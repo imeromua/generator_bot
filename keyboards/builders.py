@@ -1,57 +1,37 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import database.db_api as db
+from datetime import datetime
+import config
 
+# --- ГОЛОВНЕ МЕНЮ ---
 def main_dashboard(role, active_shift, completed_shifts):
-    """
-    Головний пульт (Розумна версія)
-    active_shift: 'm_start', 'none', ...
-    completed_shifts: {'m', 'd', 'e'} - зміни, які вже були сьогодні
-    """
     kb = []
-    
-    # 1. Якщо генератор ПРАЦЮЄ -> Показуємо ТІЛЬКИ кнопку СТОП для поточної зміни
     if active_shift != 'none':
-        # active_shift = 'm_start' -> нам треба код 'm'
         code = active_shift.split("_")[0]
-        
         names = {"m": "🌅 Ранок", "d": "☀️ День", "e": "🌙 Вечір", "x": "⚡ Екстра"}
         name = names.get(code, code.upper())
-        
-        # Єдина кнопка - СТОП
         kb.append([InlineKeyboardButton(text=f"🏁 {name} СТОП", callback_data=f"{code}_end")])
-        
     else:
-        # 2. Якщо генератор СТОЇТЬ -> Показуємо доступні старти
-        
-        # Ранок (якщо ще не був)
         if 'm' not in completed_shifts:
             kb.append([InlineKeyboardButton(text="🌅 Ранок СТАРТ", callback_data="m_start")])
-            
-        # День (якщо ще не був)
         if 'd' not in completed_shifts:
             kb.append([InlineKeyboardButton(text="☀️ День СТАРТ", callback_data="d_start")])
-            
-        # Вечір (якщо ще не був)
         if 'e' not in completed_shifts:
             kb.append([InlineKeyboardButton(text="🌙 Вечір СТАРТ", callback_data="e_start")])
-            
-        # ЕКСТРА (Тільки якщо Ранок, День і Вечір ВЖЕ були)
         if {'m', 'd', 'e'}.issubset(completed_shifts):
              kb.append([InlineKeyboardButton(text="⚡ Екстра СТАРТ", callback_data="x_start")])
 
-    # 3. Заправка (Завжди доступна)
     kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")])
     
-    # 4. Адмінка (Завжди, якщо адмін)
     if role == 'admin':
         kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home")])
-        
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-# --- Інші функції без змін ---
+# --- АДМІН ПАНЕЛЬ ---
 def admin_panel():
     kb = [
-        [InlineKeyboardButton(text="📅 Графік (Клікер)", callback_data="sched_today")],
+        # 👇 Змінили callback на вибір дати
+        [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
@@ -60,6 +40,51 @@ def admin_panel():
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+# --- НОВЕ: Вибір дати (Сьогодні / Завтра) ---
+def schedule_date_selector(today_str, tom_str):
+    # today_str, tom_str у форматі YYYY-MM-DD для коду
+    # Для відображення зробимо красиво DD-MM
+    
+    d_today = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d-%m")
+    d_tom = datetime.strptime(tom_str, "%Y-%m-%d").strftime("%d-%m")
+    
+    kb = [
+        [InlineKeyboardButton(text=f"Сьогодні ({d_today})", callback_data=f"sched_edit_{today_str}")],
+        [InlineKeyboardButton(text=f"Завтра ({d_tom})", callback_data=f"sched_edit_{tom_str}")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+# --- СІТКА ГРАФІКА (Оновлена) ---
+def schedule_grid(date_str, is_today_and_working=False):
+    """
+    is_today_and_working: True, якщо редагуємо поточний день у робочий час.
+    Тоді додаємо кнопку "Сповістити".
+    """
+    sched = db.get_schedule(date_str)
+    kb = []
+    row = []
+    
+    # Клікер годин
+    for h in range(24):
+        icon = "🔴" if sched.get(h) == 1 else "🟢"
+        # Крок 1 година
+        btn = InlineKeyboardButton(text=f"{h:02} {icon}", callback_data=f"tog_{date_str}_{h}")
+        row.append(btn)
+        if len(row) == 4:
+            kb.append(row)
+            row = []
+    if row: kb.append(row)
+    
+    # 👇 Якщо це "гаряче" редагування - додаємо кнопку сповіщення
+    if is_today_and_working:
+        kb.append([InlineKeyboardButton(text="📢 Сповістити про зміни", callback_data=f"sched_notify_{date_str}")])
+    
+    kb.append([InlineKeyboardButton(text="🔙 До вибору дати", callback_data="sched_select_date")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+# --- Інші допоміжні ---
 def maintenance_menu():
     kb = [
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
@@ -67,21 +92,6 @@ def maintenance_menu():
         [InlineKeyboardButton(text="🕯 Заміна свічок", callback_data="mnt_spark")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
     ]
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-def schedule_grid(date_str):
-    sched = db.get_schedule(date_str)
-    kb = []
-    row = []
-    for h in range(24):
-        icon = "🔴" if sched.get(h) == 1 else "🟢"
-        btn = InlineKeyboardButton(text=f"{h:02} {icon}", callback_data=f"tog_{date_str}_{h}")
-        row.append(btn)
-        if len(row) == 4:
-            kb.append(row)
-            row = []
-    if row: kb.append(row)
-    kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def drivers_list(drivers):
@@ -101,13 +111,10 @@ def report_period():
 
 def back_to_admin():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]])
-
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")]])
-
 def back_to_mnt():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
-
 def after_add_menu():
     kb = [
         [InlineKeyboardButton(text="➕ Додати ще", callback_data="add_driver_start")],
