@@ -1,0 +1,7 @@
+aiogram>=3.0
+gspread
+oauth2client
+python-dotenv
+pytz
+pandas
+openpyxl
