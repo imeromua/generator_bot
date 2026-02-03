@@ -6,15 +6,13 @@ import config
 async def scheduler_loop(bot):
     """
     Нескінченний цикл перевірки часу.
-    Приймає об'єкт bot, щоб надсилати повідомлення.
     """
     print("⏰ Планувальник (Scheduler) запущено.")
     
     while True:
         now = datetime.now(config.KYIV)
         
-        # 1. АВТО-ЗАКРИТТЯ ЗМІНИ (наприклад, 20:30)
-        # Перевіряємо точний збіг години і хвилини
+        # 1. АВТО-ЗАКРИТТЯ ЗМІНИ
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         
         if now.hour == end_t.hour and now.minute == end_t.minute:
@@ -26,8 +24,18 @@ async def scheduler_loop(bot):
                 
                 # Запис в БД
                 db.update_hours(dur)
+                
+                # Витрата палива (якщо треба, можна і тут додати, але поки спрощено)
+                # Краще додати, щоб баланс сходився:
+                fuel_consumed = dur * config.FUEL_CONSUMPTION
+                db.update_fuel(-fuel_consumed)
+
                 db.set_state('status', 'OFF')
-                db.add_log("auto_close", "SYSTEM") # Спеціальний лог
+                
+                # 👇 ВАЖЛИВО: Скидаємо активну зміну!
+                db.set_state('active_shift', 'none') 
+                
+                db.add_log("auto_close", "SYSTEM") 
                 
                 # Сповіщення адмінам
                 for admin_id in config.ADMIN_IDS:
@@ -36,31 +44,27 @@ async def scheduler_loop(bot):
                             admin_id, 
                             f"🏁 <b>АВТО-ЗАКРИТТЯ ({config.WORK_END_TIME})</b>\n"
                             f"Генератор примусово зупинено.\n"
-                            f"⏱ Час роботи: {dur:.2f} год"
+                            f"⏱ Час роботи: {dur:.2f} год\n"
+                            f"📉 Паливо: {fuel_consumed:.1f} л"
                         )
                     except: pass
             
-            # Чекаємо 65 секунд, щоб не спрацювати двічі в одну хвилину
             await asyncio.sleep(65)
 
-        # 2. РАНКОВИЙ БРИФ (наприклад, 07:50)
+        # 2. РАНКОВИЙ БРИФ
         brief_t = datetime.strptime(config.MORNING_BRIEF_TIME, "%H:%M").time()
         
         if now.hour == brief_t.hour and now.minute == brief_t.minute:
-            # Формуємо текст графіка
             sched = db.get_schedule(now.strftime("%Y-%m-%d"))
             
             txt = f"📅 <b>БРИФ НА СЬОГОДНІ ({now.strftime('%d.%m')})</b>\n\n"
-            # Форматування: 08:00 🔴 | 09:00 🟢 ...
-            # Виводимо з 08:00 до 22:00
             for h in range(8, 22):
                 icon = "🔴" if sched.get(h) == 1 else "🟢"
                 txt += f"{h:02}:00 {icon}  "
-                if h == 14: txt += "\n" # Перенос рядка для краси
+                if h == 14: txt += "\n"
             
             txt += "\n\n🔴 - Відключення\n🟢 - Світло є"
 
-            # Розсилка всім активним юзерам
             users = db.get_all_users()
             for user_id, _ in users:
                 try:
@@ -69,5 +73,4 @@ async def scheduler_loop(bot):
                 
             await asyncio.sleep(65)
 
-        # Перевірка кожні 30 секунд
         await asyncio.sleep(30)
