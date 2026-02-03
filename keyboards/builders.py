@@ -25,8 +25,19 @@ def admin_panel():
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
-        [InlineKeyboardButton(text="🛠 ТО: Заміна мастила", callback_data="mnt_oil")],
+        # ЗМІНИЛИ: Тепер тут вхід в підменю ТО
+        [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
         [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+# 👇 НОВЕ МЕНЮ ТО
+def maintenance_menu():
+    kb = [
+        [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
+        [InlineKeyboardButton(text="🛢 Заміна мастила", callback_data="mnt_oil")],
+        [InlineKeyboardButton(text="🕯 Заміна свічок", callback_data="mnt_spark")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -48,7 +59,6 @@ def schedule_grid(date_str):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def drivers_list(drivers):
-    """Список водіїв"""
     kb = []
     for d in drivers:
         kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])
@@ -56,7 +66,6 @@ def drivers_list(drivers):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def report_period():
-    """Вибір періоду"""
     kb = [
         [InlineKeyboardButton(text="📅 Цей місяць", callback_data="rep_current")],
         [InlineKeyboardButton(text="🗓 Минулий місяць", callback_data="rep_prev")],
@@ -70,7 +79,10 @@ def back_to_admin():
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")]])
 
-# 👇 НОВА ФУНКЦІЯ: Меню після додавання водія
+# Кнопка для повернення в ТО
+def back_to_mnt():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
+
 def after_add_menu():
     kb = [
         [InlineKeyboardButton(text="➕ Додати ще", callback_data="add_driver_start")],

@@ -16,9 +16,10 @@ def init_db():
     defaults = [
         ('total_hours', '0.0'),       
         ('last_oil_change', '0.0'),   
+        ('last_spark_change', '0.0'), # 👈 НОВЕ: Лічильник свічок
         ('status', 'OFF'),            
         ('last_start_time', ''),
-        ('current_fuel', '0.0') # 👈 НОВЕ: Залишок палива
+        ('current_fuel', '0.0')
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
