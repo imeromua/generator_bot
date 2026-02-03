@@ -1,37 +1,65 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import database.db_api as db
 
-def main_dashboard(role, is_on):
-    """Головний пульт керування"""
-    kb = [
-        [InlineKeyboardButton(text="🌅 Ранок СТАРТ", callback_data="m_start"),
-         InlineKeyboardButton(text="🏁 Ранок СТОП", callback_data="m_end")],
-        [InlineKeyboardButton(text="☀️ День СТАРТ", callback_data="d_start"),
-         InlineKeyboardButton(text="🏁 День СТОП", callback_data="d_end")],
-        [InlineKeyboardButton(text="🌙 Вечір СТАРТ", callback_data="e_start"),
-         InlineKeyboardButton(text="🏁 Вечір СТОП", callback_data="e_end")],
-        [InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")]
-    ]
+def main_dashboard(role, active_shift, completed_shifts):
+    """
+    Головний пульт (Розумна версія)
+    active_shift: 'm_start', 'none', ...
+    completed_shifts: {'m', 'd', 'e'} - зміни, які вже були сьогодні
+    """
+    kb = []
     
+    # 1. Якщо генератор ПРАЦЮЄ -> Показуємо ТІЛЬКИ кнопку СТОП для поточної зміни
+    if active_shift != 'none':
+        # active_shift = 'm_start' -> нам треба код 'm'
+        code = active_shift.split("_")[0]
+        
+        names = {"m": "🌅 Ранок", "d": "☀️ День", "e": "🌙 Вечір", "x": "⚡ Екстра"}
+        name = names.get(code, code.upper())
+        
+        # Єдина кнопка - СТОП
+        kb.append([InlineKeyboardButton(text=f"🏁 {name} СТОП", callback_data=f"{code}_end")])
+        
+    else:
+        # 2. Якщо генератор СТОЇТЬ -> Показуємо доступні старти
+        
+        # Ранок (якщо ще не був)
+        if 'm' not in completed_shifts:
+            kb.append([InlineKeyboardButton(text="🌅 Ранок СТАРТ", callback_data="m_start")])
+            
+        # День (якщо ще не був)
+        if 'd' not in completed_shifts:
+            kb.append([InlineKeyboardButton(text="☀️ День СТАРТ", callback_data="d_start")])
+            
+        # Вечір (якщо ще не був)
+        if 'e' not in completed_shifts:
+            kb.append([InlineKeyboardButton(text="🌙 Вечір СТАРТ", callback_data="e_start")])
+            
+        # ЕКСТРА (Тільки якщо Ранок, День і Вечір ВЖЕ були)
+        if {'m', 'd', 'e'}.issubset(completed_shifts):
+             kb.append([InlineKeyboardButton(text="⚡ Екстра СТАРТ", callback_data="x_start")])
+
+    # 3. Заправка (Завжди доступна)
+    kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")])
+    
+    # 4. Адмінка (Завжди, якщо адмін)
     if role == 'admin':
         kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home")])
         
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
+# --- Інші функції без змін ---
 def admin_panel():
-    """Меню адміністратора"""
     kb = [
         [InlineKeyboardButton(text="📅 Графік (Клікер)", callback_data="sched_today")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
-        # ЗМІНИЛИ: Тепер тут вхід в підменю ТО
         [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
         [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
-# 👇 НОВЕ МЕНЮ ТО
 def maintenance_menu():
     kb = [
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
@@ -42,7 +70,6 @@ def maintenance_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 def schedule_grid(date_str):
-    """Сітка 4x6 годин"""
     sched = db.get_schedule(date_str)
     kb = []
     row = []
@@ -53,7 +80,6 @@ def schedule_grid(date_str):
         if len(row) == 4:
             kb.append(row)
             row = []
-            
     if row: kb.append(row)
     kb.append([InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
@@ -79,7 +105,6 @@ def back_to_admin():
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")]])
 
-# Кнопка для повернення в ТО
 def back_to_mnt():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
 

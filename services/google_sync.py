@@ -7,12 +7,9 @@ import logging
 import database.db_api as db
 import config
 
-# Налаштування логування
 logging.basicConfig(level=logging.INFO)
 
 async def sync_loop():
-    """Фоновий процес синхронізації"""
-    # Захист від запуску без ID
     if not config.SHEET_ID:
         logging.error("❌ SHEETS_ID не знайдено! Синхронізацію вимкнено.")
         return
@@ -21,22 +18,18 @@ async def sync_loop():
     
     while True:
         try:
-            # 1. Чи є що відправляти?
             logs = db.get_unsynced()
             if logs:
                 logging.info(f"📤 Відправляю {len(logs)} записів у Google...")
                 
-                # 2. Авторизація
                 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
                 creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
                 client = gspread.authorize(creds)
                 
-                # Відкриваємо таблицю
                 sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
                 
                 today_str = datetime.now(config.KYIV).strftime("%d.%m.%Y")
                 
-                # 3. Шукаємо рядок
                 cell = sheet.find(today_str, in_column=1) 
                 
                 if cell is None:
@@ -58,34 +51,27 @@ async def sync_loop():
                         elif ltype == "d_end":   col=5
                         elif ltype == "e_start": col=6;  user_col=18
                         elif ltype == "e_end":   col=7
-                        elif ltype == "auto_close": col=7
+                        # 👇 ЕКСТРА (H=8, I=9)
+                        elif ltype == "x_start": col=8;  user_col=19 # S=19
+                        elif ltype == "x_end":   col=9
+                        
+                        elif ltype == "auto_close": col=7 # Або 9, якщо Екстра? Лишимо 7 поки
                         
                         elif ltype == "refill":
-                            # --- ЛОГІКА СУМУВАННЯ ---
-                            
-                            # 1. Читаємо, що вже є в клітинці (L - 12 колонка)
                             try:
                                 cur_val_raw = sheet.cell(r, 12).value
                                 cur_drv_raw = sheet.cell(r, 15).value
                                 
-                                # Якщо пусто - 0, якщо є - міняємо кому на крапку і робимо float
-                                if not cur_val_raw: 
-                                    cur_liters = 0.0
-                                else: 
-                                    cur_liters = float(cur_val_raw.replace(",", ".").replace(" ", ""))
-                            except:
-                                cur_liters = 0.0
+                                if not cur_val_raw: cur_liters = 0.0
+                                else: cur_liters = float(cur_val_raw.replace(",", ".").replace(" ", ""))
+                            except: cur_liters = 0.0
 
-                            # 2. Беремо нове значення
                             try: new_liters = float(lval)
                             except: new_liters = 0.0
                             
-                            # 3. Сумуємо
                             total_liters = cur_liters + new_liters
                             
-                            # 4. Об'єднуємо імена водіїв (щоб не стерти попереднього)
                             if cur_drv_raw:
-                                # Перевіряємо, чи цього водія ще немає в списку
                                 if ldriver not in cur_drv_raw:
                                     total_drivers = f"{cur_drv_raw}, {ldriver}"
                                 else:
@@ -93,17 +79,13 @@ async def sync_loop():
                             else:
                                 total_drivers = ldriver
 
-                            # 5. ХАК ДЛЯ ЧИСЛА: Перетворюємо у рядок з КОМОЮ
-                            # Це змусить Google (Ukraine locale) зрозуміти, що це число
                             final_val_str = str(total_liters).replace(".", ",")
 
-                            # Записуємо літри
                             sheet.update(
                                 range_name=rowcol_to_a1(r, 12), 
                                 values=[[final_val_str]], 
                                 value_input_option='USER_ENTERED'
                             )
-                            # Записуємо водіїв
                             sheet.update(
                                 range_name=rowcol_to_a1(r, 15), 
                                 values=[[total_drivers]], 
@@ -112,7 +94,6 @@ async def sync_loop():
                             ids_to_mark.append(lid)
                             continue
                         
-                        # Запис часу та імені (тут все стандартно)
                         if col:
                             sheet.update(
                                 range_name=rowcol_to_a1(r, col), 
@@ -129,7 +110,6 @@ async def sync_loop():
                         
                         ids_to_mark.append(lid)
                         
-                    # 4. Позначаємо в БД як відправлені
                     if ids_to_mark:
                         db.mark_synced(ids_to_mark)
                         

@@ -43,12 +43,13 @@ async def show_dash(msg: types.Message, user_id, user_name):
     st = db.get_state()
     role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
     
+    # 👇 Отримуємо список завершених змін за сьогодні
+    completed = db.get_today_completed_shifts()
+    
     status_icon = "🟢 ПРАЦЮЄ" if st['status']=='ON' else "💤 ВИМКНЕНО"
     to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
     
-    # --- РОЗРАХУНОК ПАЛИВА ---
     current_fuel = st['current_fuel']
-    # На скільки вистачить (Літри / Витрата)
     hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
     
     import os
@@ -66,4 +67,5 @@ async def show_dash(msg: types.Message, user_id, user_name):
     if st['status'] == 'ON':
         txt += f"\n⏱ Старт був о: {st['start_time']}"
 
-    await msg.answer(txt, reply_markup=main_dashboard(role, st['status']=='ON'))
+    # 👇 Передаємо (роль, активну зміну, завершені зміни)
+    await msg.answer(txt, reply_markup=main_dashboard(role, st.get('active_shift', 'none'), completed))

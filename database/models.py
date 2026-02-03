@@ -16,8 +16,9 @@ def init_db():
     defaults = [
         ('total_hours', '0.0'),       
         ('last_oil_change', '0.0'),   
-        ('last_spark_change', '0.0'), # 👈 НОВЕ: Лічильник свічок
-        ('status', 'OFF'),            
+        ('last_spark_change', '0.0'),
+        ('status', 'OFF'),
+        ('active_shift', 'none'),      # 👈 НОВЕ: Пам'ятаємо, яка зміна відкрита
         ('last_start_time', ''),
         ('current_fuel', '0.0')
     ]

@@ -44,15 +44,14 @@ def get_state():
         total = float(c.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
         last_oil = float(c.execute("SELECT value FROM generator_state WHERE key='last_oil_change'").fetchone()[0])
         
-        # Свічки (безпечне отримання)
-        try:
-            last_spark = float(c.execute("SELECT value FROM generator_state WHERE key='last_spark_change'").fetchone()[0])
+        try: last_spark = float(c.execute("SELECT value FROM generator_state WHERE key='last_spark_change'").fetchone()[0])
         except: last_spark = 0.0
 
-        # Паливо
-        try:
-            fuel = float(c.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
+        try: fuel = float(c.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
         except: fuel = 0.0
+        
+        try: active_shift = c.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
+        except: active_shift = "none"
             
         return {
             "status": status, 
@@ -60,18 +59,33 @@ def get_state():
             "total_hours": total, 
             "last_oil": last_oil,
             "last_spark": last_spark,
-            "current_fuel": fuel
+            "current_fuel": fuel,
+            "active_shift": active_shift
         }
+
+# 👇 НОВЕ: Перевірка завершених змін за сьогодні
+def get_today_completed_shifts():
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    with sqlite3.connect(DB_NAME) as conn:
+        # Шукаємо події "кінець" (end) за сьогодні
+        query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end')"
+        rows = conn.execute(query, (f"{date_str}%",)).fetchall()
+    
+    # Повертаємо множину префіксів: {'m', 'd'}
+    completed = set()
+    for r in rows:
+        evt = r[0] # наприклад 'm_end'
+        if "_" in evt:
+            completed.add(evt.split("_")[0])
+    return completed
 
 def update_fuel(liters_delta):
     with sqlite3.connect(DB_NAME) as conn:
-        try:
-            cur = float(conn.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
+        try: cur = float(conn.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
         except: cur = 0.0
         
         new_val = cur + liters_delta
         if new_val < 0: new_val = 0
-        
         conn.execute("UPDATE generator_state SET value = ? WHERE key='current_fuel'", (str(new_val),))
         return new_val
 
@@ -106,7 +120,6 @@ def update_hours(h):
         cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
         conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(cur + h),))
 
-# 👇 НОВЕ: Ручне встановлення годин
 def set_total_hours(new_val):
     with sqlite3.connect(DB_NAME) as conn:
         conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(new_val),))
@@ -116,7 +129,6 @@ def record_maintenance(action, admin):
     with sqlite3.connect(DB_NAME) as conn:
         cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
         conn.execute("INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)", (date, action, cur, admin))
-        
         if action == "oil":
             conn.execute("UPDATE generator_state SET value = ? WHERE key='last_oil_change'", (str(cur),))
         elif action == "spark":
