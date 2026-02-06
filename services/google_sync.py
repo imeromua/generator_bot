@@ -1,9 +1,10 @@
 import asyncio
 import gspread
-from gspread.utils import rowcol_to_a1
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
 import logging
+import os
+from gspread.utils import rowcol_to_a1
+from google.oauth2.service_account import Credentials
+from datetime import datetime
 import database.db_api as db
 import config
 
@@ -12,15 +13,22 @@ logging.basicConfig(level=logging.INFO)
 async def sync_loop():
     """Фоновий процес синхронізації"""
     if not config.SHEET_ID:
-        logging.error("❌ SHEETS_ID не знайдено! Синхронізацію вимкнено.")
+        logging.error("❌ SHEET_ID не знайдено! Синхронізацію вимкнено.")
+        return
+
+    if not os.path.exists("service_account.json"):
+        logging.error("❌ Файл service_account.json не знайдено! Синхронізацію вимкнено.")
         return
 
     print(f"🚀 Google Sync запущено. Таблиця: {config.SHEET_NAME}")
     
     while True:
         try:
-            scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-            creds = ServiceAccountCredentials.from_json_keyfile_name("service_account.json", scope)
+            scopes = [
+                "https://spreadsheets.google.com/feeds", 
+                "https://www.googleapis.com/auth/drive"
+            ]
+            creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
             client = gspread.authorize(creds)
             
             # Відкриваємо таблицю
@@ -34,6 +42,7 @@ async def sync_loop():
                 
                 if drivers_clean:
                     db.sync_drivers_from_sheet(drivers_clean)
+                    logging.info(f"✅ Синхронізовано {len(drivers_clean)} водіїв")
             except Exception as e:
                 logging.error(f"⚠️ Не вдалося прочитати список водіїв: {e}")
 
@@ -69,78 +78,99 @@ async def sync_loop():
                         elif ltype == "auto_close": col=7 
                         
                         elif ltype == "refill":
-                            # === РОЗПАКОВКА (Літри | Чек) ===
-                            if "|" in lval:
-                                liters_str, receipt_str = lval.split("|", 1)
-                            else:
-                                liters_str = lval
-                                receipt_str = ""
-
-                            # 1. ЛІТРИ (N = 14)
                             try:
-                                cur_val_raw = sheet.cell(r, 14).value
-                                if not cur_val_raw: cur_liters = 0.0
-                                else: cur_liters = float(cur_val_raw.replace(",", ".").replace(" ", ""))
-                            except: cur_liters = 0.0
-
-                            try: new_liters = float(liters_str)
-                            except: new_liters = 0.0
-                            
-                            total_liters = cur_liters + new_liters
-                            final_val_str = str(total_liters).replace(".", ",")
-
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, 14), 
-                                values=[[final_val_str]], 
-                                value_input_option='USER_ENTERED'
-                            )
-
-                            # 2. ЧЕК (P = 16)
-                            try:
-                                cur_receipt = sheet.cell(r, 16).value
-                                if cur_receipt:
-                                    # Якщо вже є чек, додаємо через кому
-                                    new_receipt = f"{cur_receipt}, {receipt_str}"
+                                # === РОЗПАКОВКА (Літри | Чек) ===
+                                if lval and "|" in lval:
+                                    liters_str, receipt_str = lval.split("|", 1)
                                 else:
-                                    new_receipt = receipt_str
-                            except: new_receipt = receipt_str
+                                    liters_str = lval if lval else "0"
+                                    receipt_str = ""
 
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, 16), 
-                                values=[[new_receipt]], 
-                                value_input_option='USER_ENTERED'
-                            )
-                            
-                            # 3. ВОДІЙ (AA = 27)
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, 27), 
-                                values=[[ldriver]], 
-                                value_input_option='USER_ENTERED'
-                            )
-                            
-                            ids_to_mark.append(lid)
+                                # 1. ЛІТРИ (N = 14)
+                                try:
+                                    cur_val_raw = sheet.cell(r, 14).value
+                                    if not cur_val_raw:
+                                        cur_liters = 0.0
+                                    else:
+                                        cur_liters = float(cur_val_raw.replace(",", ".").replace(" ", ""))
+                                except (ValueError, TypeError, AttributeError):
+                                    cur_liters = 0.0
+
+                                try:
+                                    new_liters = float(liters_str)
+                                except (ValueError, TypeError):
+                                    new_liters = 0.0
+                                
+                                total_liters = cur_liters + new_liters
+                                final_val_str = str(total_liters).replace(".", ",")
+
+                                sheet.update(
+                                    range_name=rowcol_to_a1(r, 14), 
+                                    values=[[final_val_str]], 
+                                    value_input_option='USER_ENTERED'
+                                )
+
+                                # 2. ЧЕК (P = 16)
+                                try:
+                                    cur_receipt = sheet.cell(r, 16).value
+                                    if cur_receipt and receipt_str:
+                                        new_receipt = f"{cur_receipt}, {receipt_str}"
+                                    elif receipt_str:
+                                        new_receipt = receipt_str
+                                    else:
+                                        new_receipt = cur_receipt if cur_receipt else ""
+                                except (AttributeError, TypeError):
+                                    new_receipt = receipt_str if receipt_str else ""
+
+                                sheet.update(
+                                    range_name=rowcol_to_a1(r, 16), 
+                                    values=[[new_receipt]], 
+                                    value_input_option='USER_ENTERED'
+                                )
+                                
+                                # 3. ВОДІЙ (AA = 27)
+                                if ldriver:
+                                    sheet.update(
+                                        range_name=rowcol_to_a1(r, 27), 
+                                        values=[[ldriver]], 
+                                        value_input_option='USER_ENTERED'
+                                    )
+                                
+                                ids_to_mark.append(lid)
+                                logging.info(f"✅ Синхронізовано заправку: {new_liters}л, чек: {receipt_str}")
+                            except Exception as e:
+                                logging.error(f"❌ Помилка синхронізації заправки ID {lid}: {e}")
                             continue
                         
                         # Запис часу та імені
                         if col:
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, col), 
-                                values=[[t_only]], 
-                                value_input_option='USER_ENTERED'
-                            )
-                            
-                            if user_col: 
+                            try:
                                 sheet.update(
-                                    range_name=rowcol_to_a1(r, user_col), 
-                                    values=[[luser]], 
-                                    value_input_option='RAW'
+                                    range_name=rowcol_to_a1(r, col), 
+                                    values=[[t_only]], 
+                                    value_input_option='USER_ENTERED'
                                 )
-                        
-                        ids_to_mark.append(lid)
+                                
+                                if user_col and luser: 
+                                    sheet.update(
+                                        range_name=rowcol_to_a1(r, user_col), 
+                                        values=[[luser]], 
+                                        value_input_option='RAW'
+                                    )
+                                
+                                ids_to_mark.append(lid)
+                                logging.info(f"✅ Синхронізовано подію: {ltype} о {t_only}")
+                            except Exception as e:
+                                logging.error(f"❌ Помилка синхронізації події ID {lid}: {e}")
                         
                     if ids_to_mark:
                         db.mark_synced(ids_to_mark)
+                        logging.info(f"✅ Позначено {len(ids_to_mark)} записів як синхронізовані")
                         
+        except gspread.exceptions.APIError as e:
+            logging.error(f"❌ Google API Error: {e}")
+        except gspread.exceptions.SpreadsheetNotFound:
+            logging.error(f"❌ Таблиця з ID {config.SHEET_ID} не знайдена!")
         except Exception as e:
             logging.error(f"❌ Sync Error: {e}")
         

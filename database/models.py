@@ -1,9 +1,14 @@
 import sqlite3
+import logging
 
 DB_NAME = "generator.db"
 
+def get_connection():
+    """Повертає з'єднання з БД з налаштуваннями для async"""
+    return sqlite3.connect(DB_NAME, check_same_thread=False, timeout=10)
+
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_connection()
     c = conn.cursor()
     
     c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, full_name TEXT)''')
@@ -18,8 +23,9 @@ def init_db():
         ('last_oil_change', '0.0'),   
         ('last_spark_change', '0.0'),
         ('status', 'OFF'),
-        ('active_shift', 'none'),      # 👈 НОВЕ: Пам'ятаємо, яка зміна відкрита
+        ('active_shift', 'none'),
         ('last_start_time', ''),
+        ('last_start_date', ''),
         ('current_fuel', '0.0')
     ]
     for k, v in defaults:
@@ -27,4 +33,4 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✅ База даних ініціалізована.")
+    logging.info("✅ База даних ініціалізована.")

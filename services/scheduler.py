@@ -1,76 +1,101 @@
 import asyncio
-from datetime import datetime
-import database.db_api as db
+import logging
+from datetime import datetime, time
 import config
+import database.db_api as db
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 async def scheduler_loop(bot):
     """
-    Нескінченний цикл перевірки часу.
+    Фоновий процес для автоматичних нагадувань та перевірок.
+    Наприклад: щоранковий брифінг о 07:50
     """
-    print("⏰ Планувальник (Scheduler) запущено.")
+    logger.info("⏰ Scheduler запущено")
+    
+    brief_sent_today = False
+    last_check_date = None
     
     while True:
-        now = datetime.now(config.KYIV)
-        
-        # 1. АВТО-ЗАКРИТТЯ ЗМІНИ
-        end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
-        
-        if now.hour == end_t.hour and now.minute == end_t.minute:
-            st = db.get_state()
-            if st['status'] == 'ON':
-                # Розрахунок часу роботи
-                start_dt = datetime.strptime(f"{now.date()} {st['start_time']}", "%Y-%m-%d %H:%M")
-                dur = (now.replace(tzinfo=None) - start_dt).total_seconds() / 3600.0
-                
-                # Запис в БД
-                db.update_hours(dur)
-                
-                # Витрата палива (якщо треба, можна і тут додати, але поки спрощено)
-                # Краще додати, щоб баланс сходився:
-                fuel_consumed = dur * config.FUEL_CONSUMPTION
-                db.update_fuel(-fuel_consumed)
-
-                db.set_state('status', 'OFF')
-                
-                # 👇 ВАЖЛИВО: Скидаємо активну зміну!
-                db.set_state('active_shift', 'none') 
-                
-                db.add_log("auto_close", "SYSTEM") 
-                
-                # Сповіщення адмінам
-                for admin_id in config.ADMIN_IDS:
-                    try:
-                        await bot.send_message(
-                            admin_id, 
-                            f"🏁 <b>АВТО-ЗАКРИТТЯ ({config.WORK_END_TIME})</b>\n"
-                            f"Генератор примусово зупинено.\n"
-                            f"⏱ Час роботи: {dur:.2f} год\n"
-                            f"📉 Паливо: {fuel_consumed:.1f} л"
-                        )
-                    except: pass
+        try:
+            now = datetime.now(config.KYIV)
+            current_date = now.date()
             
-            await asyncio.sleep(65)
-
-        # 2. РАНКОВИЙ БРИФ
-        brief_t = datetime.strptime(config.MORNING_BRIEF_TIME, "%H:%M").time()
-        
-        if now.hour == brief_t.hour and now.minute == brief_t.minute:
-            sched = db.get_schedule(now.strftime("%Y-%m-%d"))
+            # Скидаємо прапорець на початку нового дня
+            if last_check_date != current_date:
+                brief_sent_today = False
+                last_check_date = current_date
+                logger.info(f"📅 Новий день: {current_date}")
             
-            txt = f"📅 <b>БРИФ НА СЬОГОДНІ ({now.strftime('%d.%m')})</b>\n\n"
-            for h in range(8, 22):
-                icon = "🔴" if sched.get(h) == 1 else "🟢"
-                txt += f"{h:02}:00 {icon}  "
-                if h == 14: txt += "\n"
+            # Парсимо час брифінгу
+            try:
+                brief_time = datetime.strptime(config.MORNING_BRIEF_TIME, "%H:%M").time()
+            except ValueError:
+                logger.error(f"❌ Неправильний формат BRIEF_TIME: {config.MORNING_BRIEF_TIME}")
+                await asyncio.sleep(3600)  # Чекаємо годину і пробуємо знову
+                continue
             
-            txt += "\n\n🔴 - Відключення\n🟢 - Світло є"
-
-            users = db.get_all_users()
-            for user_id, _ in users:
-                try:
-                    await bot.send_message(user_id, txt)
-                except: pass
+            # Перевіряємо, чи настав час брифінгу
+            if now.time() >= brief_time and not brief_sent_today:
+                logger.info(f"📢 Час для ранкового брифінгу: {config.MORNING_BRIEF_TIME}")
                 
-            await asyncio.sleep(65)
-
-        await asyncio.sleep(30)
+                # Отримуємо графік на сьогодні
+                today_str = now.strftime("%Y-%m-%d")
+                schedule = db.get_schedule(today_str)
+                
+                # Формуємо повідомлення
+                txt = f"☀️ <b>Доброго ранку!</b>\n\n"
+                txt += f"📅 Графік відключень на сьогодні ({now.strftime('%d.%m.%Y')}):\n\n"
+                
+                has_outages = any(schedule.get(h) == 1 for h in range(8, 22))
+                
+                if has_outages:
+                    for h in range(8, 22):
+                        icon = "🔴" if schedule.get(h) == 1 else "🟢"
+                        txt += f"{h:02}:00 {icon}  "
+                        if h == 14:
+                            txt += "\n"
+                    txt += "\n\n🔴 - Відключення\n🟢 - Світло є"
+                else:
+                    txt += "✅ Відключень не заплановано!"
+                
+                # Отримуємо всіх користувачів
+                users = db.get_all_users()
+                
+                if not users:
+                    logger.warning("⚠️ Немає користувачів для розсилки")
+                else:
+                    success_count = 0
+                    fail_count = 0
+                    
+                    for user_id, user_name in users:
+                        try:
+                            await bot.send_message(user_id, txt)
+                            success_count += 1
+                            await asyncio.sleep(0.05)  # Невелика затримка між повідомленнями
+                        except Exception as e:
+                            fail_count += 1
+                            logger.warning(f"⚠️ Не вдалося надіслати {user_name} (ID: {user_id}): {e}")
+                    
+                    logger.info(f"✅ Брифінг надіслано: {success_count} успішно, {fail_count} помилок")
+                
+                brief_sent_today = True
+            
+            # Перевіряємо стан генератора (приклад додаткової логіки)
+            state = db.get_state()
+            if state['status'] == 'ON':
+                # Можна додати перевірку: якщо працює > 12 годин - надіслати попередження
+                pass
+            
+            # Перевірка залишку палива
+            fuel_level = state.get('current_fuel', 0)
+            if fuel_level < 20:  # Менше 20 літрів
+                # Можна надіслати попередження адмінам
+                logger.warning(f"⚠️ Низький рівень палива: {fuel_level:.1f}л")
+            
+        except Exception as e:
+            logger.error(f"❌ Scheduler Error: {e}", exc_info=True)
+        
+        # Перевіряємо кожну хвилину
+        await asyncio.sleep(60)

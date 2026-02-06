@@ -1,7 +1,70 @@
+# Конфіденційні дані
 .env
-venv/
-__pycache__/
-*.pyc
 service_account.json
+*.json
+
+# База даних
 *.db
-temp_*.xlsx
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Віртуальне середовище
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Логи
+*.log
+logs/
+
+# Тимчасові файли
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Excel звіти (згенеровані)
+*.xlsx
+*.xls
+report_*.xlsx
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json

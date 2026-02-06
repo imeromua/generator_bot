@@ -5,13 +5,13 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.filters import StateFilter
 from datetime import datetime
 
 # Імпорти наших модулів
 import config
 import database.models as db_models
 import database.db_api as db
-# 👇 ВИПРАВЛЕНО: Імпортуємо правильну назву класу
 from middlewares.auth import WhitelistMiddleware
 
 # Імпорт хендлерів (обробників)
@@ -23,7 +23,11 @@ from services.scheduler import scheduler_loop
 from services.parser import parse_dtek_message
 
 # Налаштування логування
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # --- 1. НАЛАШТУВАННЯ СЕСІЇ (Фікс тайм-ауту) ---
 session = AiohttpSession(timeout=60)
@@ -39,9 +43,9 @@ dp = Dispatcher()
 # --- ЛОГІКА ПАРСЕРА ДТЕК (Перехоплювач повідомлень) ---
 parser_router = Router()
 
-@parser_router.message(F.text & ~F.text.startswith("/"))
+@parser_router.message(F.text & ~F.text.startswith("/"), StateFilter(None))
 async def check_dtek_post(msg: types.Message):
-    """Перевіряє кожен текст: чи це графік?"""
+    """Перевіряє кожен текст: чи це графік? Працює тільки поза FSM-станами."""
     # Аналізуємо текст
     ranges = parse_dtek_message(msg.text)
     
@@ -70,7 +74,8 @@ async def apply_schedule_range(cb: types.CallbackQuery):
         e_h = int(e_str.split(":")[0])
         
         # Обробка переходу через добу (00:00 = 24)
-        if e_h == 0: e_h = 24
+        if e_h == 0:
+            e_h = 24
         
         date_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
         
@@ -81,41 +86,59 @@ async def apply_schedule_range(cb: types.CallbackQuery):
         await cb.answer()
         
     except Exception as e:
-        logging.error(f"Parser Error: {e}")
+        logger.error(f"Parser Error: {e}")
         await cb.answer("❌ Помилка обробки", show_alert=True)
 
 
 async def main():
-    # 1. Ініціалізація БД
-    db_models.init_db()
-    
-    # 2. Підключення Middleware (Охорона)
-    # 👇 ВИПРАВЛЕНО: Використовуємо WhitelistMiddleware
-    dp.message.outer_middleware(WhitelistMiddleware())
-    dp.callback_query.outer_middleware(WhitelistMiddleware())
-    
-    # 3. Реєстрація роутерів
-    dp.include_router(common.router)   # Старт, Реєстрація
-    dp.include_router(admin.router)    # Адмінка
-    dp.include_router(user.router)     # Кнопки генератора
-    dp.include_router(parser_router)   # Парсер тексту
-    
-    # 4. Запуск фонових процесів
-    asyncio.create_task(sync_loop())         
-    asyncio.create_task(scheduler_loop(bot)) 
-    
-    print("🚀 БОТ ЗАПУЩЕНО! Натисніть Ctrl+C для зупинки.")
-
-    # 5. Безпечне видалення вебхука
     try:
-        await bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        logging.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
+        # 1. Ініціалізація БД
+        logger.info("🔧 Ініціалізація бази даних...")
+        db_models.init_db()
+        
+        # 2. Підключення Middleware (Охорона)
+        logger.info("🛡 Підключення middleware...")
+        dp.message.outer_middleware(WhitelistMiddleware())
+        dp.callback_query.outer_middleware(WhitelistMiddleware())
+        
+        # 3. Реєстрація роутерів
+        logger.info("📋 Реєстрація роутерів...")
+        dp.include_router(common.router)   # Старт, Реєстрація
+        dp.include_router(admin.router)    # Адмінка
+        dp.include_router(user.router)     # Кнопки генератора
+        dp.include_router(parser_router)   # Парсер тексту
+        
+        # 4. Запуск фонових процесів
+        logger.info("🚀 Запуск фонових процесів...")
+        asyncio.create_task(sync_loop())         
+        asyncio.create_task(scheduler_loop(bot)) 
+        
+        logger.info("=" * 50)
+        logger.info("🚀 БОТ ЗАПУЩЕНО!")
+        logger.info(f"📅 Режим: {'TEST' if config.IS_TEST_MODE else 'PROD'}")
+        logger.info(f"📊 Таблиця: {config.SHEET_NAME}")
+        logger.info(f"👥 Адмінів: {len(config.ADMIN_IDS)}")
+        logger.info(f"🔓 Реєстрація: {'Відкрита' if config.REGISTRATION_OPEN else 'Закрита'}")
+        logger.info("=" * 50)
+        logger.info("Натисніть Ctrl+C для зупинки.")
 
-    await dp.start_polling(bot)
+        # 5. Безпечне видалення вебхука
+        try:
+            await bot.delete_webhook(drop_pending_updates=True)
+            logger.info("✅ Webhook очищено")
+        except Exception as e:
+            logger.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
+
+        await dp.start_polling(bot)
+        
+    except Exception as e:
+        logger.error(f"❌ Критична помилка при запуску: {e}", exc_info=True)
+        raise
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("🛑 Бот зупинений.")
+        logger.info("🛑 Бот зупинений користувачем.")
+    except Exception as e:
+        logger.error(f"💥 Фатальна помилка: {e}", exc_info=True)

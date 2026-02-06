@@ -1,7 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import datetime
+from datetime import datetime, timedelta
 import config
 import database.db_api as db
 from keyboards.builders import main_dashboard, drivers_list, back_to_main
@@ -12,7 +12,7 @@ router = Router()
 class RefillForm(StatesGroup):
     driver = State()
     liters = State()
-    receipt = State() # 👈 НОВИЙ СТАН
+    receipt = State()
 
 # --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
@@ -38,6 +38,7 @@ async def gen_start(cb: types.CallbackQuery):
     db.set_state('status', 'ON')
     db.set_state('active_shift', cb.data) 
     db.set_state('last_start_time', now.strftime("%H:%M"))
+    db.set_state('last_start_date', now.strftime("%Y-%m-%d"))
     db.add_log(cb.data, user[1])
     
     names = {
@@ -79,10 +80,32 @@ async def gen_stop(cb: types.CallbackQuery):
         return await cb.answer(f"⛔ Помилка! Зараз активний {opened_name}.\nНатисніть відповідну кнопку СТОП.", show_alert=True)
     
     now = datetime.now(config.KYIV)
+    
+    # Виправлення проблеми переходу через північ
     try:
-        start_dt = datetime.strptime(f"{now.date()} {st['start_time']}", "%Y-%m-%d %H:%M")
-        dur = (now.replace(tzinfo=None) - start_dt).total_seconds() / 3600.0
-    except:
+        start_date_str = st.get('start_date', '')
+        start_time_str = st['start_time']
+        
+        if start_date_str:
+            # Якщо є дата старту - використовуємо її
+            start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+        else:
+            # Fallback: намагаємось визначити дату
+            start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
+            # Якщо поточний час менший за час старту - значить перейшли через північ
+            if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
+                start_dt = start_dt - timedelta(days=1)
+        
+        start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
+        dur = (now - start_dt).total_seconds() / 3600.0
+        
+        # Валідація: тривалість не може бути від'ємною або більше 24 годин
+        if dur < 0 or dur > 24:
+            dur = 0.0
+            
+    except Exception as e:
+        import logging
+        logging.error(f"Помилка розрахунку тривалості: {e}")
         dur = 0.0
 
     user = db.get_user(cb.from_user.id)
@@ -113,23 +136,31 @@ async def gen_stop(cb: types.CallbackQuery):
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
     drivers = db.get_drivers()
+    if not drivers:
+        return await cb.answer("⚠️ Спочатку додайте водіїв в адмін-панелі", show_alert=True)
     await cb.message.edit_text("🚛 Хто привіз паливо?", reply_markup=drivers_list(drivers))
     await state.set_state(RefillForm.driver)
 
 @router.callback_query(RefillForm.driver, F.data.startswith("drv_"))
 async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
-    driver_name = cb.data.split("_")[1]
+    driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято? (Напишіть цифру)", reply_markup=back_to_main())
     await state.set_state(RefillForm.liters)
 
-# 👇 ТУТ ЗМІНИ: Спочатку літри, потім чек
 @router.message(RefillForm.liters)
 async def refill_ask_receipt(msg: types.Message, state: FSMContext):
     try:
-        liters = float(msg.text.replace(",", "."))
+        liters_text = msg.text.replace(",", ".").strip()
+        liters = float(liters_text)
+        
+        if liters <= 0:
+            return await msg.answer("❌ Кількість літрів має бути більше 0")
+        
+        if liters > 500:
+            return await msg.answer("❌ Кількість літрів занадто велика (максимум 500л)")
+        
         await state.update_data(liters=liters)
-        # Питаємо чек
         await msg.answer("🧾 Введіть <b>номер чека</b>:", reply_markup=back_to_main())
         await state.set_state(RefillForm.receipt)
     except ValueError:
@@ -137,7 +168,14 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
 
 @router.message(RefillForm.receipt)
 async def refill_save(msg: types.Message, state: FSMContext):
-    receipt_num = msg.text
+    receipt_num = msg.text.strip()
+    
+    if not receipt_num:
+        return await msg.answer("❌ Номер чека не може бути порожнім")
+    
+    if len(receipt_num) > 50:
+        return await msg.answer("❌ Номер чека занадто довгий (максимум 50 символів)")
+    
     data = await state.get_data()
     liters = data['liters']
     driver = data['driver']
