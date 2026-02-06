@@ -14,6 +14,24 @@ class RefillForm(StatesGroup):
     liters = State()
     receipt = State()
 
+def format_hours_hhmm(hours_float: float) -> str:
+    """
+    Конвертує години (float) у формат ГГ:ХХ.
+    """
+    try:
+        h = float(hours_float)
+    except Exception:
+        h = 0.0
+
+    sign = "-" if h < 0 else ""
+    h = abs(h)
+
+    total_minutes = int(round(h * 60.0))
+    hh = total_minutes // 60
+    mm = total_minutes % 60
+
+    return f"{sign}{hh:02d}:{mm:02d}"
+
 # --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
 async def gen_start(cb: types.CallbackQuery):
@@ -118,15 +136,17 @@ async def gen_stop(cb: types.CallbackQuery):
     db.set_state('active_shift', 'none')
     db.add_log(cb.data, user[1])
     
+    dur_hhmm = format_hours_hhmm(dur)
+    
     await cb.message.delete()
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
     completed = db.get_today_completed_shifts()
     
     await cb.message.answer(
         f"🏁 <b>Зміну закрито!</b>\n"
-        f"⏱ Працював: <b>{dur:.2f} год</b>\n"
+        f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
         f"📉 Використано: <b>{fuel_consumed:.1f} л</b>\n"
-        f"⛽ Залишок: <b>{remaining_fuel:.1f} л</b>\n"
+        f"⛽️ Залишок: <b>{remaining_fuel:.1f} л</b>\n"
         f"👤 {user[1]}", 
         reply_markup=main_dashboard(role, 'none', completed)
     )

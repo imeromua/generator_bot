@@ -19,6 +19,16 @@ set "LOGDIR=%ROOT%logs"
 set "ENV_FILE=%ROOT%.env"
 
 REM ============================================
+REM  РЕЖИМИ ЗАПУСКУ
+REM ============================================
+set "ARG1=%~1"
+set "SETUP_ONLY=0"
+set "FOREGROUND=0"
+
+if /I "%ARG1%"=="--setup-only" set "SETUP_ONLY=1"
+if /I "%ARG1%"=="--foreground" set "FOREGROUND=1"
+
+REM ============================================
 REM  АВТОМАТИЧНА ПІДГОТОВКА
 REM ============================================
 
@@ -260,7 +270,31 @@ if exist "%ROOT%generator.db" (
 )
 
 REM ============================================
-REM  ЗАПУСК БОТА
+REM  SETUP ONLY (для watchdog)
+REM ============================================
+if "%SETUP_ONLY%"=="1" (
+    echo.
+    echo ════════════════════════════════════════
+    echo  ✅ Setup-only: підготовка виконана, запуск пропущено
+    echo ════════════════════════════════════════
+    exit /b 0
+)
+
+REM ============================================
+REM  FOREGROUND MODE (для дебагу)
+REM ============================================
+if "%FOREGROUND%"=="1" (
+    echo.
+    echo ════════════════════════════════════════
+    echo  ▶ Запуск у консолі (foreground)
+    echo ════════════════════════════════════════
+    echo.
+    "%VENV_PY%" -u main.py
+    exit /b !errorlevel!
+)
+
+REM ============================================
+REM  ЗАПУСК БОТА (BACKGROUND)
 REM ============================================
 
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%i"

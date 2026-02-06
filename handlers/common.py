@@ -11,7 +11,27 @@ router = Router()
 class RegForm(StatesGroup):
     name = State()
 
-@router.message(Command("start"))
+def format_hours_hhmm(hours_float: float) -> str:
+    """
+    Конвертує години (float) у формат ГГ:ХХ.
+    Підтримує від'ємні значення.
+    Приклад: 0.01 -> 00:01, 1.5 -> 01:30, -261.4 -> -261:24
+    """
+    try:
+        h = float(hours_float)
+    except Exception:
+        h = 0.0
+
+    sign = "-" if h < 0 else ""
+    h = abs(h)
+
+    total_minutes = int(round(h * 60.0))
+    hh = total_minutes // 60
+    mm = total_minutes % 60
+
+    return f"{sign}{hh:02d}:{mm:02d}"
+
+@router.message(Command("/start"))
 async def cmd_start(msg: types.Message, state: FSMContext):
     user_id = msg.from_user.id
     await state.clear()
@@ -57,12 +77,15 @@ async def show_dash(msg: types.Message, user_id, user_name):
     if os.getenv("MODE") == "TEST":
         mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
 
+    hours_left_hhmm = format_hours_hhmm(hours_left)
+    to_service_hhmm = format_hours_hhmm(to_service)
+
     txt = (f"{mode_mark}"
            f"🔋 <b>Генератор:</b> {status_icon}\n"
            f"⛽ Залишок палива: <b>{current_fuel:.1f} л</b>\n"
-           f"⏳ Вистачить на: <b>~{hours_left:.1f} год</b>\n\n"
+           f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
            f"👤 <b>Ви:</b> {user_name}\n"
-           f"🛢 До ТО: <b>{to_service:.1f} год</b>")
+           f"🛢 До ТО: <b>{to_service_hhmm}</b>")
     
     if st['status'] == 'ON':
         txt += f"\n⏱ Старт був о: {st['start_time']}"
