@@ -23,6 +23,9 @@ def main_dashboard(role, active_shift, completed_shifts):
         if {'m', 'd', 'e'}.issubset(completed_shifts) and ('x' not in completed_shifts):
             kb.append([InlineKeyboardButton(text="⚡ Екстра СТАРТ", callback_data="x_start")])
 
+    # Графік відключень доступний для всіх
+    kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
+
     kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")])
 
     if role == 'admin':
@@ -62,9 +65,10 @@ def schedule_grid(date_str, is_today_and_working=False):
 
     for h in range(24):
         icon = "🔴" if sched.get(h) == 1 else "🟢"
-        btn = InlineKeyboardButton(text=f"{h:02} {icon}", callback_data=f"tog_{date_str}_{h}")
+        end_s = "24:00" if h == 23 else f"{(h + 1):02d}:00"
+        btn = InlineKeyboardButton(text=f"{h:02d}:00 - {end_s} {icon}", callback_data=f"tog_{date_str}_{h}")
         row.append(btn)
-        if len(row) == 4:
+        if len(row) == 2:
             kb.append(row)
             row = []
     if row:
@@ -110,7 +114,7 @@ def back_to_admin():
 
 
 def back_to_main():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="home")]])
 
 
 def back_to_mnt():

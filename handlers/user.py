@@ -67,6 +67,29 @@ def format_hours_hhmm(hours_float: float) -> str:
     return f"{sign}{hh:02d}:{mm:02d}"
 
 
+def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    start = None
+    for h in range(24):
+        off = int(schedule.get(h, 0) or 0) == 1
+        if off and start is None:
+            start = h
+        if (not off) and start is not None:
+            ranges.append((start, h))
+            start = None
+
+    if start is not None:
+        ranges.append((start, 24))
+
+    return ranges
+
+
+def _fmt_range(start_h: int, end_h: int) -> str:
+    s = f"{start_h:02d}:00"
+    e = "24:00" if end_h == 24 else f"{end_h:02d}:00"
+    return f"{s} - {e}"
+
+
 def _safe_delete(message: types.Message):
     async def _inner():
         try:
@@ -237,6 +260,32 @@ def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
             db.set_state("last_start_date", datetime.now(config.KYIV).strftime("%Y-%m-%d"))
     except Exception:
         pass
+
+
+@router.callback_query(F.data == "schedule_today")
+async def schedule_today(cb: types.CallbackQuery):
+    now = datetime.now(config.KYIV)
+    today_str = now.strftime("%Y-%m-%d")
+    schedule = db.get_schedule(today_str)
+
+    ranges = _schedule_to_ranges(schedule)
+    total_off = sum((e - s) for s, e in ranges)
+
+    now_status = "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now.hour, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
+
+    txt = f"📅 <b>Графік відключень на сьогодні</b> ({now.strftime('%d.%m.%Y')})\n\n"
+
+    if not ranges:
+        txt += "✅ Відключень не заплановано.\n\n"
+    else:
+        for s, e in ranges:
+            txt += f"🔴 {_fmt_range(s, e)}\n"
+        txt += f"\n⏱ Сумарно без світла: <b>{total_off} год</b>\n\n"
+
+    txt += now_status
+
+    await cb.message.answer(txt, reply_markup=back_to_main())
+    await cb.answer()
 
 
 # --- СТАРТ ---
