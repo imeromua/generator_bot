@@ -191,7 +191,7 @@ def _read_canonical_fuel_for_row(sheet, row: int) -> float | None:
 
 
 def _sync_canonical_state_from_sheet(sheet):
-    """На кожній ітерації підтягуємо еталонні значення з таблиці в БД."""
+    """Підтягуємо еталонні значення з таблиці в БД."""
     try:
         today = datetime.now(config.KYIV).date()
         today_str = today.strftime("%Y-%m-%d")
@@ -212,6 +212,26 @@ def _sync_canonical_state_from_sheet(sheet):
 
     except Exception as e:
         logging.error(f"❌ Помилка canonical sync: {e}", exc_info=True)
+
+
+def sync_canonical_state_once():
+    """Разове оновлення еталонного стану (Sheet -> БД). Викликається з /start для актуального дашборду."""
+    if not config.SHEET_ID:
+        return
+    if not os.path.exists("service_account.json"):
+        return
+
+    try:
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+        ]
+        creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
+        _sync_canonical_state_from_sheet(sheet)
+    except Exception as e:
+        logging.error(f"❌ sync_canonical_state_once error: {e}")
 
 
 def _import_initial_state_from_sheet(sheet):
@@ -282,7 +302,6 @@ async def sync_loop():
             sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
 
             _import_initial_state_from_sheet(sheet)
-            _sync_canonical_state_from_sheet(sheet)
 
             # --- ВОДІЇ з таблиці ---
             try:
@@ -444,6 +463,10 @@ async def sync_loop():
 
                 if ids_to_mark:
                     db.mark_synced(ids_to_mark)
+
+            # ВАЖЛИВО: canonical sync робимо ПІСЛЯ записів у Sheet,
+            # щоб залишок у БД одразу підтягнувся після заправки/формул.
+            _sync_canonical_state_from_sheet(sheet)
 
         except gspread.exceptions.APIError as e:
             logging.error(f"❌ Google API Error: {e}")

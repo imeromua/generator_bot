@@ -3,6 +3,8 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+import asyncio
+
 import database.db_api as db
 import config
 from keyboards.builders import main_dashboard
@@ -64,6 +66,13 @@ async def process_name(msg: types.Message, state: FSMContext):
 
 
 async def show_dash(msg: types.Message, user_id, user_name):
+    # Тягнемо еталонний залишок палива з таблиці, щоб /start одразу показував актуальне
+    try:
+        from services.google_sync import sync_canonical_state_once
+        await asyncio.to_thread(sync_canonical_state_once)
+    except Exception:
+        pass
+
     st = db.get_state()
     role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
 
