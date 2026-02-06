@@ -12,23 +12,22 @@ router = Router()
 class RefillForm(StatesGroup):
     driver = State()
     liters = State()
+    receipt = State() # 👈 НОВИЙ СТАН
 
-# --- СТАРТ (Додали x_start) ---
+# --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
 async def gen_start(cb: types.CallbackQuery):
     st = db.get_state()
     if st['status'] == 'ON': 
         return await cb.answer(f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {st.get('active_shift', 'Невідома')})", show_alert=True)
     
-    # 👇 Перевірка на повтор
-    shift_code = cb.data.split("_")[0] # m, d, e, x
+    shift_code = cb.data.split("_")[0]
     completed = db.get_today_completed_shifts()
     if shift_code in completed:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     now = datetime.now(config.KYIV)
     
-    # Перевірку часу для "Екстра" можна пропустити або залишити загальну
     if cb.data != "x_start":
         start_time_limit = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         if now.time() < start_time_limit:
@@ -50,18 +49,15 @@ async def gen_start(cb: types.CallbackQuery):
     pretty_name = names.get(cb.data, cb.data)
     
     await cb.message.delete()
-    
-    # Роль визначаємо динамічно
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
     
-    # Передаємо cb.data як active_shift
     await cb.message.answer(
         f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {user[1]}",
         reply_markup=main_dashboard(role, cb.data, completed)
     )
     await cb.answer()
 
-# --- СТОП (Додали x_end) ---
+# --- СТОП ---
 @router.callback_query(F.data.in_({"m_end", "d_end", "e_end", "x_end"}))
 async def gen_stop(cb: types.CallbackQuery):
     st = db.get_state()
@@ -100,11 +96,7 @@ async def gen_stop(cb: types.CallbackQuery):
     db.add_log(cb.data, user[1])
     
     await cb.message.delete()
-    
-    # 👇 Фікс ролі адміна (щоб кнопка не зникала)
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
-    
-    # Оновлюємо список завершених (бо ми щойно завершили)
     completed = db.get_today_completed_shifts()
     
     await cb.message.answer(
@@ -131,23 +123,42 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_text(f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято? (Напишіть цифру)", reply_markup=back_to_main())
     await state.set_state(RefillForm.liters)
 
+# 👇 ТУТ ЗМІНИ: Спочатку літри, потім чек
 @router.message(RefillForm.liters)
-async def refill_save(msg: types.Message, state: FSMContext):
+async def refill_ask_receipt(msg: types.Message, state: FSMContext):
     try:
         liters = float(msg.text.replace(",", "."))
-        data = await state.get_data()
-        user = db.get_user(msg.from_user.id)
-        
-        db.add_log("refill", user[1], str(liters), data['driver'])
-        new_balance = db.update_fuel(liters)
-        
-        await msg.answer(f"✅ Прийнято {liters}л (Водій: {data['driver']})\n⛽ Новий баланс: {new_balance:.1f} л")
-        await state.clear()
-        
-        await show_dash(msg, msg.from_user.id, user[1])
-        
+        await state.update_data(liters=liters)
+        # Питаємо чек
+        await msg.answer("🧾 Введіть <b>номер чека</b>:", reply_markup=back_to_main())
+        await state.set_state(RefillForm.receipt)
     except ValueError:
         await msg.answer("❌ Будь ласка, введіть число (наприклад 50 або 50.5)")
+
+@router.message(RefillForm.receipt)
+async def refill_save(msg: types.Message, state: FSMContext):
+    receipt_num = msg.text
+    data = await state.get_data()
+    liters = data['liters']
+    driver = data['driver']
+    
+    user = db.get_user(msg.from_user.id)
+    
+    # "Пакуємо" літри і чек в один рядок: "50.0|123456"
+    log_val = f"{liters}|{receipt_num}"
+    
+    db.add_log("refill", user[1], log_val, driver)
+    new_balance = db.update_fuel(liters)
+    
+    await msg.answer(
+        f"✅ Прийнято <b>{liters} л</b>\n"
+        f"🧾 Чек: <b>{receipt_num}</b>\n"
+        f"🚛 Водій: {driver}\n"
+        f"⛽ Баланс: {new_balance:.1f} л"
+    )
+    await state.clear()
+    
+    await show_dash(msg, msg.from_user.id, user[1])
 
 @router.callback_query(F.data == "home")
 async def go_home(cb: types.CallbackQuery, state: FSMContext):
