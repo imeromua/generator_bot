@@ -27,7 +27,7 @@ def get_drivers():
     with sqlite3.connect(DB_NAME) as conn:
         return [r[0] for r in conn.execute("SELECT name FROM drivers").fetchall()]
 
-# 👇 НОВЕ: Функція для синхронізації водіїв з Гугл Таблиці
+# 👇 ОНОВЛЕНА ФУНКЦІЯ (ВИПРАВЛЕНО ПОМИЛКУ ДУБЛІКАТІВ)
 def sync_drivers_from_sheet(driver_list):
     """
     Повністю оновлює список водіїв у базі на основі списку з Таблиці.
@@ -38,10 +38,10 @@ def sync_drivers_from_sheet(driver_list):
         # 1. Очищаємо стару таблицю
         conn.execute("DELETE FROM drivers")
         
-        # 2. Записуємо нових
+        # 2. Записуємо нових (INSERT OR IGNORE ігнорує дублікати)
         for name in driver_list:
             if name and name.strip():
-                conn.execute("INSERT INTO drivers (name) VALUES (?)", (name.strip(),))
+                conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (name.strip(),))
 
 def delete_driver(name):
     with sqlite3.connect(DB_NAME) as conn:

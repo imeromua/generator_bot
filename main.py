@@ -4,13 +4,14 @@ from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.client.session.aiohttp import AiohttpSession # 👈 Додано для фікса тайм-ауту
 from datetime import datetime
 
 # Імпорти наших модулів
 import config
 import database.models as db_models
 import database.db_api as db
-from middlewares.auth import WhitelistMiddleware
+from middlewares.auth import AuthMiddleware
 
 # Імпорт хендлерів (обробників)
 from handlers import common, user, admin
@@ -23,11 +24,18 @@ from services.parser import parse_dtek_message
 # Налаштування логування
 logging.basicConfig(level=logging.INFO)
 
-# Ініціалізація бота
-bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+# --- 1. НАЛАШТУВАННЯ СЕСІЇ (ФІКС ВИЛЬОТІВ) ---
+session = AiohttpSession(timeout=60)
+
+# Ініціалізація бота з сесією
+bot = Bot(
+    token=config.BOT_TOKEN, 
+    session=session, 
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 
-# --- ЛОГІКА ПАРСЕРА ДТЕК (Живе тут, щоб ловити всі повідомлення) ---
+# --- ЛОГІКА ПАРСЕРА ДТЕК (Повернено на місце) ---
 parser_router = Router()
 
 @parser_router.message(F.text & ~F.text.startswith("/"))
@@ -81,23 +89,27 @@ async def main():
     db_models.init_db()
     
     # 2. Підключення Middleware (Охорона)
-    # Важливо: підключаємо до всіх роутерів
-    dp.message.outer_middleware(WhitelistMiddleware())
-    dp.callback_query.outer_middleware(WhitelistMiddleware())
+    dp.message.outer_middleware(AuthMiddleware())
+    dp.callback_query.outer_middleware(AuthMiddleware())
     
-    # 3. Реєстрація роутерів (Порядок важливий!)
+    # 3. Реєстрація роутерів
     dp.include_router(common.router)   # Старт, Реєстрація
     dp.include_router(admin.router)    # Адмінка
     dp.include_router(user.router)     # Кнопки генератора
-    dp.include_router(parser_router)   # Парсер тексту
+    dp.include_router(parser_router)   # Парсер тексту (ТУТ ВІН Є)
     
     # 4. Запуск фонових процесів
-    asyncio.create_task(sync_loop())         # Синхронізація з Google
-    asyncio.create_task(scheduler_loop(bot)) # Планувальник (20:30, 07:50)
+    asyncio.create_task(sync_loop())         
+    asyncio.create_task(scheduler_loop(bot)) 
     
-    # 5. Видалення вебхука і старт
-    await bot.delete_webhook(drop_pending_updates=True)
     print("🚀 БОТ ЗАПУЩЕНО! Натисніть Ctrl+C для зупинки.")
+
+    # 5. Безпечне видалення вебхука
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logging.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
