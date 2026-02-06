@@ -4,14 +4,15 @@ from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.client.session.aiohttp import AiohttpSession # 👈 Додано для фікса тайм-ауту
+from aiogram.client.session.aiohttp import AiohttpSession
 from datetime import datetime
 
 # Імпорти наших модулів
 import config
 import database.models as db_models
 import database.db_api as db
-from middlewares.auth import AuthMiddleware
+# 👇 ВИПРАВЛЕНО: Імпортуємо правильну назву класу
+from middlewares.auth import WhitelistMiddleware
 
 # Імпорт хендлерів (обробників)
 from handlers import common, user, admin
@@ -24,7 +25,7 @@ from services.parser import parse_dtek_message
 # Налаштування логування
 logging.basicConfig(level=logging.INFO)
 
-# --- 1. НАЛАШТУВАННЯ СЕСІЇ (ФІКС ВИЛЬОТІВ) ---
+# --- 1. НАЛАШТУВАННЯ СЕСІЇ (Фікс тайм-ауту) ---
 session = AiohttpSession(timeout=60)
 
 # Ініціалізація бота з сесією
@@ -35,7 +36,7 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# --- ЛОГІКА ПАРСЕРА ДТЕК (Повернено на місце) ---
+# --- ЛОГІКА ПАРСЕРА ДТЕК (Перехоплювач повідомлень) ---
 parser_router = Router()
 
 @parser_router.message(F.text & ~F.text.startswith("/"))
@@ -89,14 +90,15 @@ async def main():
     db_models.init_db()
     
     # 2. Підключення Middleware (Охорона)
-    dp.message.outer_middleware(AuthMiddleware())
-    dp.callback_query.outer_middleware(AuthMiddleware())
+    # 👇 ВИПРАВЛЕНО: Використовуємо WhitelistMiddleware
+    dp.message.outer_middleware(WhitelistMiddleware())
+    dp.callback_query.outer_middleware(WhitelistMiddleware())
     
     # 3. Реєстрація роутерів
     dp.include_router(common.router)   # Старт, Реєстрація
     dp.include_router(admin.router)    # Адмінка
     dp.include_router(user.router)     # Кнопки генератора
-    dp.include_router(parser_router)   # Парсер тексту (ТУТ ВІН Є)
+    dp.include_router(parser_router)   # Парсер тексту
     
     # 4. Запуск фонових процесів
     asyncio.create_task(sync_loop())         
