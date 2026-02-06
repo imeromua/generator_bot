@@ -98,6 +98,28 @@ _SHIFT_COLS = {
 }
 
 
+def _shift_pretty(code_or_event: str) -> str:
+    code = code_or_event
+    if "_" in code_or_event:
+        code = code_or_event.split("_", 1)[0]
+
+    # Можемо в майбутньому повністю перейменувати кнопки,
+    # але зараз міняємо тільки відображення (тексти).
+    return {
+        "m": "🟦 Зміна 1",
+        "d": "🟩 Зміна 2",
+        "e": "🟪 Зміна 3",
+        "x": "⚡ Екстра",
+    }.get(code, code_or_event)
+
+
+def _shift_prev_required(code: str) -> str | None:
+    return {
+        "d": "m",
+        "e": "d",
+    }.get(code)
+
+
 def _sheet_name_to_month(sheet_name: str):
     if not sheet_name:
         return None
@@ -202,15 +224,15 @@ def _open_ws_sync():
 
 
 def _get_sheet_shift_info_sync():
-    """Повертає (open_shift_code|None, completed_set, start_time_by_shift)."""
+    """Повертає (sheet_ok, open_shift_code|None, completed_set, start_time_by_shift)."""
     ws = _open_ws_sync()
     if not ws:
-        return None, set(), {}
+        return False, None, set(), {}
 
     today = datetime.now(config.KYIV).date()
     row = _find_row_by_date_in_column_a(ws, today, config.SHEET_NAME)
     if not row:
-        return None, set(), {}
+        return False, None, set(), {}
 
     rng = ws.get(f"A{row}:I{row}")
     vals = (rng[0] if rng else [])
@@ -235,7 +257,7 @@ def _get_sheet_shift_info_sync():
         if s and not e and open_shift is None:
             open_shift = code
 
-    return open_shift, completed, start_times
+    return True, open_shift, completed, start_times
 
 
 def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
@@ -290,17 +312,17 @@ async def gen_start(cb: types.CallbackQuery):
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
-    open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
-    if open_shift:
+    sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+    if sheet_ok and open_shift:
         _sync_db_from_sheet_open_shift(open_shift, start_times)
         return await cb.answer(
-            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {open_shift.upper()})",
+            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(open_shift)})",
             show_alert=True
         )
 
     shift_code = cb.data.split("_")[0]
 
-    if shift_code in completed_sheet:
+    if sheet_ok and shift_code in completed_sheet:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     if st['status'] == 'ON':
@@ -309,8 +331,20 @@ async def gen_start(cb: types.CallbackQuery):
             show_alert=True
         )
 
-    completed = db.get_today_completed_shifts()
-    if shift_code in completed:
+    completed_db = db.get_today_completed_shifts()
+    completed_total = set(completed_db)
+    if sheet_ok:
+        completed_total |= set(completed_sheet)
+
+    # Черга змін: 1 -> 2 -> 3 (екстра без черги)
+    prev_required = _shift_prev_required(shift_code)
+    if prev_required and (prev_required not in completed_total):
+        return await cb.answer(
+            f"⛔ Спочатку закрийте {_shift_pretty(prev_required)}.",
+            show_alert=True
+        )
+
+    if shift_code in completed_db:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     now = datetime.now(config.KYIV)
@@ -333,15 +367,7 @@ async def gen_start(cb: types.CallbackQuery):
             )
         return await cb.answer("❌ Помилка старту. Спробуйте ще раз.", show_alert=True)
 
-    names = {
-        "m_start": "🌅 РАНОК",
-        "d_start": "☀️ ДЕНЬ",
-        "e_start": "🌙 ВЕЧІР",
-        "x_start": "⚡ ЕКСТРА"
-    }
-    pretty_name = names.get(cb.data, cb.data)
-
-    banner = f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
+    banner = f"✅ <b>{_shift_pretty(cb.data)}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
     await show_dash(cb.message, user[0], user[1], banner=banner)
     await cb.answer()
 
@@ -358,20 +384,49 @@ async def gen_stop(cb: types.CallbackQuery):
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_")[0]
 
-    open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+    sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
 
-    if expected_code in completed_sheet:
+    # Якщо в таблиці вже закрито — кнопкою СТОП нічого не пишемо, тільки синхронізуємо стан
+    if sheet_ok and expected_code in completed_sheet:
         db.set_state('status', 'OFF')
         db.set_state('active_shift', 'none')
-        return await cb.answer("⛔ Цю зміну вже закрито в таблиці.", show_alert=True)
 
-    if open_shift and open_shift != expected_code:
+        user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+        if not user:
+            return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
+
+        banner = f"ℹ️ {_shift_pretty(expected_code)} вже закрито в таблиці. Стан оновлено."
+        await show_dash(cb.message, user[0], user[1], banner=banner)
+        await cb.answer()
+        return
+
+    # Якщо таблиця каже, що відкрита інша зміна
+    if sheet_ok and open_shift and open_shift != expected_code:
         return await cb.answer(
-            f"⛔ Помилка! Зараз активний {open_shift.upper()}.\nНатисніть відповідну кнопку СТОП.",
+            f"⛔ Помилка! Зараз активний {_shift_pretty(open_shift)}.\nНатисніть відповідну кнопку СТОП.",
             show_alert=True
         )
 
-    if not open_shift and st['status'] == 'OFF':
+    # Якщо в таблиці НІЧОГО не відкрите, але бот думає, що ON — це саме кейс "закрили на ПК"
+    if sheet_ok and (not open_shift) and st['status'] == 'ON':
+        db.set_state('status', 'OFF')
+        db.set_state('active_shift', 'none')
+
+        user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+        if not user:
+            return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
+
+        banner = "ℹ️ У таблиці немає відкритої зміни. Стан бота синхронізовано."
+        await show_dash(cb.message, user[0], user[1], banner=banner)
+        await cb.answer()
+        return
+
+    # Якщо таблиця недоступна/не знайшли рядок — працюємо по локальному стану
+    if (not sheet_ok) and st['status'] == 'OFF':
+        return await cb.answer("⛔ Вже вимкнено.", show_alert=True)
+
+    # Якщо таблиця доступна і там теж OFF
+    if sheet_ok and (not open_shift) and st['status'] == 'OFF':
         return await cb.answer("⛔ Вже вимкнено.", show_alert=True)
 
     now = datetime.now(config.KYIV)
@@ -425,7 +480,7 @@ async def gen_stop(cb: types.CallbackQuery):
     dur_hhmm = format_hours_hhmm(dur)
 
     banner = (
-        f"🏁 <b>Зміну закрито!</b>\n"
+        f"🏁 <b>{_shift_pretty(expected_code)} закрито!</b>\n"
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
         f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
         f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
