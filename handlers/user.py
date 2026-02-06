@@ -326,8 +326,9 @@ async def gen_start(cb: types.CallbackQuery):
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     if st['status'] == 'ON':
+        active = st.get('active_shift', 'none')
         return await cb.answer(
-            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {st.get('active_shift', 'Невідома')})",
+            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(active)})",
             show_alert=True
         )
 
@@ -361,8 +362,9 @@ async def gen_start(cb: types.CallbackQuery):
     res = db.try_start_shift(cb.data, operator_personnel, now)
     if not res.get("ok"):
         if res.get("reason") == "already_on":
+            active = res.get('active_shift', 'none')
             return await cb.answer(
-                f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {res.get('active_shift', 'Невідома')})",
+                f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(active)})",
                 show_alert=True
             )
         return await cb.answer("❌ Помилка старту. Спробуйте ще раз.", show_alert=True)
@@ -462,7 +464,7 @@ async def gen_stop(cb: types.CallbackQuery):
         if res.get("reason") == "wrong_shift":
             active = res.get("active_shift", "none")
             return await cb.answer(
-                f"⛔ Помилка! Зараз активний {active}.\nНатисніть відповідну кнопку СТОП.",
+                f"⛔ Помилка! Зараз активний {_shift_pretty(active)}.\nНатисніть відповідну кнопку СТОП.",
                 show_alert=True
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
