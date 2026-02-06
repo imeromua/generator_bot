@@ -34,18 +34,13 @@ def get_drivers():
         return [r[0] for r in conn.execute("SELECT name FROM drivers").fetchall()]
 
 def sync_drivers_from_sheet(driver_list):
-    """
-    Повністю оновлює список водіїв у базі на основі списку з Таблиці.
-    """
+    """Повністю оновлює список водіїв у базі на основі списку з Таблиці."""
     if not driver_list:
         return
-    
+
     try:
         with get_connection() as conn:
-            # 1. Очищаємо стару таблицю
             conn.execute("DELETE FROM drivers")
-            
-            # 2. Записуємо нових (INSERT OR IGNORE ігнорує дублікати)
             for name in driver_list:
                 if name and name.strip():
                     conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (name.strip(),))
@@ -66,15 +61,15 @@ def get_state():
         c = conn.cursor()
         status = c.execute("SELECT value FROM generator_state WHERE key='status'").fetchone()[0]
         start_time = c.execute("SELECT value FROM generator_state WHERE key='last_start_time'").fetchone()[0]
-        
+
         try:
             start_date = c.execute("SELECT value FROM generator_state WHERE key='last_start_date'").fetchone()[0]
         except (TypeError, IndexError):
             start_date = ''
-        
+
         total = float(c.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
         last_oil = float(c.execute("SELECT value FROM generator_state WHERE key='last_oil_change'").fetchone()[0])
-        
+
         try:
             last_spark = float(c.execute("SELECT value FROM generator_state WHERE key='last_spark_change'").fetchone()[0])
         except (TypeError, ValueError):
@@ -84,17 +79,17 @@ def get_state():
             fuel = float(c.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
         except (TypeError, ValueError):
             fuel = 0.0
-        
+
         try:
             active_shift = c.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
         except (TypeError, IndexError):
             active_shift = "none"
-            
+
         return {
-            "status": status, 
+            "status": status,
             "start_time": start_time,
             "start_date": start_date,
-            "total_hours": total, 
+            "total_hours": total,
             "last_oil": last_oil,
             "last_spark": last_spark,
             "current_fuel": fuel,
@@ -106,22 +101,23 @@ def get_today_completed_shifts():
     with get_connection() as conn:
         query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end')"
         rows = conn.execute(query, (f"{date_str}%",)).fetchall()
-    
+
     completed = set()
     for r in rows:
-        evt = r[0] 
+        evt = r[0]
         if "_" in evt:
             completed.add(evt.split("_")[0])
     return completed
 
 def update_fuel(liters_delta):
+    """Локальне паливо (state.current_fuel). Якщо таблиця еталон — бажано НЕ викликати це з хендлерів."""
     try:
         with get_connection() as conn:
             try:
                 cur = float(conn.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
             except (TypeError, ValueError):
                 cur = 0.0
-            
+
             new_val = cur + liters_delta
             if new_val < 0:
                 new_val = 0
@@ -131,18 +127,97 @@ def update_fuel(liters_delta):
         logging.error(f"Помилка оновлення палива: {e}")
         return 0.0
 
-def add_log(event, user, val=None, driver=None):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def add_log(event, user, val=None, driver=None, ts: str | None = None):
+    ts_val = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
-        conn.execute("INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
-                     (event, ts, user, val, driver))
+        conn.execute(
+            "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
+            (event, ts_val, user, val, driver)
+        )
+
+
+def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
+    """Атомарний старт зміни: тільки перший виграє (CAS по status OFF->ON)."""
+    ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            cur = conn.execute(
+                "UPDATE generator_state SET value = 'ON' WHERE key = 'status' AND value = 'OFF'"
+            )
+            if cur.rowcount == 0:
+                active = conn.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
+                st_time = conn.execute("SELECT value FROM generator_state WHERE key='last_start_time'").fetchone()[0]
+                conn.commit()
+                return {"ok": False, "reason": "already_on", "active_shift": active, "start_time": st_time}
+
+            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'active_shift'", (event_type,))
+            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_start_time'", (dt.strftime("%H:%M"),))
+            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_start_date'", (dt.strftime("%Y-%m-%d"),))
+
+            conn.execute(
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
+                (event_type, ts, user_name, None, None)
+            )
+
+            conn.commit()
+            return {"ok": True, "ts": ts}
+
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logging.error(f"try_start_shift error: {e}")
+            return {"ok": False, "reason": "error"}
+
+
+def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
+    """Атомарне закриття зміни: тільки для активної зміни."""
+    ts = dt.strftime("%Y-%m-%d %H:%M:%S")
+    expected_start = end_event_type.replace("_end", "_start")
+
+    with get_connection() as conn:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+
+            status = conn.execute("SELECT value FROM generator_state WHERE key='status'").fetchone()[0]
+            if status != "ON":
+                conn.commit()
+                return {"ok": False, "reason": "already_off"}
+
+            active = conn.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
+            if active != expected_start:
+                conn.commit()
+                return {"ok": False, "reason": "wrong_shift", "active_shift": active}
+
+            conn.execute("UPDATE generator_state SET value = 'OFF' WHERE key = 'status'")
+            conn.execute("UPDATE generator_state SET value = 'none' WHERE key = 'active_shift'")
+
+            conn.execute(
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
+                (end_event_type, ts, user_name, None, None)
+            )
+
+            conn.commit()
+            return {"ok": True, "ts": ts}
+
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logging.error(f"try_stop_shift error: {e}")
+            return {"ok": False, "reason": "error"}
+
 
 def get_unsynced():
     with get_connection() as conn:
         return conn.execute("SELECT * FROM logs WHERE is_synced = 0").fetchall()
 
 def mark_synced(ids):
-    """Позначає записи як синхронізовані. ВИПРАВЛЕНО SQL injection."""
+    """Позначає записи як синхронізовані."""
     if not ids:
         return
     try:

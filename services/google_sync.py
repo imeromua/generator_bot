@@ -3,6 +3,7 @@ import gspread
 import logging
 import os
 import re
+from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
 
@@ -190,7 +191,7 @@ def _read_canonical_fuel_for_row(sheet, row: int) -> float | None:
 
 
 def _sync_canonical_state_from_sheet(sheet):
-    """На кожній ітерації підтягуємо еталонні значення з таблиці в БД (але НЕ пишемо назад у Sheet)."""
+    """На кожній ітерації підтягуємо еталонні значення з таблиці в БД."""
     try:
         today = datetime.now(config.KYIV).date()
         today_str = today.strftime("%Y-%m-%d")
@@ -280,13 +281,10 @@ async def sync_loop():
 
             sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
 
-            # --- ЕТАП 0: СТАРТОВІ ЗНАЧЕННЯ (fallback) ---
             _import_initial_state_from_sheet(sheet)
-
-            # --- ЕТАП 0.1: CANONICAL SYNC (таблиця -> БД) ---
             _sync_canonical_state_from_sheet(sheet)
 
-            # --- ЕТАП 1: ЧИТАННЯ (Синхронізація водіїв) ---
+            # --- ВОДІЇ з таблиці ---
             try:
                 drivers_raw = sheet.col_values(28)[2:]
                 drivers_clean = [d.strip() for d in drivers_raw if d.strip()]
@@ -297,22 +295,14 @@ async def sync_loop():
             except Exception as e:
                 logging.error(f"⚠️ Не вдалося прочитати список водіїв: {e}")
 
-            # --- ЕТАП 2: ЗАПИС ---
-            # Таблиця = еталон по паливу/мотогодинах. Заправки НЕ пишемо в таблицю.
             logs = db.get_unsynced()
             if logs:
                 ids_to_mark = []
+                date_row_cache = {}
 
                 for l in logs:
                     lid, ltype, ltime, luser, lval, ldriver, _ = l
 
-                    # refuel: залишаємо тільки в БД як журнал, в Google Sheet не записуємо
-                    if ltype == "refill":
-                        ids_to_mark.append(lid)
-                        continue
-
-                    # інші події (старт/стоп змін) — як і раніше можна синхронізувати в Sheet
-                    # (якщо захочеш — можу зробити окремий перемикач у config)
                     try:
                         log_date_str = ltime.split(" ")[0]
                         log_time_hhmm = ltime.split(" ")[1][:5]
@@ -324,10 +314,84 @@ async def sync_loop():
                     except Exception:
                         continue
 
-                    r = _find_row_by_date_in_column_a(sheet, log_date_obj, config.SHEET_NAME)
+                    if log_date_str not in date_row_cache:
+                        date_row_cache[log_date_str] = _find_row_by_date_in_column_a(sheet, log_date_obj, config.SHEET_NAME)
+
+                    r = date_row_cache.get(log_date_str)
                     if not r:
                         continue
 
+                    # --- REFILL: пишемо тільки "Привезено паливо" + чек + водій ---
+                    if ltype == "refill":
+                        try:
+                            if lval and "|" in lval:
+                                liters_str, receipt_str = lval.split("|", 1)
+                            else:
+                                liters_str = lval if lval else "0"
+                                receipt_str = ""
+
+                            # N(14): сумуємо літри
+                            try:
+                                cur_val_raw = sheet.cell(r, 14).value
+                                cur_liters = float(str(cur_val_raw).replace(",", ".").replace(" ", "")) if cur_val_raw else 0.0
+                            except Exception:
+                                cur_liters = 0.0
+
+                            try:
+                                new_liters = float(str(liters_str).replace(",", ".").strip())
+                            except Exception:
+                                new_liters = 0.0
+
+                            total_liters = cur_liters + new_liters
+                            sheet.update(
+                                range_name=rowcol_to_a1(r, 14),
+                                values=[[str(total_liters).replace(".", ",")]],
+                                value_input_option='USER_ENTERED'
+                            )
+
+                            # P(16): чеки через кому
+                            try:
+                                cur_receipt = (sheet.cell(r, 16).value or "").strip()
+                            except Exception:
+                                cur_receipt = ""
+
+                            receipt_str = (receipt_str or "").strip()
+                            if cur_receipt and receipt_str:
+                                new_receipt = f"{cur_receipt}, {receipt_str}"
+                            else:
+                                new_receipt = receipt_str or cur_receipt
+
+                            sheet.update(
+                                range_name=rowcol_to_a1(r, 16),
+                                values=[[new_receipt]],
+                                value_input_option='USER_ENTERED'
+                            )
+
+                            # AA(27): водії через кому
+                            if ldriver:
+                                try:
+                                    cur_driver = (sheet.cell(r, 27).value or "").strip()
+                                except Exception:
+                                    cur_driver = ""
+
+                                d = str(ldriver).strip()
+                                if cur_driver and d:
+                                    new_driver = f"{cur_driver}, {d}"
+                                else:
+                                    new_driver = d or cur_driver
+
+                                sheet.update(
+                                    range_name=rowcol_to_a1(r, 27),
+                                    values=[[new_driver]],
+                                    value_input_option='USER_ENTERED'
+                                )
+
+                            ids_to_mark.append(lid)
+                        except Exception as e:
+                            logging.error(f"❌ Refill sync error lid={lid}: {e}")
+                        continue
+
+                    # --- START/END: часи змін пишемо як раніше ---
                     col = None
                     user_col = None
 
@@ -337,28 +401,24 @@ async def sync_loop():
                     elif ltype == "m_end":
                         col = 3
                         user_col = 20
-
                     elif ltype == "d_start":
                         col = 4
                         user_col = 21
                     elif ltype == "d_end":
                         col = 5
                         user_col = 22
-
                     elif ltype == "e_start":
                         col = 6
                         user_col = 23
                     elif ltype == "e_end":
                         col = 7
                         user_col = 24
-
                     elif ltype == "x_start":
                         col = 8
                         user_col = 25
                     elif ltype == "x_end":
                         col = 9
                         user_col = 26
-
                     elif ltype == "auto_close":
                         col = 7
                         user_col = 24
@@ -366,21 +426,21 @@ async def sync_loop():
                     if col:
                         try:
                             sheet.update(
-                                range_name=f"{gspread.utils.rowcol_to_a1(r, col)}",
+                                range_name=rowcol_to_a1(r, col),
                                 values=[[log_time_hhmm]],
                                 value_input_option='USER_ENTERED'
                             )
 
                             if user_col and luser:
                                 sheet.update(
-                                    range_name=f"{gspread.utils.rowcol_to_a1(r, user_col)}",
+                                    range_name=rowcol_to_a1(r, user_col),
                                     values=[[luser]],
                                     value_input_option='RAW'
                                 )
 
                             ids_to_mark.append(lid)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logging.error(f"❌ Event sync error lid={lid}: {e}")
 
                 if ids_to_mark:
                     db.mark_synced(ids_to_mark)
