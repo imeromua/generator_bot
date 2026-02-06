@@ -168,9 +168,13 @@ async def gen_stop(cb: types.CallbackQuery):
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
-    db.update_hours(dur)
+    # Таблиця = еталон. Тут тільки рахуємо, але НЕ змінюємо state/current_fuel в БД.
     fuel_consumed = dur * config.FUEL_CONSUMPTION
-    remaining_fuel = db.update_fuel(-fuel_consumed)
+    try:
+        canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
+    except Exception:
+        canonical_fuel = 0.0
+    remaining_est = canonical_fuel - fuel_consumed
 
     db.set_state('status', 'OFF')
     db.set_state('active_shift', 'none')
@@ -186,8 +190,8 @@ async def gen_stop(cb: types.CallbackQuery):
     await cb.message.answer(
         f"🏁 <b>Зміну закрито!</b>\n"
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
-        f"📉 Використано: <b>{fuel_consumed:.1f} л</b>\n"
-        f"⛽️ Залишок: <b>{remaining_fuel:.1f} л</b>\n"
+        f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
+        f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
         f"👤 {user[1]}",
         reply_markup=main_dashboard(role, 'none', completed)
     )
@@ -255,18 +259,23 @@ async def refill_save(msg: types.Message, state: FSMContext):
         return await msg.answer("⚠️ Спочатку натисніть /start")
 
     log_val = f"{liters}|{receipt_num}"
-
     db.add_log("refill", user[1], log_val, driver)
-    new_balance = db.update_fuel(liters)
+
+    # Таблиця = еталон. Тут НЕ змінюємо current_fuel в БД, лише фіксуємо подію.
+    st = db.get_state()
+    try:
+        canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
+    except Exception:
+        canonical_fuel = 0.0
 
     await msg.answer(
-        f"✅ Прийнято <b>{liters} л</b>\n"
+        f"✅ Записано: <b>{liters} л</b>\n"
         f"🧾 Чек: <b>{receipt_num}</b>\n"
         f"🚛 Водій: {driver}\n"
-        f"⛽ Баланс: {new_balance:.1f} л"
+        f"ℹ️ Залишок (за таблицею): <b>{canonical_fuel:.1f} л</b>"
     )
-    await state.clear()
 
+    await state.clear()
     await show_dash(msg, msg.from_user.id, user[1])
 
 

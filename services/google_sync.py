@@ -3,7 +3,6 @@ import gspread
 import logging
 import os
 import re
-from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
 
@@ -145,28 +144,10 @@ def _parse_motohours_to_hours(val):
     if f is None:
         return None
 
-    # Якщо раптом зчитали "дні" (Excel/Sheets duration як число днів) — конвертуємо у години,
-    # але тільки коли це явно дає великий пробіг.
     if 1.0 < f < 31.0 and (f * 24.0) > 100.0:
         return f * 24.0
 
     return f
-
-
-def _format_hours_hhmm(hours_float: float) -> str:
-    try:
-        h = float(hours_float)
-    except Exception:
-        h = 0.0
-
-    sign = "-" if h < 0 else ""
-    h = abs(h)
-
-    total_minutes = int(round(h * 60.0))
-    hh = total_minutes // 60
-    mm = total_minutes % 60
-
-    return f"{sign}{hh:02d}:{mm:02d}"
 
 
 def _db_has_logs_for_date(date_str: str) -> bool:
@@ -182,8 +163,58 @@ def _db_has_logs_for_date(date_str: str) -> bool:
         return False
 
 
+def _read_canonical_fuel_for_row(sheet, row: int) -> float | None:
+    """Таблиця = еталон. Беремо паливо з найактуальнішої колонки: O(15) -> M(13) -> K(11)."""
+    try:
+        evening = _parse_float(sheet.cell(row, 15).value)  # O
+        if evening is not None:
+            return evening
+    except Exception:
+        pass
+
+    try:
+        remaining_mid = _parse_float(sheet.cell(row, 13).value)  # M
+        if remaining_mid is not None:
+            return remaining_mid
+    except Exception:
+        pass
+
+    try:
+        morning = _parse_float(sheet.cell(row, 11).value)  # K
+        if morning is not None:
+            return morning
+    except Exception:
+        pass
+
+    return None
+
+
+def _sync_canonical_state_from_sheet(sheet):
+    """На кожній ітерації підтягуємо еталонні значення з таблиці в БД (але НЕ пишемо назад у Sheet)."""
+    try:
+        today = datetime.now(config.KYIV).date()
+        today_str = today.strftime("%Y-%m-%d")
+
+        row = _find_row_by_date_in_column_a(sheet, today, config.SHEET_NAME)
+        if not row:
+            logging.warning(f"⚠️ Canonical sync: дата {today_str} не знайдена в колонці A")
+            return
+
+        fuel_val = _read_canonical_fuel_for_row(sheet, row)
+        if fuel_val is not None:
+            db.set_state("current_fuel", fuel_val)
+
+        moto_raw = sheet.cell(row, 17).value
+        moto_val = _parse_motohours_to_hours(moto_raw)
+        if moto_val is not None:
+            db.set_total_hours(moto_val)
+
+    except Exception as e:
+        logging.error(f"❌ Помилка canonical sync: {e}", exc_info=True)
+
+
 def _import_initial_state_from_sheet(sheet):
-    """Імпорт стартових значень на сьогодні: паливо (K=11) і мотогодини (Q=17)."""
+    """Одноразовий імпорт (fallback) стартових значень на сьогодні."""
     try:
         today = datetime.now(config.KYIV).date()
         today_str = today.strftime("%Y-%m-%d")
@@ -226,32 +257,6 @@ def _import_initial_state_from_sheet(sheet):
         logging.error(f"❌ Помилка імпорту стартових значень: {e}", exc_info=True)
 
 
-def _sync_state_back_to_sheet(sheet, row: int):
-    """Синхронізація стану з БД у Sheet: O(15)=паливо вечір, Q(17)=мотогодини (ГГ:ХХ)."""
-    try:
-        st = db.get_state()
-        current_fuel = float(st.get("current_fuel", 0.0) or 0.0)
-        total_hours = float(st.get("total_hours", 0.0) or 0.0)
-
-        sheet.update(
-            range_name=rowcol_to_a1(row, 15),
-            values=[[str(current_fuel).replace(".", ",")]],
-            value_input_option="USER_ENTERED"
-        )
-
-        mh = _format_hours_hhmm(total_hours)
-        sheet.update(
-            range_name=rowcol_to_a1(row, 17),
-            values=[[mh]],
-            value_input_option="USER_ENTERED"
-        )
-
-        logging.info(f"✅ Стан синхронізовано у Sheet: fuel={current_fuel:.1f}л, motohours={mh}")
-
-    except Exception as e:
-        logging.error(f"❌ Помилка синхронізації стану у Sheet: {e}", exc_info=True)
-
-
 async def sync_loop():
     """Фоновий процес синхронізації"""
     if not config.SHEET_ID:
@@ -275,8 +280,11 @@ async def sync_loop():
 
             sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
 
-            # --- ЕТАП 0: СТАРТОВІ ЗНАЧЕННЯ (fuel + мотогодини) ---
+            # --- ЕТАП 0: СТАРТОВІ ЗНАЧЕННЯ (fallback) ---
             _import_initial_state_from_sheet(sheet)
+
+            # --- ЕТАП 0.1: CANONICAL SYNC (таблиця -> БД) ---
+            _sync_canonical_state_from_sheet(sheet)
 
             # --- ЕТАП 1: ЧИТАННЯ (Синхронізація водіїв) ---
             try:
@@ -290,35 +298,34 @@ async def sync_loop():
                 logging.error(f"⚠️ Не вдалося прочитати список водіїв: {e}")
 
             # --- ЕТАП 2: ЗАПИС ---
+            # Таблиця = еталон по паливу/мотогодинах. Заправки НЕ пишемо в таблицю.
             logs = db.get_unsynced()
             if logs:
-                logging.info(f"📤 Відправляю {len(logs)} записів у Google...")
-
-                date_row_cache = {}
                 ids_to_mark = []
 
                 for l in logs:
                     lid, ltype, ltime, luser, lval, ldriver, _ = l
 
+                    # refuel: залишаємо тільки в БД як журнал, в Google Sheet не записуємо
+                    if ltype == "refill":
+                        ids_to_mark.append(lid)
+                        continue
+
+                    # інші події (старт/стоп змін) — як і раніше можна синхронізувати в Sheet
+                    # (якщо захочеш — можу зробити окремий перемикач у config)
                     try:
                         log_date_str = ltime.split(" ")[0]
                         log_time_hhmm = ltime.split(" ")[1][:5]
                     except Exception:
-                        log_date_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
-                        log_time_hhmm = ""
+                        continue
 
                     try:
                         log_date_obj = datetime.strptime(log_date_str, "%Y-%m-%d").date()
                     except Exception:
-                        logging.warning(f"⚠️ Некоректна дата в логу ID {lid}: '{log_date_str}'")
                         continue
 
-                    if log_date_str not in date_row_cache:
-                        date_row_cache[log_date_str] = _find_row_by_date_in_column_a(sheet, log_date_obj, config.SHEET_NAME)
-
-                    r = date_row_cache.get(log_date_str)
+                    r = _find_row_by_date_in_column_a(sheet, log_date_obj, config.SHEET_NAME)
                     if not r:
-                        logging.warning(f"⚠️ Дата {log_date_str} не знайдена в стовпці А!")
                         continue
 
                     col = None
@@ -356,101 +363,27 @@ async def sync_loop():
                         col = 7
                         user_col = 24
 
-                    elif ltype == "refill":
-                        try:
-                            if lval and "|" in lval:
-                                liters_str, receipt_str = lval.split("|", 1)
-                            else:
-                                liters_str = lval if lval else "0"
-                                receipt_str = ""
-
-                            try:
-                                cur_val_raw = sheet.cell(r, 14).value
-                                if not cur_val_raw:
-                                    cur_liters = 0.0
-                                else:
-                                    cur_liters = float(cur_val_raw.replace(",", ".").replace(" ", ""))
-                            except (ValueError, TypeError, AttributeError):
-                                cur_liters = 0.0
-
-                            try:
-                                new_liters = float(str(liters_str).replace(",", ".").strip())
-                            except (ValueError, TypeError):
-                                new_liters = 0.0
-
-                            total_liters = cur_liters + new_liters
-                            final_val_str = str(total_liters).replace(".", ",")
-
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, 14),
-                                values=[[final_val_str]],
-                                value_input_option='USER_ENTERED'
-                            )
-
-                            try:
-                                cur_receipt = sheet.cell(r, 16).value
-                                if cur_receipt and receipt_str:
-                                    new_receipt = f"{cur_receipt}, {receipt_str}"
-                                elif receipt_str:
-                                    new_receipt = receipt_str
-                                else:
-                                    new_receipt = cur_receipt if cur_receipt else ""
-                            except (AttributeError, TypeError):
-                                new_receipt = receipt_str if receipt_str else ""
-
-                            sheet.update(
-                                range_name=rowcol_to_a1(r, 16),
-                                values=[[new_receipt]],
-                                value_input_option='USER_ENTERED'
-                            )
-
-                            if ldriver:
-                                sheet.update(
-                                    range_name=rowcol_to_a1(r, 27),
-                                    values=[[ldriver]],
-                                    value_input_option='USER_ENTERED'
-                                )
-
-                            ids_to_mark.append(lid)
-                            logging.info(f"✅ Синхронізовано заправку: {new_liters}л, чек: {receipt_str}")
-
-                            today_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
-                            if log_date_str == today_str:
-                                _sync_state_back_to_sheet(sheet, r)
-
-                        except Exception as e:
-                            logging.error(f"❌ Помилка синхронізації заправки ID {lid}: {e}")
-                        continue
-
                     if col:
                         try:
                             sheet.update(
-                                range_name=rowcol_to_a1(r, col),
+                                range_name=f"{gspread.utils.rowcol_to_a1(r, col)}",
                                 values=[[log_time_hhmm]],
                                 value_input_option='USER_ENTERED'
                             )
 
                             if user_col and luser:
                                 sheet.update(
-                                    range_name=rowcol_to_a1(r, user_col),
+                                    range_name=f"{gspread.utils.rowcol_to_a1(r, user_col)}",
                                     values=[[luser]],
                                     value_input_option='RAW'
                                 )
 
                             ids_to_mark.append(lid)
-                            logging.info(f"✅ Синхронізовано подію: {ltype} о {log_time_hhmm} (дата {log_date_str})")
-
-                            if ltype in ("m_end", "d_end", "e_end", "x_end", "auto_close"):
-                                today_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
-                                if log_date_str == today_str:
-                                    _sync_state_back_to_sheet(sheet, r)
-
-                        except Exception as e:
-                            logging.error(f"❌ Помилка синхронізації події ID {lid}: {e}")
+                        except Exception:
+                            pass
 
                 if ids_to_mark:
                     db.mark_synced(ids_to_mark)
-                    logging.info(f"✅ Позначено {len(ids_to_mark)} записів як синхронізовані")
 
         except gspread.exceptions.APIError as e:
             logging.error(f"❌ Google API Error: {e}")
