@@ -386,7 +386,15 @@ async def report_gen(cb: types.CallbackQuery):
             return
 
         file = types.FSInputFile(file_path)
-        await cb.message.answer_document(file, caption=caption)
+
+        nav_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="⚙️ Адмін панель", callback_data="admin_home"),
+                types.InlineKeyboardButton(text="🏠 Головне меню", callback_data="home"),
+            ]
+        ])
+
+        await cb.message.answer_document(file, caption=caption, reply_markup=nav_kb)
 
         import os
         os.remove(file_path)

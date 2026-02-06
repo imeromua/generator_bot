@@ -6,22 +6,30 @@ import config
 # --- ГОЛОВНЕ МЕНЮ ---
 def main_dashboard(role, active_shift, completed_shifts):
     kb = []
+
+    def pretty(code: str) -> str:
+        return {
+            "m": "🟦 Зміна 1",
+            "d": "🟩 Зміна 2",
+            "e": "🟪 Зміна 3",
+            "x": "⚡ Екстра",
+        }.get(code, code.upper())
+
     if active_shift != 'none':
         code = active_shift.split("_")[0]
-        names = {"m": "🌅 Ранок", "d": "☀️ День", "e": "🌙 Вечір", "x": "⚡ Екстра"}
-        name = names.get(code, code.upper())
-        kb.append([InlineKeyboardButton(text=f"🏁 {name} СТОП", callback_data=f"{code}_end")])
+        kb.append([InlineKeyboardButton(text=f"🏁 {pretty(code)} СТОП", callback_data=f"{code}_end")])
     else:
+        # Показуємо старт тільки наступної зміни по черзі (1 -> 2 -> 3)
         if 'm' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text="🌅 Ранок СТАРТ", callback_data="m_start")])
-        if 'd' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text="☀️ День СТАРТ", callback_data="d_start")])
-        if 'e' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text="🌙 Вечір СТАРТ", callback_data="e_start")])
+            kb.append([InlineKeyboardButton(text=f"{pretty('m')} СТАРТ", callback_data="m_start")])
+        elif 'd' not in completed_shifts:
+            kb.append([InlineKeyboardButton(text=f"{pretty('d')} СТАРТ", callback_data="d_start")])
+        elif 'e' not in completed_shifts:
+            kb.append([InlineKeyboardButton(text=f"{pretty('e')} СТАРТ", callback_data="e_start")])
 
-        # ⚡ Екстра: показуємо тільки якщо M/D/E вже закриті, і сама Екстра ще не закрита
+        # ⚡ Екстра: показуємо тільки якщо 1/2/3 вже закриті, і сама Екстра ще не закрита
         if {'m', 'd', 'e'}.issubset(completed_shifts) and ('x' not in completed_shifts):
-            kb.append([InlineKeyboardButton(text="⚡ Екстра СТАРТ", callback_data="x_start")])
+            kb.append([InlineKeyboardButton(text=f"{pretty('x')} СТАРТ", callback_data="x_start")])
 
     # Графік відключень доступний для всіх
     kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
