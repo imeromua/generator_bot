@@ -1,20 +1,46 @@
 import sqlite3
 import logging
 from datetime import datetime
-from database.models import DB_NAME, get_connection
+from database.models import get_connection
 
 # --- USER ---
 def register_user(user_id, name):
     with get_connection() as conn:
         conn.execute("INSERT OR REPLACE INTO users (user_id, full_name) VALUES (?, ?)", (user_id, name))
 
+
 def get_user(user_id):
     with get_connection() as conn:
         return conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
 
+
 def get_all_users():
     with get_connection() as conn:
         return conn.execute("SELECT user_id, full_name FROM users").fetchall()
+
+
+# --- UI (single window) ---
+def set_ui_message(user_id: int, chat_id: int, message_id: int):
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO user_ui (user_id, chat_id, message_id) VALUES (?,?,?)",
+            (int(user_id), int(chat_id), int(message_id))
+        )
+
+
+def get_ui_message(user_id: int):
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT chat_id, message_id FROM user_ui WHERE user_id = ?",
+            (int(user_id),)
+        ).fetchone()
+        return (row[0], row[1]) if row else None
+
+
+def clear_ui_message(user_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM user_ui WHERE user_id = ?", (int(user_id),))
+
 
 # --- PERSONNEL (mapping) ---
 def set_personnel_for_user(user_id: int, personnel_name: str | None):
@@ -28,10 +54,12 @@ def set_personnel_for_user(user_id: int, personnel_name: str | None):
             (int(user_id), str(personnel_name).strip())
         )
 
+
 def get_personnel_for_user(user_id: int) -> str | None:
     with get_connection() as conn:
         row = conn.execute("SELECT personnel_name FROM user_personnel WHERE user_id = ?", (int(user_id),)).fetchone()
         return row[0] if row else None
+
 
 def get_all_users_with_personnel():
     """Повертає список користувачів з прив'язкою, якщо є."""
@@ -46,6 +74,28 @@ def get_all_users_with_personnel():
         ).fetchall()
         return rows
 
+
+# --- PERSONNEL (list) ---
+def sync_personnel_from_sheet(personnel_list):
+    """Повністю оновлює список персоналу в базі на основі колонки AC з Таблиці."""
+    if personnel_list is None:
+        return
+
+    try:
+        with get_connection() as conn:
+            conn.execute("DELETE FROM personnel_names")
+            for name in personnel_list:
+                if name and str(name).strip():
+                    conn.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (str(name).strip(),))
+    except Exception as e:
+        logging.error(f"Помилка синхронізації персоналу: {e}")
+
+
+def get_personnel_names():
+    with get_connection() as conn:
+        return [r[0] for r in conn.execute("SELECT name FROM personnel_names ORDER BY name COLLATE NOCASE").fetchall()]
+
+
 # --- DRIVERS ---
 def add_driver(name):
     try:
@@ -59,9 +109,11 @@ def add_driver(name):
         logging.error(f"Помилка додавання водія: {e}")
         return False
 
+
 def get_drivers():
     with get_connection() as conn:
         return [r[0] for r in conn.execute("SELECT name FROM drivers").fetchall()]
+
 
 def sync_drivers_from_sheet(driver_list):
     """Повністю оновлює список водіїв у базі на основі списку з Таблиці."""
@@ -77,14 +129,17 @@ def sync_drivers_from_sheet(driver_list):
     except Exception as e:
         logging.error(f"Помилка синхронізації водіїв: {e}")
 
+
 def delete_driver(name):
     with get_connection() as conn:
         conn.execute("DELETE FROM drivers WHERE name = ?", (name,))
+
 
 # --- STATE & LOGS ---
 def set_state(key, value):
     with get_connection() as conn:
         conn.execute("UPDATE generator_state SET value = ? WHERE key = ?", (str(value), key))
+
 
 def get_state():
     with get_connection() as conn:
@@ -126,6 +181,7 @@ def get_state():
             "active_shift": active_shift
         }
 
+
 def get_today_completed_shifts():
     date_str = datetime.now().strftime("%Y-%m-%d")
     with get_connection() as conn:
@@ -138,6 +194,7 @@ def get_today_completed_shifts():
         if "_" in evt:
             completed.add(evt.split("_")[0])
     return completed
+
 
 def update_fuel(liters_delta):
     """Локальне паливо (state.current_fuel). Якщо таблиця еталон — бажано НЕ викликати це з хендлерів."""
@@ -156,6 +213,7 @@ def update_fuel(liters_delta):
     except Exception as e:
         logging.error(f"Помилка оновлення палива: {e}")
         return 0.0
+
 
 def add_log(event, user, val=None, driver=None, ts: str | None = None):
     ts_val = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -246,6 +304,7 @@ def get_unsynced():
     with get_connection() as conn:
         return conn.execute("SELECT * FROM logs WHERE is_synced = 0").fetchall()
 
+
 def mark_synced(ids):
     """Позначає записи як синхронізовані."""
     if not ids:
@@ -257,15 +316,17 @@ def mark_synced(ids):
     except Exception as e:
         logging.error(f"Помилка позначення синхронізованих: {e}")
 
+
 def get_logs_for_period(start_date, end_date):
     with get_connection() as conn:
         query = """
-            SELECT event_type, timestamp, user_name, value, driver_name 
-            FROM logs 
+            SELECT event_type, timestamp, user_name, value, driver_name
+            FROM logs
             WHERE timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
         """
         return conn.execute(query, (start_date + " 00:00:00", end_date + " 23:59:59")).fetchall()
+
 
 # --- MAINTENANCE ---
 def update_hours(h):
@@ -273,9 +334,11 @@ def update_hours(h):
         cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
         conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(cur + h),))
 
+
 def set_total_hours(new_val):
     with get_connection() as conn:
         conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(new_val),))
+
 
 def record_maintenance(action, admin):
     date = datetime.now().strftime("%Y-%m-%d")
@@ -286,6 +349,7 @@ def record_maintenance(action, admin):
             conn.execute("UPDATE generator_state SET value = ? WHERE key='last_oil_change'", (str(cur),))
         elif action == "spark":
             conn.execute("UPDATE generator_state SET value = ? WHERE key='last_spark_change'", (str(cur),))
+
 
 # --- SCHEDULE ---
 def toggle_schedule(date_str, hour):
@@ -298,11 +362,13 @@ def toggle_schedule(date_str, hour):
             conn.execute("INSERT INTO schedule (date, hour, is_off) VALUES (?, ?, 1)", (date_str, hour))
     return new_val
 
+
 def set_schedule_range(date_str, start_h, end_h):
     with get_connection() as conn:
         for h in range(start_h, end_h):
             if 0 <= h < 24:
                 conn.execute("INSERT OR REPLACE INTO schedule (date, hour, is_off) VALUES (?, ?, 1)", (date_str, h))
+
 
 def get_schedule(date_str):
     with get_connection() as conn:

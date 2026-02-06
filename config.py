@@ -10,11 +10,11 @@ def validate_env():
     """Перевіряє наявність обов'язкових змінних"""
     required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
     missing = []
-    
+
     for key in required:
         if not os.getenv(key):
             missing.append(key)
-    
+
     if missing:
         print("=" * 60)
         print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
@@ -52,7 +52,8 @@ KYIV = pytz.timezone(TIMEZONE)
 # --- ГРАФІК РОБОТИ ---
 WORK_START_TIME = os.getenv("WORK_START", "07:30")
 WORK_END_TIME = os.getenv("WORK_END", "20:30")
-MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:50")
+# ВАЖЛИВО: дефолт брифінгу = 07:30 (якщо BRIEF_TIME не задано в .env)
+MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:30")
 
 # --- ТЕХНІКА ---
 MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", "100"))

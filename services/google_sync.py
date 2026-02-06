@@ -262,7 +262,6 @@ def _import_initial_state_from_sheet(sheet):
             if cur_fuel <= 0.0:
                 if not _db_has_logs_for_date(today_str):
                     db.set_state("current_fuel", fuel_val)
-                    logging.info(f"✅ Імпорт стартового палива з таблиці: {fuel_val}л (рядок {row})")
 
         if moto_val is not None:
             try:
@@ -272,7 +271,6 @@ def _import_initial_state_from_sheet(sheet):
 
             if cur_total <= 0.0 or (moto_val > (cur_total + 0.05)):
                 db.set_total_hours(moto_val)
-                logging.info(f"✅ Імпорт мотогодин з таблиці: {moto_val:.2f} год (рядок {row})")
 
     except Exception as e:
         logging.error(f"❌ Помилка імпорту стартових значень: {e}", exc_info=True)
@@ -303,16 +301,23 @@ async def sync_loop():
 
             _import_initial_state_from_sheet(sheet)
 
-            # --- ВОДІЇ з таблиці ---
+            # --- ВОДІЇ з таблиці (AB=28) ---
             try:
                 drivers_raw = sheet.col_values(28)[2:]
                 drivers_clean = [d.strip() for d in drivers_raw if d.strip()]
-
                 if drivers_clean:
                     db.sync_drivers_from_sheet(drivers_clean)
-                    logging.info(f"✅ Синхронізовано {len(drivers_clean)} водіїв")
             except Exception as e:
                 logging.error(f"⚠️ Не вдалося прочитати список водіїв: {e}")
+
+            # --- ПЕРСОНАЛ з таблиці (AC=29) ---
+            try:
+                personnel_raw = sheet.col_values(29)[2:]
+                personnel_clean = [p.strip() for p in personnel_raw if p.strip()]
+                if personnel_clean:
+                    db.sync_personnel_from_sheet(personnel_clean)
+            except Exception as e:
+                logging.error(f"⚠️ Не вдалося прочитати список персоналу: {e}")
 
             logs = db.get_unsynced()
             if logs:
@@ -464,7 +469,7 @@ async def sync_loop():
                 if ids_to_mark:
                     db.mark_synced(ids_to_mark)
 
-            # ВАЖЛИВО: canonical sync робимо ПІСЛЯ записів у Sheet,
+            # canonical sync робимо ПІСЛЯ записів у Sheet,
             # щоб залишок у БД одразу підтягнувся після заправки/формул.
             _sync_canonical_state_from_sheet(sheet)
 

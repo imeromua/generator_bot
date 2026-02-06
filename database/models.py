@@ -3,9 +3,11 @@ import logging
 
 DB_NAME = "generator.db"
 
+
 def get_connection():
     """Повертає з'єднання з БД з налаштуваннями для async"""
     return sqlite3.connect(DB_NAME, check_same_thread=False, timeout=10)
+
 
 def init_db():
     conn = get_connection()
@@ -20,6 +22,12 @@ def init_db():
 
     # Прив'язка Telegram user_id -> ПІБ з колонки "ПЕРСОНАЛ"
     c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT)''')
+
+    # Список персоналу (імпортуємо з таблиці, колонка AC)
+    c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
+
+    # UI: "single window" — зберігаємо останнє повідомлення-дашборд
+    c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER)''')
 
     defaults = [
         ('total_hours', '0.0'),

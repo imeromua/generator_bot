@@ -17,20 +17,6 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-PERSONNEL_NAMES = [
-    "Вірко О. О.",
-    "Юзько О. С.",
-    "Галата Д. К.",
-    "Жумінська Т. В.",
-    "Явір А. В.",
-    "Андреєва О. Ю.",
-    "Гужва Є. В.",
-    "Молодець С. І.",
-    "Алімова Н. М.",
-    "Сухий Ю. Ф.",
-]
-
-
 class AddDriverForm(StatesGroup):
     name = State()
 
@@ -91,6 +77,18 @@ async def personnel_choose_user(cb: types.CallbackQuery):
         return await cb.answer("❌ Користувача не знайдено", show_alert=True)
 
     current = db.get_personnel_for_user(uid)
+    names = db.get_personnel_names()
+
+    if not names:
+        txt = (
+            f"👤 <b>{user[1]}</b>\n"
+            f"🆔 <code>{uid}</code>\n\n"
+            f"Поточна прив'язка: <b>{current or '—'}</b>\n\n"
+            f"⚠️ Список персоналу ще не завантажений.\n"
+            f"Перевірте, що в таблиці заповнена колонка AC (ПЕРСОНАЛ) і синхронізація працює."
+        )
+        kb = [[types.InlineKeyboardButton(text="🔙 Назад", callback_data="personnel_menu")]]
+        return await cb.message.edit_text(txt, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
 
     txt = (
         f"👤 <b>{user[1]}</b>\n"
@@ -100,7 +98,7 @@ async def personnel_choose_user(cb: types.CallbackQuery):
     )
 
     kb = []
-    for i, name in enumerate(PERSONNEL_NAMES):
+    for i, name in enumerate(names[:40]):
         kb.append([types.InlineKeyboardButton(text=name, callback_data=f"pers_set_{uid}_{i}")])
 
     kb.append([types.InlineKeyboardButton(text="🚫 Зняти прив'язку", callback_data=f"pers_clear_{uid}")])
@@ -118,11 +116,14 @@ async def personnel_set(cb: types.CallbackQuery):
         _, _, uid_s, idx_s = cb.data.split("_", 3)
         uid = int(uid_s)
         idx = int(idx_s)
-        name = PERSONNEL_NAMES[idx]
     except Exception:
         return await cb.answer("❌ Помилка призначення", show_alert=True)
 
-    db.set_personnel_for_user(uid, name)
+    names = db.get_personnel_names()
+    if idx < 0 or idx >= len(names):
+        return await cb.answer("⚠️ Список персоналу оновився. Відкрийте ще раз.", show_alert=True)
+
+    db.set_personnel_for_user(uid, names[idx])
     await cb.answer("✅ Призначено", show_alert=True)
     await personnel_choose_user(cb)
 
@@ -201,8 +202,11 @@ async def sched_edit(cb: types.CallbackQuery):
     try:
         await cb.message.edit_text(txt, reply_markup=schedule_grid(date_str, is_hot_edit))
     except TelegramBadRequest as e:
-        logger.warning(f"TelegramBadRequest при редагуванні графіка: {e}")
-        await cb.answer()
+        # нормальна ситуація при повторному натисканні тієї ж кнопки
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"TelegramBadRequest при редагуванні графіка: {e}")
+
+    await cb.answer()
 
 
 # --- 3. ГРАФІК: КЛІКЕР ---
@@ -222,8 +226,9 @@ async def tog_hour(cb: types.CallbackQuery):
 
         try:
             await cb.message.edit_reply_markup(reply_markup=schedule_grid(date_str, is_hot_edit))
-        except TelegramBadRequest:
-            pass
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e).lower():
+                raise
 
         await cb.answer()
     except Exception as e:

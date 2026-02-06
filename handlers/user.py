@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 
 import config
 import database.db_api as db
-from keyboards.builders import main_dashboard, drivers_list, back_to_main
+from keyboards.builders import main_dashboard, drivers_list
 from handlers.common import show_dash
 
 
@@ -88,17 +88,6 @@ def _fmt_range(start_h: int, end_h: int) -> str:
     s = f"{start_h:02d}:00"
     e = "24:00" if end_h == 24 else f"{end_h:02d}:00"
     return f"{s} - {e}"
-
-
-def _safe_delete(message: types.Message):
-    async def _inner():
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        except Exception:
-            pass
-    return _inner()
 
 
 _SHIFT_COLS = {
@@ -273,18 +262,22 @@ async def schedule_today(cb: types.CallbackQuery):
 
     now_status = "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now.hour, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
 
-    txt = f"📅 <b>Графік відключень на сьогодні</b> ({now.strftime('%d.%m.%Y')})\n\n"
+    banner = f"📅 <b>Графік відключень на сьогодні</b> ({now.strftime('%d.%m.%Y')})\n\n"
 
     if not ranges:
-        txt += "✅ Відключень не заплановано.\n\n"
+        banner += "✅ Відключень не заплановано.\n\n"
     else:
         for s, e in ranges:
-            txt += f"🔴 {_fmt_range(s, e)}\n"
-        txt += f"\n⏱ Сумарно без світла: <b>{total_off} год</b>\n\n"
+            banner += f"🔴 {_fmt_range(s, e)}\n"
+        banner += f"\n⏱ Сумарно без світла: <b>{total_off} год</b>\n\n"
 
-    txt += now_status
+    banner += now_status
 
-    await cb.message.answer(txt, reply_markup=back_to_main())
+    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    if not user:
+        return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
+
+    await show_dash(cb.message, user[0], user[1], banner=banner)
     await cb.answer()
 
 
@@ -293,12 +286,10 @@ async def schedule_today(cb: types.CallbackQuery):
 async def gen_start(cb: types.CallbackQuery):
     st = db.get_state()
 
-    # Персонал має бути призначений, бо в таблицю пишемо ПІБ з колонки "ПЕРСОНАЛ"
     operator_personnel = _get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
-    # 0) Перевірка таблиці (еталон) на відкриту зміну
     open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
     if open_shift:
         _sync_db_from_sheet_open_shift(open_shift, start_times)
@@ -309,11 +300,9 @@ async def gen_start(cb: types.CallbackQuery):
 
     shift_code = cb.data.split("_")[0]
 
-    # 1) Якщо в таблиці зміна вже закрита — блокуємо старт
     if shift_code in completed_sheet:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
-    # 2) Якщо в БД вже ON — блокуємо
     if st['status'] == 'ON':
         return await cb.answer(
             f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {st.get('active_shift', 'Невідома')})",
@@ -335,7 +324,6 @@ async def gen_start(cb: types.CallbackQuery):
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
-    # 4) Атомарний старт: перший виграє
     res = db.try_start_shift(cb.data, operator_personnel, now)
     if not res.get("ok"):
         if res.get("reason") == "already_on":
@@ -353,15 +341,8 @@ async def gen_start(cb: types.CallbackQuery):
     }
     pretty_name = names.get(cb.data, cb.data)
 
-    await _safe_delete(cb.message)
-
-    role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
-
-    await cb.message.answer(
-        f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}",
-        reply_markup=main_dashboard(role, cb.data, completed)
-    )
-
+    banner = f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
+    await show_dash(cb.message, user[0], user[1], banner=banner)
     await cb.answer()
 
 
@@ -377,7 +358,6 @@ async def gen_stop(cb: types.CallbackQuery):
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_")[0]
 
-    # 0) Перевірка таблиці: яка зміна відкрита
     open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
 
     if expected_code in completed_sheet:
@@ -444,27 +424,21 @@ async def gen_stop(cb: types.CallbackQuery):
 
     dur_hhmm = format_hours_hhmm(dur)
 
-    await _safe_delete(cb.message)
-
-    role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
-    completed = db.get_today_completed_shifts()
-
-    await cb.message.answer(
+    banner = (
         f"🏁 <b>Зміну закрито!</b>\n"
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
         f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
         f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
-        f"👤 {operator_personnel}",
-        reply_markup=main_dashboard(role, 'none', completed)
+        f"👤 {operator_personnel}"
     )
 
+    await show_dash(cb.message, user[0], user[1], banner=banner)
     await cb.answer()
 
 
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
-    # персонал має бути призначений (для журналу/відповідального)
     operator_personnel = _get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
@@ -472,8 +446,13 @@ async def refill_start(cb: types.CallbackQuery, state: FSMContext):
     drivers = db.get_drivers()
     if not drivers:
         return await cb.answer("⚠️ Спочатку додайте водіїв в адмін-панелі", show_alert=True)
+
+    # запам'ятовуємо повідомлення "вікна"
+    await state.update_data(ui_chat_id=cb.message.chat.id, ui_message_id=cb.message.message_id)
+
     await cb.message.edit_text("🚛 Хто привіз паливо?", reply_markup=drivers_list(drivers))
     await state.set_state(RefillForm.driver)
+    await cb.answer()
 
 
 @router.callback_query(RefillForm.driver, F.data.startswith("drv_"))
@@ -482,73 +461,88 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(
         f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято? (Напишіть цифру)",
-        reply_markup=back_to_main()
+        reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
     )
     await state.set_state(RefillForm.liters)
+    await cb.answer()
 
 
 @router.message(RefillForm.liters)
 async def refill_ask_receipt(msg: types.Message, state: FSMContext):
+    data = await state.get_data()
+    chat_id = int(data.get("ui_chat_id", msg.chat.id))
+    message_id = int(data.get("ui_message_id", 0))
+
     try:
-        liters_text = msg.text.replace(",", ".").strip()
+        liters_text = (msg.text or "").replace(",", ".").strip()
         liters = float(liters_text)
 
-        if liters <= 0:
-            return await msg.answer("❌ Кількість літрів має бути більше 0")
-
-        if liters > 500:
-            return await msg.answer("❌ Кількість літрів занадто велика (максимум 500л)")
+        if liters <= 0 or liters > 500:
+            raise ValueError
 
         await state.update_data(liters=liters)
-        await msg.answer("🧾 Введіть <b>номер чека</b>:", reply_markup=back_to_main())
+
+        if message_id:
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text="🧾 Введіть <b>номер чека</b>:",
+                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                )
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e).lower():
+                    raise
+
         await state.set_state(RefillForm.receipt)
-    except ValueError:
-        await msg.answer("❌ Будь ласка, введіть число (наприклад 50 або 50.5)")
+
+    except Exception:
+        if message_id:
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text="❌ Введіть кількість літрів числом (1..500).",
+                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                )
+            except Exception:
+                pass
 
 
 @router.message(RefillForm.receipt)
 async def refill_save(msg: types.Message, state: FSMContext):
-    receipt_num = msg.text.strip()
-
-    if not receipt_num:
-        return await msg.answer("❌ Номер чека не може бути порожнім")
-
-    if len(receipt_num) > 50:
-        return await msg.answer("❌ Номер чека занадто довгий (максимум 50 символів)")
+    receipt_num = (msg.text or "").strip()
+    if not receipt_num or len(receipt_num) > 50:
+        return
 
     data = await state.get_data()
-    liters = data['liters']
-    driver = data['driver']
+    liters = data.get('liters')
+    driver = data.get('driver')
 
     user = _ensure_user(msg.from_user.id, msg.from_user.first_name)
     if not user:
         await state.clear()
-        return await msg.answer("⚠️ Спочатку натисніть /start")
+        return
 
     operator_personnel = _get_operator_personnel_name(msg.from_user.id)
     if not operator_personnel:
         await state.clear()
-        return await msg.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.")
+        return
 
     log_val = f"{liters}|{receipt_num}"
     db.add_log("refill", operator_personnel, log_val, driver)
 
-    st = db.get_state()
-    try:
-        canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
-    except Exception:
-        canonical_fuel = 0.0
+    await state.clear()
 
-    await msg.answer(
-        f"✅ Записано: <b>{liters} л</b>\n"
+    banner = (
+        f"✅ <b>Паливо прийнято</b>\n"
+        f"🛢 Літри: <b>{float(liters):.1f}</b>\n"
         f"🧾 Чек: <b>{receipt_num}</b>\n"
-        f"🚛 Водій: {driver}\n"
-        f"👤 Відповідальний: <b>{operator_personnel}</b>\n"
-        f"ℹ️ Залишок (за таблицею): <b>{canonical_fuel:.1f} л</b>"
+        f"🚛 Водій: <b>{driver}</b>\n"
+        f"👤 Відповідальний: <b>{operator_personnel}</b>"
     )
 
-    await state.clear()
-    await show_dash(msg, msg.from_user.id, user[1])
+    await show_dash(msg, user[0], user[1], banner=banner)
 
 
 @router.callback_query(F.data == "home")
@@ -560,6 +554,5 @@ async def go_home(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
         return
 
-    await _safe_delete(cb.message)
     await show_dash(cb.message, user[0], user[1])
     await cb.answer()

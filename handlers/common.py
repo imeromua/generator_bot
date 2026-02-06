@@ -2,6 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 
 import asyncio
 
@@ -31,6 +32,46 @@ def format_hours_hhmm(hours_float: float) -> str:
     mm = total_minutes % 60
 
     return f"{sign}{hh:02d}:{mm:02d}"
+
+
+def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) -> tuple[str, types.InlineKeyboardMarkup]:
+    st = db.get_state()
+    role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
+
+    completed = db.get_today_completed_shifts()
+
+    status_icon = "🟢 ПРАЦЮЄ" if st['status'] == 'ON' else "💤 ВИМКНЕНО"
+
+    to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
+    to_service_hhmm = format_hours_hhmm(to_service)
+
+    current_fuel = st['current_fuel']
+    hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
+    hours_left_hhmm = format_hours_hhmm(hours_left)
+
+    import os
+    mode_mark = ""
+    if os.getenv("MODE") == "TEST":
+        mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
+
+    txt = (
+        f"{mode_mark}"
+        f"🔋 <b>Генератор:</b> {status_icon}\n"
+        f"⛽ Залишок палива: <b>{current_fuel:.1f} л</b>\n"
+        f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
+        f"👤 <b>Ви:</b> {user_name}\n"
+        f"🛢 До ТО: <b>{to_service_hhmm}</b>"
+    )
+
+    if st['status'] == 'ON':
+        txt += f"\n⏱ Старт був о: {st['start_time']}"
+
+    if banner:
+        txt = f"{banner}\n\n" + txt
+
+    markup = main_dashboard(role, st.get('active_shift', 'none'), completed)
+
+    return txt, markup
 
 
 @router.message(Command("start"))
@@ -65,43 +106,44 @@ async def process_name(msg: types.Message, state: FSMContext):
     await show_dash(msg, msg.from_user.id, msg.text)
 
 
-async def show_dash(msg: types.Message, user_id, user_name):
-    # Тягнемо еталонний залишок палива з таблиці, щоб /start одразу показував актуальне
+async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: str | None = None):
+    # Тягнемо еталонний залишок палива з таблиці, щоб дашборд показував актуальне
     try:
         from services.google_sync import sync_canonical_state_once
         await asyncio.to_thread(sync_canonical_state_once)
     except Exception:
         pass
 
-    st = db.get_state()
-    role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
+    txt, markup = _build_dash_text(user_id, user_name, banner=banner)
 
-    completed = db.get_today_completed_shifts()
+    # 1) Якщо це bot message (callback/екран) — редагуємо його
+    try:
+        await msg.edit_text(txt, reply_markup=markup)
+        try:
+            db.set_ui_message(user_id, msg.chat.id, msg.message_id)
+        except Exception:
+            pass
+        return
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e).lower():
+            return
+    except Exception:
+        pass
 
-    status_icon = "🟢 ПРАЦЮЄ" if st['status'] == 'ON' else "💤 ВИМКНЕНО"
+    # 2) Якщо редагувати не можна (наприклад /start) — видаляємо попередній дашборд та надсилаємо новий
+    try:
+        prev = db.get_ui_message(user_id)
+        if prev:
+            prev_chat_id, prev_msg_id = prev
+            try:
+                await msg.bot.delete_message(chat_id=prev_chat_id, message_id=prev_msg_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-    to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
-    to_service_hhmm = format_hours_hhmm(to_service)
-
-    current_fuel = st['current_fuel']
-    hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
-    hours_left_hhmm = format_hours_hhmm(hours_left)
-
-    import os
-    mode_mark = ""
-    if os.getenv("MODE") == "TEST":
-        mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
-
-    txt = (
-        f"{mode_mark}"
-        f"🔋 <b>Генератор:</b> {status_icon}\n"
-        f"⛽ Залишок палива: <b>{current_fuel:.1f} л</b>\n"
-        f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
-        f"👤 <b>Ви:</b> {user_name}\n"
-        f"🛢 До ТО: <b>{to_service_hhmm}</b>"
-    )
-
-    if st['status'] == 'ON':
-        txt += f"\n⏱ Старт був о: {st['start_time']}"
-
-    await msg.answer(txt, reply_markup=main_dashboard(role, st.get('active_shift', 'none'), completed))
+    sent = await msg.answer(txt, reply_markup=markup)
+    try:
+        db.set_ui_message(user_id, sent.chat.id, sent.message_id)
+    except Exception:
+        pass
