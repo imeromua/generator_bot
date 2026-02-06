@@ -42,6 +42,14 @@ def _ensure_user(user_id: int, first_name: str | None = None):
     return None
 
 
+def _get_operator_personnel_name(user_id: int) -> str | None:
+    """Повертає ПІБ з 'ПЕРСОНАЛ' для запису у таблицю. Якщо не призначено — None."""
+    try:
+        return db.get_personnel_for_user(user_id)
+    except Exception:
+        return None
+
+
 def format_hours_hhmm(hours_float: float) -> str:
     """Конвертує години (float) у формат ГГ:ХХ."""
     try:
@@ -236,6 +244,11 @@ def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
 async def gen_start(cb: types.CallbackQuery):
     st = db.get_state()
 
+    # Персонал має бути призначений, бо в таблицю пишемо ПІБ з колонки "ПЕРСОНАЛ"
+    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    if not operator_personnel:
+        return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
+
     # 0) Перевірка таблиці (еталон) на відкриту зміну
     open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
     if open_shift:
@@ -258,7 +271,6 @@ async def gen_start(cb: types.CallbackQuery):
             show_alert=True
         )
 
-    # 3) Також блокуємо, якщо вже є _end в логах (щоб зникало/не стартувало вдруге)
     completed = db.get_today_completed_shifts()
     if shift_code in completed:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
@@ -275,7 +287,7 @@ async def gen_start(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
     # 4) Атомарний старт: перший виграє
-    res = db.try_start_shift(cb.data, user[1], now)
+    res = db.try_start_shift(cb.data, operator_personnel, now)
     if not res.get("ok"):
         if res.get("reason") == "already_on":
             return await cb.answer(
@@ -297,7 +309,7 @@ async def gen_start(cb: types.CallbackQuery):
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
 
     await cb.message.answer(
-        f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {user[1]}",
+        f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}",
         reply_markup=main_dashboard(role, cb.data, completed)
     )
 
@@ -309,15 +321,17 @@ async def gen_start(cb: types.CallbackQuery):
 async def gen_stop(cb: types.CallbackQuery):
     st = db.get_state()
 
+    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    if not operator_personnel:
+        return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
+
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_")[0]
 
     # 0) Перевірка таблиці: яка зміна відкрита
     open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
 
-    # Якщо в таблиці вже закрито (є end) — блокуємо
     if expected_code in completed_sheet:
-        # узгодимо БД як вимкнено
         db.set_state('status', 'OFF')
         db.set_state('active_shift', 'none')
         return await cb.answer("⛔ Цю зміну вже закрито в таблиці.", show_alert=True)
@@ -333,7 +347,6 @@ async def gen_stop(cb: types.CallbackQuery):
 
     now = datetime.now(config.KYIV)
 
-    # Виправлення проблеми переходу через північ (беремо старт з БД)
     try:
         start_date_str = st.get('start_date', '')
         start_time_str = st['start_time']
@@ -358,8 +371,7 @@ async def gen_stop(cb: types.CallbackQuery):
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
-    # 1) Атомарний стоп
-    res = db.try_stop_shift(cb.data, user[1], now)
+    res = db.try_stop_shift(cb.data, operator_personnel, now)
     if not res.get("ok"):
         if res.get("reason") == "already_off":
             return await cb.answer("⛔ Вже вимкнено.", show_alert=True)
@@ -371,7 +383,6 @@ async def gen_stop(cb: types.CallbackQuery):
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
-    # Таблиця = еталон. Тут тільки розрахунок
     fuel_consumed = dur * config.FUEL_CONSUMPTION
     try:
         canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
@@ -379,7 +390,6 @@ async def gen_stop(cb: types.CallbackQuery):
         canonical_fuel = 0.0
     remaining_est = canonical_fuel - fuel_consumed
 
-    # синхронізуємо стан в БД
     db.set_state('status', 'OFF')
     db.set_state('active_shift', 'none')
 
@@ -395,7 +405,7 @@ async def gen_stop(cb: types.CallbackQuery):
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
         f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
         f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
-        f"👤 {user[1]}",
+        f"👤 {operator_personnel}",
         reply_markup=main_dashboard(role, 'none', completed)
     )
 
@@ -405,6 +415,11 @@ async def gen_stop(cb: types.CallbackQuery):
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
+    # персонал має бути призначений (для журналу/відповідального)
+    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    if not operator_personnel:
+        return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
+
     drivers = db.get_drivers()
     if not drivers:
         return await cb.answer("⚠️ Спочатку додайте водіїв в адмін-панелі", show_alert=True)
@@ -461,8 +476,13 @@ async def refill_save(msg: types.Message, state: FSMContext):
         await state.clear()
         return await msg.answer("⚠️ Спочатку натисніть /start")
 
+    operator_personnel = _get_operator_personnel_name(msg.from_user.id)
+    if not operator_personnel:
+        await state.clear()
+        return await msg.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.")
+
     log_val = f"{liters}|{receipt_num}"
-    db.add_log("refill", user[1], log_val, driver)
+    db.add_log("refill", operator_personnel, log_val, driver)
 
     st = db.get_state()
     try:
@@ -474,6 +494,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
         f"✅ Записано: <b>{liters} л</b>\n"
         f"🧾 Чек: <b>{receipt_num}</b>\n"
         f"🚛 Водій: {driver}\n"
+        f"👤 Відповідальний: <b>{operator_personnel}</b>\n"
         f"ℹ️ Залишок (за таблицею): <b>{canonical_fuel:.1f} л</b>"
     )
 

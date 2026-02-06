@@ -34,6 +34,7 @@ def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
+        [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
         [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
