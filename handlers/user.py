@@ -1,7 +1,9 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 from datetime import datetime, timedelta
+
 import config
 import database.db_api as db
 from keyboards.builders import main_dashboard, drivers_list, back_to_main
@@ -17,10 +19,24 @@ class RefillForm(StatesGroup):
     receipt = State()
 
 
+def _ensure_user(user_id: int, first_name: str | None = None):
+    """Повертає (user_id, full_name) з БД. Якщо адмін без запису — авто-реєструє."""
+    user = db.get_user(user_id)
+    if user:
+        return user
+
+    if user_id in config.ADMIN_IDS:
+        name = f"Admin {first_name or ''}".strip()
+        if not name:
+            name = f"Admin {user_id}"
+        db.register_user(user_id, name)
+        return db.get_user(user_id)
+
+    return None
+
+
 def format_hours_hhmm(hours_float: float) -> str:
-    """
-    Конвертує години (float) у формат ГГ:ХХ.
-    """
+    """Конвертує години (float) у формат ГГ:ХХ."""
     try:
         h = float(hours_float)
     except Exception:
@@ -34,6 +50,17 @@ def format_hours_hhmm(hours_float: float) -> str:
     mm = total_minutes % 60
 
     return f"{sign}{hh:02d}:{mm:02d}"
+
+
+def _safe_delete(message: types.Message):
+    async def _inner():
+        try:
+            await message.delete()
+        except TelegramBadRequest:
+            pass
+        except Exception:
+            pass
+    return _inner()
 
 
 # --- СТАРТ ---
@@ -58,7 +85,9 @@ async def gen_start(cb: types.CallbackQuery):
         if now.time() < start_time_limit:
             return await cb.answer(f"😴 Ще рано! Робота з {config.WORK_START_TIME}", show_alert=True)
 
-    user = db.get_user(cb.from_user.id)
+    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    if not user:
+        return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
     db.set_state('status', 'ON')
     db.set_state('active_shift', cb.data)
@@ -74,13 +103,15 @@ async def gen_start(cb: types.CallbackQuery):
     }
     pretty_name = names.get(cb.data, cb.data)
 
-    await cb.message.delete()
+    await _safe_delete(cb.message)
+
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
 
     await cb.message.answer(
         f"✅ <b>{pretty_name}</b> відкрито о {now.strftime('%H:%M')}\n👤 {user[1]}",
         reply_markup=main_dashboard(role, cb.data, completed)
     )
+
     await cb.answer()
 
 
@@ -116,19 +147,15 @@ async def gen_stop(cb: types.CallbackQuery):
         start_time_str = st['start_time']
 
         if start_date_str:
-            # Якщо є дата старту - використовуємо її
             start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
         else:
-            # Fallback: намагаємось визначити дату
             start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
-            # Якщо поточний час менший за час старту - значить перейшли через північ
             if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
                 start_dt = start_dt - timedelta(days=1)
 
         start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
         dur = (now - start_dt).total_seconds() / 3600.0
 
-        # Валідація: тривалість не може бути від'ємною або більше 24 годин
         if dur < 0 or dur > 24:
             dur = 0.0
 
@@ -137,7 +164,9 @@ async def gen_stop(cb: types.CallbackQuery):
         logging.error(f"Помилка розрахунку тривалості: {e}")
         dur = 0.0
 
-    user = db.get_user(cb.from_user.id)
+    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    if not user:
+        return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
     db.update_hours(dur)
     fuel_consumed = dur * config.FUEL_CONSUMPTION
@@ -149,7 +178,8 @@ async def gen_stop(cb: types.CallbackQuery):
 
     dur_hhmm = format_hours_hhmm(dur)
 
-    await cb.message.delete()
+    await _safe_delete(cb.message)
+
     role = 'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager'
     completed = db.get_today_completed_shifts()
 
@@ -161,6 +191,7 @@ async def gen_stop(cb: types.CallbackQuery):
         f"👤 {user[1]}",
         reply_markup=main_dashboard(role, 'none', completed)
     )
+
     await cb.answer()
 
 
@@ -218,9 +249,11 @@ async def refill_save(msg: types.Message, state: FSMContext):
     liters = data['liters']
     driver = data['driver']
 
-    user = db.get_user(msg.from_user.id)
+    user = _ensure_user(msg.from_user.id, msg.from_user.first_name)
+    if not user:
+        await state.clear()
+        return await msg.answer("⚠️ Спочатку натисніть /start")
 
-    # "Пакуємо" літри і чек в один рядок: "50.0|123456"
     log_val = f"{liters}|{receipt_num}"
 
     db.add_log("refill", user[1], log_val, driver)
@@ -240,6 +273,12 @@ async def refill_save(msg: types.Message, state: FSMContext):
 @router.callback_query(F.data == "home")
 async def go_home(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    user = db.get_user(cb.from_user.id)
-    await cb.message.delete()
+
+    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    if not user:
+        await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
+        return
+
+    await _safe_delete(cb.message)
     await show_dash(cb.message, user[0], user[1])
+    await cb.answer()
