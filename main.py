@@ -29,8 +29,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- 1. НАЛАШТУВАННЯ СЕСІЇ (Фікс тайм-ауту) ---
-session = AiohttpSession(timeout=60)
+# --- 1. НАЛАШТУВАННЯ СЕСІЇ (Збільшено timeout) ---
+session = AiohttpSession(timeout=120)  # Збільшено з 60 до 120
 
 # Ініціалізація бота з сесією
 bot = Bot(
@@ -122,12 +122,22 @@ async def main():
         logger.info("=" * 50)
         logger.info("Натисніть Ctrl+C для зупинки.")
 
-        # 5. Безпечне видалення вебхука
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            logger.info("✅ Webhook очищено")
-        except Exception as e:
-            logger.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
+        # 5. Безпечне видалення вебхука з retry
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Webhook очищено")
+                break
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⏳ Timeout при очищенні webhook, спроба {attempt + 2}/{max_retries}...")
+                    await asyncio.sleep(2)
+                else:
+                    logger.warning("⚠️ Не вдалося очистити webhook після 3 спроб (не критично)")
+            except Exception as e:
+                logger.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
+                break
 
         await dp.start_polling(bot)
         

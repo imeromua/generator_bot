@@ -1,46 +1,91 @@
 import os
-import sys
-import pytz
 from dotenv import load_dotenv
+import pytz
+import sys
 
 load_dotenv()
 
-def get_list(key):
-    val = os.getenv(key, "")
-    return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
+# --- ВАЛІДАЦІЯ КРИТИЧНИХ ПАРАМЕТРІВ ---
+def validate_env():
+    """Перевіряє наявність обов'язкових змінних"""
+    required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
+    missing = []
+    
+    for key in required:
+        if not os.getenv(key):
+            missing.append(key)
+    
+    if missing:
+        print("=" * 60)
+        print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
+        print("")
+        print("Відсутні обов'язкові параметри в .env:")
+        for key in missing:
+            print(f"  - {key}")
+        print("")
+        print("Створіть .env файл з усіма необхідними параметрами.")
+        print("=" * 60)
+        sys.exit(1)
 
-def get_bool(key):
-    return os.getenv(key, "OFF").upper() in ["ON", "TRUE"]
+# Виконуємо валідацію
+validate_env()
 
+# --- КЛЮЧІ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-IS_TEST_MODE = os.getenv("MODE", "PROD").upper() == "TEST"
+
+# --- НАЛАШТУВАННЯ ТАБЛИЦІ ---
+MODE = os.getenv("MODE", "TEST")
+IS_TEST_MODE = (MODE == "TEST")
 
 if IS_TEST_MODE:
-    SHEET_ID = os.getenv("SHEET_ID_TEST")
     print("⚠️  УВАГА: Бот запущено в ТЕСТОВОМУ режимі (SHEET_ID_TEST)")
+    SHEET_ID = os.getenv("SHEET_ID_TEST")
 else:
     SHEET_ID = os.getenv("SHEET_ID_PROD")
-    print("✅  Бот запущено в РОБОЧОМУ режимі (SHEET_ID_PROD)")
-
-if not SHEET_ID:
-    print("❌ ПОМИЛКА: Не знайдено SHEET_ID в .env!")
-    sys.exit(1)
 
 SHEET_NAME = os.getenv("SHEET_NAME", "ЛЮТИЙ")
 
-ADMIN_IDS = get_list("ADMINS")
-WHITELIST_IDS = get_list("USERS")
-REGISTRATION_OPEN = get_bool("BOT_STATUS")
-
+# --- ЧАС ТА МІСЦЕ ---
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Kyiv")
 KYIV = pytz.timezone(TIMEZONE)
 
+# --- ГРАФІК РОБОТИ ---
 WORK_START_TIME = os.getenv("WORK_START", "07:30")
 WORK_END_TIME = os.getenv("WORK_END", "20:30")
 MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:50")
 
+# --- ТЕХНІКА ---
 MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", "100"))
-# 👇 НОВЕ: Витрата палива
-FUEL_CONSUMPTION = float(os.getenv("FUEL_RATE", "1.5"))
 
-REMINDER_DELAY = 15
+# --- ДОСТУП ---
+ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
+BOT_STATUS = os.getenv("BOT_STATUS", "ON")
+REGISTRATION_OPEN = (BOT_STATUS == "ON")
+WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
+
+# --- ПАЛИВО ---
+FUEL_RATE_STR = os.getenv("FUEL_RATE")
+
+if FUEL_RATE_STR:
+    try:
+        FUEL_CONSUMPTION = float(FUEL_RATE_STR)
+    except ValueError:
+        print(f"⚠️  УВАГА: FUEL_RATE='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням")
+        FUEL_CONSUMPTION = 5.3
+else:
+    print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
+    FUEL_CONSUMPTION = 5.3
+
+# --- ІНФОРМАЦІЯ ПРО КОНФІГУРАЦІЮ ---
+if __name__ == "__main__":
+    print("\n" + "=" * 60)
+    print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
+    print("=" * 60)
+    print(f"Режим: {'TEST' if IS_TEST_MODE else 'PROD'}")
+    print(f"Таблиця: {SHEET_NAME}")
+    print(f"ID таблиці: {SHEET_ID}")
+    print(f"Адміни: {ADMIN_IDS}")
+    print(f"Витрата палива: {FUEL_CONSUMPTION} л/год")
+    print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")
+    print(f"Реєстрація: {'Відкрита' if REGISTRATION_OPEN else 'Закрита'}")
+    print("=" * 60 + "\n")
