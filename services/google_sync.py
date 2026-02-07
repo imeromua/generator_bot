@@ -223,6 +223,14 @@ def _sync_canonical_state_from_sheet(sheet):
 
 def sync_canonical_state_once():
     """Разове оновлення еталонного стану (Sheet -> БД). Викликається з /start для актуального дашборду."""
+    # Якщо ми вже у стійкому OFFLINE-режимі — не чіпаємо Google,
+    # щоб /start і дашборд не підвисали на таймаутах.
+    try:
+        if db.sheet_is_offline():
+            return
+    except Exception:
+        return
+
     if not config.SHEET_ID:
         db.sheet_mark_fail()
         db.sheet_check_offline()
