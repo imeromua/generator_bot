@@ -18,6 +18,7 @@ class CorrectionForm(StatesGroup):
     total_hours = State()
     last_oil = State()
     last_spark = State()
+    fuel_consumption = State()
 
 
 def _block_if_running() -> str | None:
@@ -43,12 +44,20 @@ async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
         return await cb.answer(block, show_alert=True)
 
     st = db.get_state()
+    
+    # Отримуємо витрату палива з state або config
+    try:
+        fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+    except Exception:
+        fuel_consumption = config.FUEL_CONSUMPTION
+    
     txt = (
         "🧮 <b>Корекція</b>\n\n"
         f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
         f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
         f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
         f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+        f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
     )
 
     await cb.message.edit_text(txt, reply_markup=correction_menu())
@@ -101,6 +110,12 @@ async def corr_fuel_save(msg: types.Message, state: FSMContext):
 
         await state.clear()
         st = db.get_state()
+        
+        try:
+            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        except Exception:
+            fuel_consumption = config.FUEL_CONSUMPTION
+        
         txt = (
             "✅ Збережено.\n\n"
             "🧮 <b>Корекція</b>\n\n"
@@ -108,11 +123,83 @@ async def corr_fuel_save(msg: types.Message, state: FSMContext):
             f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
             f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
             f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
         )
         await msg.answer(txt, reply_markup=correction_menu())
 
     except ValueError:
         await msg.answer("❌ Введіть число (наприклад 171.0)", reply_markup=back_to_corr())
+
+
+@router.callback_query(F.data == "corr_fuel_consumption_set")
+async def corr_fuel_consumption_set(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    block = _block_if_running()
+    if block:
+        return await cb.answer(block, show_alert=True)
+
+    st = db.get_state()
+    try:
+        cur = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+    except Exception:
+        cur = config.FUEL_CONSUMPTION
+    
+    await cb.message.edit_text(
+        f"📊 Поточна витрата: <b>{cur:.2f} л/год</b>\nВведіть нове значення (літрів на годину):",
+        reply_markup=back_to_corr(),
+    )
+    await state.set_state(CorrectionForm.fuel_consumption)
+    await cb.answer()
+
+
+@router.message(CorrectionForm.fuel_consumption)
+async def corr_fuel_consumption_save(msg: types.Message, state: FSMContext):
+    if msg.from_user.id not in config.ADMIN_IDS:
+        await state.clear()
+        return await msg.answer("⛔ Тільки для адмінів")
+
+    block = _block_if_running()
+    if block:
+        await state.clear()
+        return await msg.answer(block)
+
+    try:
+        val_text = (msg.text or "").replace(",", ".").strip()
+        val = float(val_text)
+
+        if val <= 0:
+            return await msg.answer("❌ Значення має бути більше 0", reply_markup=back_to_corr())
+        if val > 100:
+            return await msg.answer("❌ Значення занадто велике (максимум 100)", reply_markup=back_to_corr())
+
+        db.set_state("fuel_consumption", str(val))
+        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
+        db.add_log("corr_fuel_consumption_set", actor, val=str(val))
+        logger.info(f"📊 {actor} встановив витрату палива: {val} л/год")
+
+        await state.clear()
+        st = db.get_state()
+        
+        try:
+            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        except Exception:
+            fuel_consumption = config.FUEL_CONSUMPTION
+        
+        txt = (
+            "✅ Збережено.\n\n"
+            "🧮 <b>Корекція</b>\n\n"
+            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
+            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
+            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
+            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
+        )
+        await msg.answer(txt, reply_markup=correction_menu())
+
+    except ValueError:
+        await msg.answer("❌ Введіть число (наприклад 0.8)", reply_markup=back_to_corr())
 
 
 @router.callback_query(F.data == "corr_total_hours_set")
@@ -161,6 +248,12 @@ async def corr_total_hours_save(msg: types.Message, state: FSMContext):
 
         await state.clear()
         st = db.get_state()
+        
+        try:
+            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        except Exception:
+            fuel_consumption = config.FUEL_CONSUMPTION
+        
         txt = (
             "✅ Збережено.\n\n"
             "🧮 <b>Корекція</b>\n\n"
@@ -168,6 +261,7 @@ async def corr_total_hours_save(msg: types.Message, state: FSMContext):
             f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
             f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
             f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
         )
         await msg.answer(txt, reply_markup=correction_menu())
 
@@ -221,6 +315,12 @@ async def corr_last_oil_save(msg: types.Message, state: FSMContext):
 
         await state.clear()
         st = db.get_state()
+        
+        try:
+            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        except Exception:
+            fuel_consumption = config.FUEL_CONSUMPTION
+        
         txt = (
             "✅ Збережено.\n\n"
             "🧮 <b>Корекція</b>\n\n"
@@ -228,6 +328,7 @@ async def corr_last_oil_save(msg: types.Message, state: FSMContext):
             f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
             f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
             f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
         )
         await msg.answer(txt, reply_markup=correction_menu())
 
@@ -281,6 +382,12 @@ async def corr_last_spark_save(msg: types.Message, state: FSMContext):
 
         await state.clear()
         st = db.get_state()
+        
+        try:
+            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        except Exception:
+            fuel_consumption = config.FUEL_CONSUMPTION
+        
         txt = (
             "✅ Збережено.\n\n"
             "🧮 <b>Корекція</b>\n\n"
@@ -288,6 +395,7 @@ async def corr_last_spark_save(msg: types.Message, state: FSMContext):
             f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
             f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
             f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
         )
         await msg.answer(txt, reply_markup=correction_menu())
 
