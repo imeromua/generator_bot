@@ -211,6 +211,26 @@ def get_today_completed_shifts():
     return completed
 
 
+def get_last_logs(limit: int = 15):
+    """Повертає останні N подій (новіші -> старіші)."""
+    try:
+        lim = int(limit)
+    except Exception:
+        lim = 15
+
+    if lim <= 0:
+        lim = 15
+
+    with get_connection() as conn:
+        query = """
+            SELECT event_type, timestamp, user_name, value, driver_name
+            FROM logs
+            ORDER BY id DESC
+            LIMIT ?
+        """
+        return conn.execute(query, (lim,)).fetchall()
+
+
 def update_fuel(liters_delta):
     """Локальне паливо (state.current_fuel). Якщо таблиця еталон — бажано НЕ викликати це з хендлерів."""
     try:
