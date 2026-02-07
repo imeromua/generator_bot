@@ -1,237 +1,22 @@
 import asyncio
-import gspread
 import logging
-import os
-import re
-import threading
-import time
-from gspread.utils import rowcol_to_a1
-from google.oauth2.service_account import Credentials
-from datetime import datetime, date, timedelta
+
+import gspread
 
 import database.db_api as db
-import database.models as db_models
 import config
-from utils.sheets_dates import find_row_by_date_in_column_a
+
 from utils.sheets_guard import sheets_forced_offline
-from services.sheets_sync.logs_tab import ensure_logs_worksheet, ensure_logs_header, upsert_log_row
-from services.sheets_sync.refill import update_refill_aggregates_for_date
+
+from services.google_sync_parts.client import validate_sync_prereqs, make_client, open_spreadsheet, open_main_worksheet
+from services.google_sync_parts.offline import should_skip_offline_probe
+from services.google_sync_parts.canonical import sync_canonical_state_once
+from services.google_sync_parts.sync_cycle import run_sync_cycle
 
 logging.basicConfig(level=logging.INFO)
 
-# --- Canonical sync cache (avoid hitting Google Sheet on every dashboard open) ---
-_CANONICAL_SYNC_LOCK = threading.Lock()
-_LAST_CANONICAL_SYNC_TS = 0.0
-_CANONICAL_SYNC_TTL_SECONDS = 30
 
-# --- Offline probe (avoid hammering Sheets when offline) ---
-_OFFLINE_PROBE_LOCK = threading.Lock()
-_LAST_OFFLINE_PROBE_TS = 0.0
-_OFFLINE_PROBE_INTERVAL_SECONDS = 5 * 60
-
-
-
-def _parse_float(val):
-    if val is None:
-        return None
-    s = str(val).strip()
-    if not s:
-        return None
-    s = s.replace(" ", "").replace("\u00a0", "").replace(",", ".")
-    m = re.search(r"-?\d+(\.\d+)?", s)
-    if not m:
-        return None
-    try:
-        return float(m.group(0))
-    except Exception:
-        return None
-
-
-def _parse_motohours_to_hours(val):
-    """Парсить мотогодини з Sheet у float годин. Підтримує 'HH:MM(:SS)' та числа."""
-    if val is None:
-        return None
-
-    s = str(val).strip()
-    if not s:
-        return None
-
-    if ":" in s:
-        parts = s.split(":")
-        try:
-            if len(parts) == 2:
-                hh = int(parts[0])
-                mm = int(parts[1])
-                return float(hh) + (float(mm) / 60.0)
-            if len(parts) == 3:
-                hh = int(parts[0])
-                mm = int(parts[1])
-                ss = int(parts[2])
-                return float(hh) + (float(mm) / 60.0) + (float(ss) / 3600.0)
-        except Exception:
-            return None
-
-    f = _parse_float(s)
-    if f is None:
-        return None
-
-    if 1.0 < f < 31.0 and (f * 24.0) > 100.0:
-        return f * 24.0
-
-    return f
-
-
-def _db_has_logs_for_date(date_str: str) -> bool:
-    try:
-        with db_models.get_connection() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM logs WHERE timestamp LIKE ? LIMIT 1",
-                (f"{date_str}%",)
-            ).fetchone()
-            return row is not None
-    except Exception as e:
-        logging.error(f"⚠️ Не вдалося перевірити логи за дату {date_str}: {e}")
-        return False
-
-
-def _read_canonical_fuel_for_row(sheet, row: int) -> float | None:
-    """Таблиця = еталон. Беремо паливо з найактуальнішої колонки: O(15) -> M(13) -> K(11)."""
-    try:
-        evening = _parse_float(sheet.cell(row, 15).value)  # O
-        if evening is not None:
-            return evening
-    except Exception:
-        pass
-
-    try:
-        remaining_mid = _parse_float(sheet.cell(row, 13).value)  # M
-        if remaining_mid is not None:
-            return remaining_mid
-    except Exception:
-        pass
-
-    try:
-        morning = _parse_float(sheet.cell(row, 11).value)  # K
-        if morning is not None:
-            return morning
-    except Exception:
-        pass
-
-    return None
-
-
-def _sync_canonical_state_from_sheet(sheet):
-    """Підтягуємо еталонні значення з таблиці в БД."""
-    try:
-        today = datetime.now(config.KYIV).date()
-        today_str = today.strftime("%Y-%m-%d")
-
-        row = find_row_by_date_in_column_a(sheet, today, config.SHEET_NAME)
-        if not row:
-            logging.warning(f"⚠️ Canonical sync: дата {today_str} не знайдена в колонці A")
-            return
-
-        fuel_val = _read_canonical_fuel_for_row(sheet, row)
-        if fuel_val is not None:
-            db.set_state("current_fuel", fuel_val)
-
-        moto_raw = sheet.cell(row, 17).value
-        moto_val = _parse_motohours_to_hours(moto_raw)
-        if moto_val is not None:
-            db.set_total_hours(moto_val)
-
-    except Exception as e:
-        logging.error(f"❌ Помилка canonical sync: {e}", exc_info=True)
-
-
-def sync_canonical_state_once():
-    """Разове оновлення еталонного стану (Sheet -> БД). Викликається з /start для актуального дашборду."""
-    # Якщо ми вже у стійкому OFFLINE-режимі — не чіпаємо Google,
-    # щоб /start і дашборд не підвисали на таймаутах.
-    try:
-        if db.sheet_is_offline():
-            return
-    except Exception:
-        return
-
-    if not config.SHEET_ID:
-        db.sheet_mark_fail()
-        db.sheet_check_offline()
-        return
-    if not os.path.exists("service_account.json"):
-        db.sheet_mark_fail()
-        db.sheet_check_offline()
-        return
-
-    global _LAST_CANONICAL_SYNC_TS
-
-    now_ts = time.monotonic()
-    with _CANONICAL_SYNC_LOCK:
-        if (now_ts - _LAST_CANONICAL_SYNC_TS) < _CANONICAL_SYNC_TTL_SECONDS:
-            return
-        _LAST_CANONICAL_SYNC_TS = now_ts
-
-    try:
-        scopes = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
-
-        db.sheet_mark_ok()
-        _sync_canonical_state_from_sheet(sheet)
-
-    except Exception as e:
-        # Дозволяємо швидку повторну спробу при падінні (не кешуємо помилку)
-        with _CANONICAL_SYNC_LOCK:
-            _LAST_CANONICAL_SYNC_TS = 0.0
-        db.sheet_mark_fail()
-        db.sheet_check_offline()
-        logging.error(f"❌ sync_canonical_state_once error: {e}")
-
-
-def _import_initial_state_from_sheet(sheet):
-    """Одноразовий імпорт (fallback) стартових значень на сьогодні."""
-    try:
-        today = datetime.now(config.KYIV).date()
-        today_str = today.strftime("%Y-%m-%d")
-
-        row = find_row_by_date_in_column_a(sheet, today, config.SHEET_NAME)
-        if not row:
-            logging.warning(f"⚠️ Не можу імпортувати стартові значення: дата {today_str} не знайдена в колонці A")
-            return
-
-        fuel_raw = sheet.cell(row, 11).value
-        moto_raw = sheet.cell(row, 17).value
-
-        fuel_val = _parse_float(fuel_raw)
-        moto_val = _parse_motohours_to_hours(moto_raw)
-
-        state = db.get_state()
-
-        if fuel_val is not None:
-            try:
-                cur_fuel = float(state.get("current_fuel", 0.0) or 0.0)
-            except Exception:
-                cur_fuel = 0.0
-
-            if cur_fuel <= 0.0:
-                if not _db_has_logs_for_date(today_str):
-                    db.set_state("current_fuel", fuel_val)
-
-        if moto_val is not None:
-            try:
-                cur_total = float(state.get("total_hours", 0.0) or 0.0)
-            except Exception:
-                cur_total = 0.0
-
-            if cur_total <= 0.0 or (moto_val > (cur_total + 0.05)):
-                db.set_total_hours(moto_val)
-
-    except Exception as e:
-        logging.error(f"❌ Помилка імпорту стартових значень: {e}", exc_info=True)
+__all__ = ["sync_loop", "sync_canonical_state_once"]
 
 
 async def sync_loop():
@@ -242,15 +27,13 @@ async def sync_loop():
         db.sheet_check_offline()
         return
 
-    if not os.path.exists("service_account.json"):
+    if not validate_sync_prereqs():
         logging.error("❌ Файл service_account.json не знайдено! Синхронізацію вимкнено.")
         db.sheet_mark_fail()
         db.sheet_check_offline()
         return
 
     print(f"🚀 Google Sync запущено. Таблиця: {config.SHEET_NAME}")
-
-    global _LAST_OFFLINE_PROBE_TS
 
     while True:
         try:
@@ -263,167 +46,15 @@ async def sync_loop():
                 pass
 
             # Авто OFFLINE: робимо пробу раз на N хвилин, щоб можна було відновитись.
-            try:
-                if db.sheet_is_offline():
-                    now_probe = time.monotonic()
-                    with _OFFLINE_PROBE_LOCK:
-                        if (now_probe - _LAST_OFFLINE_PROBE_TS) < _OFFLINE_PROBE_INTERVAL_SECONDS:
-                            await asyncio.sleep(60)
-                            continue
-                        _LAST_OFFLINE_PROBE_TS = now_probe
-            except Exception:
-                pass
+            if should_skip_offline_probe():
+                await asyncio.sleep(60)
+                continue
 
-            scopes = [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
-            client = gspread.authorize(creds)
+            client = make_client()
+            ss = open_spreadsheet(client)
+            sheet = open_main_worksheet(ss)
 
-            ss = client.open_by_key(config.SHEET_ID)
-
-            sheet = ss.worksheet(config.SHEET_NAME)
-            logs_ws = ensure_logs_worksheet(ss)
-            ensure_logs_header(logs_ws)
-
-            db.sheet_mark_ok()
-
-            _import_initial_state_from_sheet(sheet)
-
-            # --- ВОДІЇ з таблиці (AB=28) ---
-            try:
-                drivers_raw = sheet.col_values(28)[2:]
-                drivers_clean = [d.strip() for d in drivers_raw if d.strip()]
-                if drivers_clean:
-                    db.sync_drivers_from_sheet(drivers_clean)
-            except Exception as e:
-                logging.error(f"⚠️ Не вдалося прочитати список водіїв: {e}")
-
-            # --- ПЕРСОНАЛ з таблиці (AC=29) ---
-            try:
-                personnel_raw = sheet.col_values(29)[2:]
-                personnel_clean = [p.strip() for p in personnel_raw if p.strip()]
-                if personnel_clean:
-                    db.sync_personnel_from_sheet(personnel_clean)
-            except Exception as e:
-                logging.error(f"⚠️ Не вдалося прочитати список персоналу: {e}")
-
-            logs = db.get_unsynced()
-            if logs:
-                ids_to_mark = []
-                date_row_cache = {}
-
-                for l in logs:
-                    lid, ltype, ltime, luser, lval, ldriver, _ = l
-
-                    try:
-                        log_date_str = (ltime or "").split(" ")[0]
-                        log_time_hhmm = (ltime or "").split(" ")[1][:5]
-                    except Exception:
-                        log_date_str = ""
-                        log_time_hhmm = ""
-
-                    # 1) Запис у ОКРЕМУ вкладку журналу — idempotent
-                    if logs_ws:
-                        try:
-                            upsert_log_row(
-                                logs_ws,
-                                lid,
-                                ltime or "",
-                                ltype or "",
-                                luser or "",
-                                lval or "",
-                                ldriver or "",
-                            )
-                        except Exception as e:
-                            logging.error(f"❌ Logs-tab upsert error lid={lid}: {e}")
-                            # якщо не змогли записати в журнал — не позначаємо synced
-                            continue
-
-                    # 2) Оновлення ОСНОВНОЇ вкладки (як було), але refill робимо idempotent
-                    if log_date_str:
-                        try:
-                            log_date_obj = datetime.strptime(log_date_str, "%Y-%m-%d").date()
-                        except Exception:
-                            log_date_obj = None
-
-                        if log_date_obj is not None:
-                            if log_date_str not in date_row_cache:
-                                date_row_cache[log_date_str] = find_row_by_date_in_column_a(sheet, log_date_obj, config.SHEET_NAME)
-
-                            r = date_row_cache.get(log_date_str)
-
-                            # REFILL: агрегуємо (може бути декілька заправок)
-                            if ltype == "refill":
-                                try:
-                                    if r:
-                                        update_refill_aggregates_for_date(sheet, r, log_date_str)
-                                    ids_to_mark.append(lid)
-                                except Exception as e:
-                                    logging.error(f"❌ Refill sync error lid={lid}: {e}")
-                                continue
-
-                            # START/END: часи змін пишемо як раніше
-                            col = None
-                            user_col = None
-
-                            if ltype == "m_start":
-                                col = 2
-                                user_col = 19
-                            elif ltype == "m_end":
-                                col = 3
-                                user_col = 20
-                            elif ltype == "d_start":
-                                col = 4
-                                user_col = 21
-                            elif ltype == "d_end":
-                                col = 5
-                                user_col = 22
-                            elif ltype == "e_start":
-                                col = 6
-                                user_col = 23
-                            elif ltype == "e_end":
-                                col = 7
-                                user_col = 24
-                            elif ltype == "x_start":
-                                col = 8
-                                user_col = 25
-                            elif ltype == "x_end":
-                                col = 9
-                                user_col = 26
-
-                            if col and r:
-                                try:
-                                    sheet.update(
-                                        range_name=rowcol_to_a1(r, col),
-                                        values=[[log_time_hhmm]],
-                                        value_input_option='USER_ENTERED'
-                                    )
-
-                                    if user_col and luser:
-                                        sheet.update(
-                                            range_name=rowcol_to_a1(r, user_col),
-                                            values=[[luser]],
-                                            value_input_option='RAW'
-                                        )
-
-                                except Exception as e:
-                                    logging.error(f"❌ Event sync error lid={lid}: {e}")
-
-                            # навіть якщо рядок дати не знайдений — журнал подій вже записали
-                            ids_to_mark.append(lid)
-
-                    else:
-                        # без дати — все одно записали у журнал
-                        ids_to_mark.append(lid)
-
-                if ids_to_mark:
-                    db.mark_synced(ids_to_mark)
-
-            # canonical sync робимо ПІСЛЯ записів у Sheet,
-            # щоб залишок у БД одразу підтягнувся після заправки/формул.
-            _sync_canonical_state_from_sheet(sheet)
+            run_sync_cycle(ss, sheet)
 
         except gspread.exceptions.APIError as e:
             db.sheet_mark_fail()
