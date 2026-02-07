@@ -10,7 +10,10 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import StateFilter
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from redis.asyncio import Redis
 
 # Налаштування логування (має бути якомога раніше)
 logging.basicConfig(
@@ -159,7 +162,18 @@ def build_dispatcher() -> Dispatcher:
     - підключаємо routers
     Це важливо, щоб не отримувати: "Router is already attached..."
     """
-    dp = Dispatcher()
+
+    storage = MemoryStorage()
+    if getattr(config, "REDIS_ENABLED", False):
+        try:
+            redis = Redis.from_url(getattr(config, "REDIS_URL", "redis://localhost:6379/0"))
+            storage = RedisStorage(redis=redis)
+            logger.info("🧠 FSM storage: Redis")
+        except Exception as e:
+            logger.error(f"❌ Не вдалося підключити Redis FSM storage: {e}. Використовую MemoryStorage")
+            storage = MemoryStorage()
+
+    dp = Dispatcher(storage=storage)
 
     logger.info("🛡 Підключення error handler...")
     dp.errors.register(global_error_handler)

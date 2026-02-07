@@ -7,6 +7,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
+
+
 # --- ВАЛІДАЦІЯ КРИТИЧНИХ ПАРАМЕТРІВ ---
 def validate_env():
     """Перевіряє наявність обов'язкових змінних.
@@ -16,6 +23,14 @@ def validate_env():
     """
 
     required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
+
+    db_backend = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
+    if db_backend == "postgres":
+        required.append("POSTGRES_DSN")
+
+    if _env_bool("REDIS_ENABLED", False):
+        required.append("REDIS_URL")
+
     missing = [key for key in required if not os.getenv(key)]
 
     if missing:
@@ -33,6 +48,18 @@ def validate_env():
 
 # --- КЛЮЧІ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# --- DB BACKEND ---
+DB_BACKEND = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
+SQLITE_PATH = (os.getenv("SQLITE_PATH", "generator.db") or "generator.db").strip()
+POSTGRES_DSN = (os.getenv("POSTGRES_DSN", "") or "").strip()
+# Admin DSN потрібен для автосоздання БД (CREATE DATABASE) якщо її ще немає.
+# Якщо не задано, бот спробує створити БД через звичайний DSN (може не мати прав).
+POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
+
+# --- REDIS ---
+REDIS_ENABLED = _env_bool("REDIS_ENABLED", False)
+REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
 
 # --- НАЛАШТУВАННЯ ТАБЛИЦІ ---
 MODE = os.getenv("MODE", "TEST")
@@ -104,6 +131,13 @@ if __name__ == "__main__":
     print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
     print("=" * 60)
     print(f"Режим: {'TEST' if IS_TEST_MODE else 'PROD'}")
+    print(f"DB backend: {DB_BACKEND}")
+    if DB_BACKEND == "sqlite":
+        print(f"SQLite path: {SQLITE_PATH}")
+    if DB_BACKEND == "postgres":
+        print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
+        print(f"Postgres admin DSN: {'(set)' if bool(POSTGRES_ADMIN_DSN) else '(missing)'}")
+    print(f"Redis enabled: {REDIS_ENABLED}")
     print(f"Таблиця: {SHEET_NAME}")
     print(f"ID таблиці: {SHEET_ID}")
     print(f"Вкладка логів: {LOGS_SHEET_NAME}")

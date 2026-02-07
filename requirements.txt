@@ -8,3 +8,7 @@ python-dotenv
 pytz
 pandas
 openpyxl
+
+# --- DB / cache backends ---
+psycopg[binary]>=3.1
+redis>=5.0
