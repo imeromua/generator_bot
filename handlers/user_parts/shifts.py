@@ -235,20 +235,18 @@ async def gen_stop(cb: types.CallbackQuery):
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
+    # FIX #7: Витрати палива обчислюються з логів при експорті/імпорті
+    # В handler НІКОЛИ не треба міняти current_fuel вручну!
+    # Обчислюємо тільки для відображення
     fuel_consumed = dur * config.FUEL_CONSUMPTION
 
-    # OFFLINE: ведемо локальний облік палива та мотогодин
-    if db.sheet_is_offline():
-        try:
-            db.update_fuel(-float(fuel_consumed or 0.0))
-        except Exception:
-            pass
-        try:
-            db.update_hours(float(dur or 0.0))
-        except Exception:
-            pass
+    # Оновлюємо мотогодини (це правильно, бо вони не обчислюються з логів)
+    try:
+        db.update_hours(float(dur or 0.0))
+    except Exception:
+        pass
 
-    # Оновлюємо стан після закриття/обліку
+    # Оновлюємо стан після закриття
     try:
         st = db.get_state()
     except Exception:
@@ -259,10 +257,8 @@ async def gen_stop(cb: types.CallbackQuery):
     except Exception:
         canonical_fuel = 0.0
 
-    if db.sheet_is_offline():
-        remaining_est = canonical_fuel
-    else:
-        remaining_est = canonical_fuel - fuel_consumed
+    # Відображаємо очікуваний залишок (тільки для UI)
+    remaining_est = canonical_fuel - fuel_consumed
 
     dur_hhmm = format_hours_hhmm(dur)
 
