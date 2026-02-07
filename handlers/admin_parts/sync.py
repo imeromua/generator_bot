@@ -26,6 +26,14 @@ def _import_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+def _export_confirm_kb() -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="✅ Підтверджую експорт", callback_data="sync_export_execute")],
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="sync_menu")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
 @router.callback_query(F.data == "sync_menu")
 async def show_sync_menu(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -39,6 +47,7 @@ async def show_sync_menu(cb: types.CallbackQuery):
         "📤 <b>Експорт</b> — записує дані з БД у Sheets (A-AC + вкладка журналу)\n\n"
         f"🗂 Вкладка журналу подій: <b>{logs_title}</b>\n\n"
         "⚠️ Імпорт повністю очищає БД перед завантаженням (потрібне підтвердження).\n"
+        "⚠️ Експорт перезаписує вкладку журналу подій (потрібне підтвердження).\n"
     )
     await cb.message.edit_text(txt, reply_markup=sync_menu())
     await cb.answer()
@@ -63,7 +72,7 @@ async def sync_import_confirm(cb: types.CallbackQuery):
         "• Повністю очистить БД\n"
         "• Завантажить дані з Google Sheets\n\n"
         "❌ <b>Цю операцію НЕМОЖЛИВО ВІДМІНИТИ!</b>\n\n"
-        "Рекомендація: перед імпортом зробіть експорт як резервну копію." 
+        "Рекомендація: перед імпортом зробіть експорт як резервну копію."
     )
 
     await cb.message.edit_text(txt, reply_markup=_import_confirm_kb())
@@ -100,7 +109,26 @@ async def sync_import_execute(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "sync_export")
-async def sync_export(cb: types.CallbackQuery):
+async def sync_export_confirm(cb: types.CallbackQuery):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    logs_title = _logs_title()
+
+    txt = (
+        "⚠️ <b>Підтвердження експорту</b>\n\n"
+        "Експорт зробить наступне:\n"
+        "• Оновить основну вкладку (A-AC)\n"
+        f"• Перезапише вкладку журналу подій: <b>{logs_title}</b>\n\n"
+        "Це безпечно для БД, але може затерти ручні правки у вкладці журналу."
+    )
+
+    await cb.message.edit_text(txt, reply_markup=_export_confirm_kb())
+    await cb.answer()
+
+
+@router.callback_query(F.data == "sync_export_execute")
+async def sync_export_execute(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
