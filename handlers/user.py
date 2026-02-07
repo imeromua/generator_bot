@@ -144,6 +144,12 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
     if event_type == "fuel_ordered":
         return f"• {ts_pretty} — ✅ Паливо замовлено ({who})"
 
+    if event_type == "sheet_force_offline":
+        return f"• {ts_pretty} — 🔌 Google Sheets: <b>OFFLINE (примусово)</b> ({who})"
+
+    if event_type == "sheet_force_online":
+        return f"• {ts_pretty} — 🌐 Google Sheets: <b>OFFLINE вимкнено</b> ({who})"
+
     val = (value or "").strip()
     tail = f" — {val}" if val else ""
     return f"• {ts_pretty} — <b>{event_type}</b>{tail} ({who})"
