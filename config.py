@@ -1,19 +1,22 @@
 import os
-from dotenv import load_dotenv
-import pytz
 import sys
+
+import pytz
+from dotenv import load_dotenv
 
 load_dotenv()
 
+
 # --- ВАЛІДАЦІЯ КРИТИЧНИХ ПАРАМЕТРІВ ---
 def validate_env():
-    """Перевіряє наявність обов'язкових змінних"""
-    required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
-    missing = []
+    """Перевіряє наявність обов'язкових змінних.
 
-    for key in required:
-        if not os.getenv(key):
-            missing.append(key)
+    Важливо: НЕ викликається автоматично при імпорті config.
+    Викликайте з точки входу (main.py) перед запуском бота.
+    """
+
+    required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
+    missing = [key for key in required if not os.getenv(key)]
 
     if missing:
         print("=" * 60)
@@ -27,8 +30,6 @@ def validate_env():
         print("=" * 60)
         sys.exit(1)
 
-# Виконуємо валідацію
-validate_env()
 
 # --- КЛЮЧІ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")

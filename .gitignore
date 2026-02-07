@@ -1,7 +1,6 @@
 # Конфіденційні дані
 .env
 service_account.json
-*.json
 
 # База даних
 *.db

@@ -12,8 +12,19 @@ from aiogram.exceptions import TelegramNetworkError
 from aiogram.filters import StateFilter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Налаштування логування (має бути якомога раніше)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 # Імпорти наших модулів
 import config
+
+# Критичні змінні перевіряємо в точці входу, а не під час імпорту config
+config.validate_env()
+
 import database.models as db_models
 import database.db_api as db
 from middlewares.auth import WhitelistMiddleware
@@ -27,12 +38,6 @@ from services.google_sync import sync_loop
 from services.scheduler import scheduler_loop
 from services.parser import parse_dtek_message
 
-# Налаштування логування
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # --- ЛОГІКА ПАРСЕРА ДТЕК ---
 parser_router = Router()
@@ -117,11 +122,33 @@ def _is_transient_network_error(exc: Exception) -> bool:
 
 
 async def _sleep_with_jitter(base_seconds: int, jitter_seconds: int = 3):
-    """
-    Сон з невеликим випадковим джитером, щоб уникати "бурстів" перезапусків.
-    """
+    """Сон з невеликим випадковим джитером, щоб уникати "бурстів" перезапусків."""
     extra = random.randint(0, max(0, jitter_seconds))
     await asyncio.sleep(max(0, base_seconds + extra))
+
+
+async def _run_background_forever(name: str, coro_func, *args):
+    """Supervisor: тримає фоновий процес живим, перезапускає при падінні/виході."""
+    attempt = 0
+    min_delay = 5
+    max_delay = 60
+
+    while True:
+        try:
+            await coro_func(*args)
+            # якщо корутина завершилась без exception — це нетипово для наших daemon-loop'ів
+            logger.error(f"⚠️ Background task '{name}' завершилась без помилки. Перезапуск через 60s")
+            attempt = 0
+            await _sleep_with_jitter(60, jitter_seconds=5)
+
+        except asyncio.CancelledError:
+            raise
+
+        except Exception as e:
+            attempt += 1
+            delay = min(max_delay, min_delay * (2 ** max(0, attempt - 1)))
+            logger.error(f"💥 Background task '{name}' впала: {e}. Restart in {delay}s", exc_info=True)
+            await _sleep_with_jitter(delay, jitter_seconds=5)
 
 
 def build_dispatcher() -> Dispatcher:
@@ -173,8 +200,8 @@ async def run_polling_once(dp: Dispatcher):
         )
 
         logger.info("🚀 Запуск фонових процесів...")
-        tasks.append(asyncio.create_task(sync_loop(), name="google_sync"))
-        tasks.append(asyncio.create_task(scheduler_loop(bot), name="scheduler"))
+        tasks.append(asyncio.create_task(_run_background_forever("google_sync", sync_loop), name="google_sync"))
+        tasks.append(asyncio.create_task(_run_background_forever("scheduler", scheduler_loop, bot), name="scheduler"))
 
         logger.info("=" * 50)
         logger.info("🚀 БОТ ЗАПУЩЕНО!")
