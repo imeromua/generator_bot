@@ -82,7 +82,7 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     sheets_line = ""
     try:
         is_offline = db.sheet_is_offline()
-        forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+        forced_offline = bool(db.sheet_is_forced_offline())
         if not is_offline:
             last_ok = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
             sheets_line = f"Google Sheets: 🌐 <b>ONLINE</b> (останній OK: {last_ok})"
@@ -116,7 +116,7 @@ async def sheet_mode_menu(cb: types.CallbackQuery, state: FSMContext):
         is_offline = False
 
     try:
-        forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+        forced_offline = bool(db.sheet_is_forced_offline())
     except Exception:
         forced_offline = False
 

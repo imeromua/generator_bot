@@ -55,9 +55,8 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     offline_mark = ""
     try:
         if db.sheet_is_offline():
-            forced_offline = False
             try:
-                forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+                forced_offline = bool(db.sheet_is_forced_offline())
             except Exception:
                 forced_offline = False
 
