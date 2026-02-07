@@ -9,17 +9,17 @@ import os
 import config
 import database.db_api as db
 from handlers.admin_parts.export_logs import router as export_logs_router
+from handlers.admin_parts.maintenance import router as maintenance_router
 from handlers.admin_parts.personnel import router as personnel_router
 from handlers.admin_parts.schedule import router as schedule_router
 from handlers.admin_parts.sheet_mode import router as sheet_mode_router
 from handlers.admin_parts.utils import (
-    ensure_admin_user as _ensure_admin_user,
     actor_name as _actor_name,
     fmt_state_ts as _fmt_state_ts,
 )
 from keyboards.builders import (
     admin_panel, report_period,
-    back_to_admin, after_add_menu, maintenance_menu, back_to_mnt,
+    back_to_admin, after_add_menu,
 )
 from services.excel_report import generate_report
 
@@ -28,16 +28,13 @@ router.include_router(sheet_mode_router)
 router.include_router(export_logs_router)
 router.include_router(personnel_router)
 router.include_router(schedule_router)
+router.include_router(maintenance_router)
 
 logger = logging.getLogger(__name__)
 
 
 class AddDriverForm(StatesGroup):
     name = State()
-
-
-class SetHoursForm(StatesGroup):
-    hours = State()
 
 
 # --- ВХІД В АДМІНКУ ---
@@ -107,95 +104,6 @@ async def fuel_ordered(cb: types.CallbackQuery):
         logger.warning(f"fuel_ordered edit failed: {e}")
 
     await cb.answer("✅ Прийнято", show_alert=True)
-
-
-# --- МЕНЮ ТО ---
-@router.callback_query(F.data == "mnt_menu")
-async def mnt_view(cb: types.CallbackQuery):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    st = db.get_state()
-    txt = (f"🛠 <b>Технічне Обслуговування</b>\n\n"
-           f"⏱ Загальний пробіг: <b>{st['total_hours']:.1f} год</b>\n"
-           f"🛢 Після заміни мастила: <b>{(st['total_hours'] - st['last_oil']):.1f} год</b>\n"
-           f"🕯 Після заміни свічок: <b>{(st['total_hours'] - st['last_spark']):.1f} год</b>")
-
-    try:
-        await cb.message.edit_text(txt, reply_markup=maintenance_menu())
-    except TelegramBadRequest:
-        await cb.answer()
-
-
-@router.callback_query(F.data == "mnt_oil")
-async def mnt_oil(cb: types.CallbackQuery):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    user = _ensure_admin_user(cb.from_user.id, first_name=cb.from_user.first_name)
-    actor = (user[1] if user and user[1] else _actor_name(cb.from_user.id, first_name=cb.from_user.first_name))
-
-    db.record_maintenance("oil", actor)
-    logger.info(f"🛢 {actor} виконав заміну мастила")
-    await cb.answer("✅ Мастило замінено!", show_alert=True)
-    await mnt_view(cb)
-
-
-@router.callback_query(F.data == "mnt_spark")
-async def mnt_spark(cb: types.CallbackQuery):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    user = _ensure_admin_user(cb.from_user.id, first_name=cb.from_user.first_name)
-    actor = (user[1] if user and user[1] else _actor_name(cb.from_user.id, first_name=cb.from_user.first_name))
-
-    db.record_maintenance("spark", actor)
-    logger.info(f"🕯 {actor} виконав заміну свічок")
-    await cb.answer("✅ Свічки замінено!", show_alert=True)
-    await mnt_view(cb)
-
-
-@router.callback_query(F.data == "mnt_set_hours")
-async def ask_hours(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    st = db.get_state()
-    await cb.message.edit_text(f"⏱ Поточний: <b>{st['total_hours']:.1f}</b>\nВведіть нове:", reply_markup=back_to_mnt())
-    await state.set_state(SetHoursForm.hours)
-
-
-@router.message(SetHoursForm.hours)
-async def save_hours(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    try:
-        val_text = msg.text.replace(",", ".").strip()
-        val = float(val_text)
-
-        if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_mnt())
-
-        if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_mnt())
-
-        db.set_total_hours(val)
-        actor = _actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        logger.info(f"⏱ {actor} встановив мотогодини: {val}")
-        await msg.answer(f"✅ Встановлено: <b>{val} год</b>")
-
-        st = db.get_state()
-        txt = (f"🛠 <b>Технічне Обслуговування</b>\n\n"
-               f"⏱ Загальний пробіг: <b>{st['total_hours']:.1f} год</b>\n"
-               f"🛢 Після заміни мастила: <b>{(st['total_hours'] - st['last_oil']):.1f} год</b>\n"
-               f"🕯 Після заміни свічок: <b>{(st['total_hours'] - st['last_spark']):.1f} год</b>")
-
-        await msg.answer(txt, reply_markup=maintenance_menu())
-        await state.clear()
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 100.5)", reply_markup=back_to_mnt())
 
 
 # --- ЗВІТИ ---
