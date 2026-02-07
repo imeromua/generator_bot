@@ -77,7 +77,27 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
     await state.clear()
     logger.info(f"👤 Адмін {cb.from_user.id} відкрив панель")
-    await cb.message.edit_text("⚙️ <b>Адмін Панель</b>", reply_markup=admin_panel())
+
+    # короткий статус Sheets прямо в хедері адмінки
+    sheets_line = ""
+    try:
+        is_offline = db.sheet_is_offline()
+        forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+        if not is_offline:
+            last_ok = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
+            sheets_line = f"Google Sheets: 🌐 <b>ONLINE</b> (останній OK: {last_ok})"
+        else:
+            offline_since = _fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
+            mode = "примусово" if forced_offline else "авто"
+            sheets_line = f"Google Sheets: 🔌 <b>OFFLINE</b> ({mode}) з {offline_since}"
+    except Exception:
+        sheets_line = ""
+
+    txt = "⚙️ <b>Адмін Панель</b>"
+    if sheets_line:
+        txt += f"\n\n{sheets_line}\n➖➖➖➖➖➖"
+
+    await cb.message.edit_text(txt, reply_markup=admin_panel())
 
 
 # --- Sheets mode menu ---
