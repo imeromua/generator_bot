@@ -135,6 +135,34 @@ def logs_row_for_id(log_id: int) -> int:
     return max(2, lid + 1)
 
 
+def _event_type_human(ltype: str) -> str:
+    """Повертає зрозумілу назву події (UA) + код у дужках."""
+    code = (ltype or "").strip()
+
+    mapping = {
+        "m_start": "Ранкова зміна — старт",
+        "m_end": "Ранкова зміна — фініш",
+        "d_start": "Денна зміна — старт",
+        "d_end": "Денна зміна — фініш",
+        "e_start": "Вечірня зміна — старт",
+        "e_end": "Вечірня зміна — фініш",
+        "x_start": "Екстра зміна — старт",
+        "x_end": "Екстра зміна — фініш",
+        "refill": "Заправка (прийом палива)",
+        "auto_close": "Авто-закриття зміни",
+    }
+
+    if not code:
+        return ""
+
+    title = mapping.get(code)
+    if title:
+        return f"{title} ({code})"
+
+    # fallback для майбутніх/невідомих типів
+    return code
+
+
 def upsert_log_row(ws, lid: int, ltime: str, ltype: str, luser: str, lval: str, ldriver: str):
     """Idempotent write у вкладку логів: один log_id = один рядок."""
     if not ws:
@@ -152,7 +180,7 @@ def upsert_log_row(ws, lid: int, ltime: str, ltype: str, luser: str, lval: str, 
     values = [
         str(lid),
         ltime or "",
-        ltype or "",
+        _event_type_human(ltype),
         luser or "",
         str(liters).replace(".", ",") if liters else "",
         receipt or "",
