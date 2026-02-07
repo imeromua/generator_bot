@@ -82,7 +82,7 @@ async def sheet_mode_menu(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "sheet_force_offline")
-async def sheet_force_offline(cb: types.CallbackQuery):
+async def sheet_force_offline(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -92,11 +92,11 @@ async def sheet_force_offline(cb: types.CallbackQuery):
         pass
 
     await cb.answer("✅ OFFLINE увімкнено", show_alert=True)
-    await sheet_mode_menu(cb, state=FSMContext)  # will be ignored; fallback below
+    await sheet_mode_menu(cb, state)
 
 
 @router.callback_query(F.data == "sheet_force_online")
-async def sheet_force_online(cb: types.CallbackQuery):
+async def sheet_force_online(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -106,7 +106,7 @@ async def sheet_force_online(cb: types.CallbackQuery):
         pass
 
     await cb.answer("✅ OFFLINE вимкнено", show_alert=True)
-    await sheet_mode_menu(cb, state=FSMContext)
+    await sheet_mode_menu(cb, state)
 
 
 
