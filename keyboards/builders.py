@@ -49,6 +49,7 @@ def admin_panel():
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="🔌 Режим Google Sheets", callback_data="sheet_mode_menu")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
+        [InlineKeyboardButton(text="🧮 Корекція", callback_data="corr_menu")],
         [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
@@ -56,6 +57,22 @@ def admin_panel():
         [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def correction_menu():
+    kb = [
+        [InlineKeyboardButton(text="⛽️ Корекція залишку палива", callback_data="corr_fuel_set")],
+        [InlineKeyboardButton(text="⏱ Корекція мотогодин", callback_data="corr_total_hours_set")],
+        [InlineKeyboardButton(text="🛢 Корекція: остання заміна мастила", callback_data="corr_last_oil_set")],
+        [InlineKeyboardButton(text="🕯 Корекція: остання заміна свічок", callback_data="corr_last_spark_set")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def back_to_corr():
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
+
 
 
 def sheet_mode_kb(is_offline: bool, forced_offline: bool = False):
@@ -131,7 +148,7 @@ def maintenance_menu():
 def drivers_list(drivers):
     kb = []
     for d in drivers:
-        kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])
+        kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])])
     kb.append([InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
