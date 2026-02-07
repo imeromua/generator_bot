@@ -22,7 +22,6 @@ def _translate_qmarks(query: str) -> str:
     """Translate sqlite-style placeholders ('?') to psycopg placeholders ('%s')."""
     if not _is_postgres():
         return query
-    # Simple translation is enough for our codebase (we don't embed '?' in SQL literals)
     return query.replace("?", "%s")
 
 
@@ -107,13 +106,11 @@ def _parse_dbname_from_dsn(dsn: str) -> str:
 
 def _build_admin_dsn_from_app_dsn(app_dsn: str) -> str:
     u = urlparse(app_dsn)
-    # switch database to 'postgres'
     new_u = u._replace(path="/postgres")
     return urlunparse(new_u)
 
 
 def _postgres_db_missing(exc: Exception) -> bool:
-    # Prefer structured errors if available
     try:
         if pg_errors and isinstance(exc, pg_errors.InvalidCatalogName):
             return True
@@ -136,7 +133,6 @@ def ensure_postgres_database_exists():
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is not set")
 
-    # Fast path: DB exists
     try:
         with psycopg.connect(dsn):
             return
@@ -161,7 +157,6 @@ def ensure_postgres_database_exists():
                 if pg_errors and isinstance(ce, pg_errors.DuplicateDatabase):
                     pass
                 else:
-                    # race condition or different server message, ignore if DB already exists
                     if "already exists" not in str(ce).lower():
                         raise
             except Exception:
@@ -196,7 +191,6 @@ def get_connection():
 def begin_transaction(conn):
     """Start a transaction in a backend-appropriate way."""
     if _is_postgres():
-        # psycopg starts a transaction implicitly, but explicit BEGIN is OK.
         try:
             conn.execute("BEGIN")
         except Exception:
@@ -213,7 +207,7 @@ def init_db():
     if not _is_postgres():
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id INTEGER PRIMARY KEY, name TEXT UNIQUE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, is_synced INTEGER DEFAULT 0)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, receipt_number TEXT, is_synced INTEGER DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id INTEGER PRIMARY KEY, date TEXT, type TEXT, hours REAL, admin TEXT)''')
@@ -224,13 +218,26 @@ def init_db():
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS logs (id BIGSERIAL PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, is_synced INTEGER DEFAULT 0)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS logs (id BIGSERIAL PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, receipt_number TEXT, is_synced INTEGER DEFAULT 0)''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id BIGSERIAL PRIMARY KEY, date TEXT, type TEXT, hours DOUBLE PRECISION, admin TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY, personnel_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY, chat_id BIGINT, message_id BIGINT)''')
+
+    # Міграція: додати receipt_number якщо його немає
+    try:
+        c.execute("SELECT receipt_number FROM logs LIMIT 1")
+    except Exception:
+        try:
+            if _is_postgres():
+                c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
+            else:
+                # SQLite не підтримує ALTER ADD без IF NOT EXISTS до 3.35, тож робимо через exception
+                pass
+        except Exception:
+            pass
 
     defaults = [
         ('total_hours', '0.0'),
@@ -250,7 +257,6 @@ def init_db():
         ('sheet_offline_since_ts', ''),
     ]
 
-    # Seed defaults: keep existing values if already present
     for k, v in defaults:
         try:
             c.execute(
@@ -261,7 +267,6 @@ def init_db():
                 (k, v),
             )
         except Exception:
-            # fallback for older sqlite
             try:
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
             except Exception:
