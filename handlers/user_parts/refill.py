@@ -72,7 +72,7 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
                 await msg.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text="🧾 Введіть <b>номер чека</b>:",
+                    text="🧻 Введіть <b>номер чека</b>:",
                     reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
                 )
             except TelegramBadRequest as e:
@@ -143,8 +143,8 @@ async def refill_save(msg: types.Message, state: FSMContext):
             pass
         return
 
-    log_val = f"{liters}|{receipt_num}"
-    db.add_log("refill", operator_personnel, log_val, driver)
+    # Записуємо з новим полем receipt_number
+    db.add_log("refill", operator_personnel, str(liters), driver, receipt=receipt_num)
 
     if db.sheet_is_offline():
         try:
@@ -157,7 +157,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
     banner = (
         f"✅ <b>Паливо прийнято</b>\n"
         f"🛢 Літри: <b>{float(liters):.1f}</b>\n"
-        f"🧾 Чек: <b>{receipt_num}</b>\n"
+        f"🧻 Чек: <b>{receipt_num}</b>\n"
         f"🚛 Водій: <b>{driver}</b>\n"
         f"👤 Відповідальний: <b>{operator_personnel}</b>"
     )
