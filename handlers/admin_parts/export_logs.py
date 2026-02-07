@@ -8,11 +8,13 @@ from aiogram import Router, F, types
 import config
 import database.db_api as db
 from keyboards.builders import admin_panel
+from services.logs_xlsx_export import generate_logs_report_xlsx
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 
+# --- Legacy CSV export from SQLite (kept for fallback/debug) ---
 def _export_logs_to_csv(path: str, rows) -> None:
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
         wr = csv.writer(f, delimiter=";")
@@ -27,7 +29,7 @@ def _export_logs_to_csv(path: str, rows) -> None:
             ])
 
 
-async def _handle_export(cb: types.CallbackQuery, start_date: str, end_date: str):
+async def _handle_export_csv_from_db(cb: types.CallbackQuery, start_date: str, end_date: str):
     rows = db.get_logs_for_period(start_date, end_date)
 
     if not rows:
@@ -79,6 +81,52 @@ async def _handle_export(cb: types.CallbackQuery, start_date: str, end_date: str
             pass
 
 
+async def _handle_export_xlsx_from_sheet(cb: types.CallbackQuery, start_date: str, end_date: str):
+    """Export last events from monthly sheet (e.g. 'ЛЮТИЙ') to Excel with original styles, limited columns."""
+
+    filename = None
+    try:
+        filename, caption = await generate_logs_report_xlsx(
+            start_date=start_date,
+            end_date=end_date,
+            sheet_name=config.SHEET_NAME,
+        )
+
+        if not filename:
+            await cb.answer("ℹ️ Немає подій за цей період", show_alert=True)
+            try:
+                await cb.message.edit_text("⚙️ <b>Адмін Панель</b>", reply_markup=admin_panel())
+            except Exception:
+                pass
+            return
+
+        nav_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="⚙️ Адмін панель", callback_data="admin_home"),
+                types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home"),
+            ]
+        ])
+
+        await cb.message.answer_document(types.FSInputFile(filename), caption=caption, reply_markup=nav_kb)
+        await cb.answer("✅ Готово", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"XLSX export error: {e}", exc_info=True)
+        await cb.answer("❌ Помилка експорту", show_alert=True)
+
+    finally:
+        try:
+            if filename and os.path.exists(filename):
+                os.remove(filename)
+        except Exception:
+            pass
+
+        try:
+            await cb.message.edit_text("⚙️ <b>Адмін Панель</b>", reply_markup=admin_panel())
+        except Exception:
+            pass
+
+
 @router.callback_query(F.data == "export_logs_yesterday")
 async def export_logs_yesterday(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -92,11 +140,11 @@ async def export_logs_yesterday(cb: types.CallbackQuery):
     end_str = end_d.strftime("%Y-%m-%d")
 
     try:
-        await cb.message.edit_text("⏳ Готую CSV (вчора)...")
+        await cb.message.edit_text("⏳ Готую Excel (вчора)...")
     except Exception:
         pass
 
-    await _handle_export(cb, start_str, end_str)
+    await _handle_export_xlsx_from_sheet(cb, start_str, end_str)
 
 
 @router.callback_query(F.data == "export_logs_7d")
@@ -112,8 +160,8 @@ async def export_logs_7d(cb: types.CallbackQuery):
     end_str = end_d.strftime("%Y-%m-%d")
 
     try:
-        await cb.message.edit_text("⏳ Готую CSV (останні 7 днів, без сьогодні)...")
+        await cb.message.edit_text("⏳ Готую Excel (останні 7 днів, без сьогодні)...")
     except Exception:
         pass
 
-    await _handle_export(cb, start_str, end_str)
+    await _handle_export_xlsx_from_sheet(cb, start_str, end_str)
