@@ -15,7 +15,10 @@ def toggle_schedule(date_str, hour):
             )
         else:
             conn.execute(
-                "INSERT INTO schedule (date, hour, is_off) VALUES (?, ?, 1)",
+                """
+                INSERT INTO schedule (date, hour, is_off) VALUES (?, ?, 1)
+                ON CONFLICT(date, hour) DO UPDATE SET is_off = excluded.is_off
+                """,
                 (date_str, hour),
             )
     return new_val
@@ -26,7 +29,10 @@ def set_schedule_range(date_str, start_h, end_h):
         for h in range(start_h, end_h):
             if 0 <= h < 24:
                 conn.execute(
-                    "INSERT OR REPLACE INTO schedule (date, hour, is_off) VALUES (?, ?, 1)",
+                    """
+                    INSERT INTO schedule (date, hour, is_off) VALUES (?, ?, 1)
+                    ON CONFLICT(date, hour) DO UPDATE SET is_off = excluded.is_off
+                    """,
                     (date_str, h),
                 )
 

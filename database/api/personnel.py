@@ -10,7 +10,10 @@ def set_personnel_for_user(user_id: int, personnel_name: str | None):
             conn.execute("DELETE FROM user_personnel WHERE user_id = ?", (user_id,))
             return
         conn.execute(
-            "INSERT OR REPLACE INTO user_personnel (user_id, personnel_name) VALUES (?, ?)",
+            """
+            INSERT INTO user_personnel (user_id, personnel_name) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET personnel_name = excluded.personnel_name
+            """,
             (int(user_id), str(personnel_name).strip()),
         )
 
@@ -32,7 +35,7 @@ def get_all_users_with_personnel():
             SELECT u.user_id, u.full_name, up.personnel_name
             FROM users u
             LEFT JOIN user_personnel up ON up.user_id = u.user_id
-            ORDER BY u.full_name COLLATE NOCASE
+            ORDER BY LOWER(u.full_name)
             """
         ).fetchall()
         return rows
@@ -49,7 +52,10 @@ def sync_personnel_from_sheet(personnel_list):
             for name in personnel_list:
                 if name and str(name).strip():
                     conn.execute(
-                        "INSERT OR IGNORE INTO personnel_names (name) VALUES (?)",
+                        """
+                        INSERT INTO personnel_names (name) VALUES (?)
+                        ON CONFLICT(name) DO NOTHING
+                        """,
                         (str(name).strip(),),
                     )
     except Exception as e:
@@ -61,6 +67,6 @@ def get_personnel_names():
         return [
             r[0]
             for r in conn.execute(
-                "SELECT name FROM personnel_names ORDER BY name COLLATE NOCASE"
+                "SELECT name FROM personnel_names ORDER BY LOWER(name)"
             ).fetchall()
         ]

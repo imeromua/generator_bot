@@ -1,18 +1,29 @@
 import logging
-import sqlite3
 
 from database.models import get_connection
 
 
 def add_driver(name):
+    """Adds driver; returns True if inserted, False if already existed or error."""
     try:
         with get_connection() as conn:
-            conn.execute("INSERT INTO drivers (name) VALUES (?)", (name,))
-        return True
-    except sqlite3.IntegrityError:
-        logging.warning(f"Водій {name} вже існує")
-        return False
+            cur = conn.execute(
+                """
+                INSERT INTO drivers (name) VALUES (?)
+                ON CONFLICT(name) DO NOTHING
+                """,
+                (name,),
+            )
+            try:
+                return bool(cur.rowcount and cur.rowcount > 0)
+            except Exception:
+                # sqlite can be inconsistent; treat success if no exception
+                return True
     except Exception as e:
+        msg = str(e).lower()
+        if "unique" in msg or "duplicate" in msg:
+            logging.warning(f"Водій {name} вже існує")
+            return False
         logging.error(f"Помилка додавання водія: {e}")
         return False
 
@@ -33,7 +44,10 @@ def sync_drivers_from_sheet(driver_list):
             for name in driver_list:
                 if name and name.strip():
                     conn.execute(
-                        "INSERT OR IGNORE INTO drivers (name) VALUES (?)",
+                        """
+                        INSERT INTO drivers (name) VALUES (?)
+                        ON CONFLICT(name) DO NOTHING
+                        """,
                         (name.strip(),),
                     )
     except Exception as e:
