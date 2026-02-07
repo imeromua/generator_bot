@@ -19,6 +19,10 @@
 - AA = хто привіз паливо (driver)
 - AB = водії (список через кому)
 - AC = персонал (список через кому)
+
+Експорт інкрементальний:
+- Знаходимо останню дату в Sheets
+- Експортуємо тільки дні >= цієї дати (оновлюємо поточний + дописуємо нові)
 """
 
 import logging
@@ -58,8 +62,52 @@ def _hours_to_hhmm(hours: float) -> str:
     return f"{h:02d}:{m:02d}"
 
 
-def _aggregate_logs_by_date():
+def _find_last_date_in_sheet(sheet) -> str | None:
+    """Знаходить останню дату в колонці A (формат DD.MM.YYYY).
+    
+    Повертає дату у форматі YYYY-MM-DD або None якщо таблиця порожня.
+    """
+    try:
+        # Читаємо всю колонку A (починаючи з рядка 3)
+        col_a = sheet.col_values(1)  # Колонка A = індекс 1
+        
+        if len(col_a) < 3:
+            logger.info("📋 Sheets порожня, експортуємо всі дані")
+            return None
+        
+        # Перші 2 рядки — шапка, шукаємо з рядка 3
+        data_rows = col_a[2:]
+        
+        # Шукаємо останню непорожню комірку з датою
+        last_date_str = None
+        for cell in reversed(data_rows):
+            if cell and cell.strip():
+                last_date_str = cell.strip()
+                break
+        
+        if not last_date_str:
+            logger.info("📋 Немає даних в Sheets, експортуємо всі дані")
+            return None
+        
+        # Парсимо DD.MM.YYYY → YYYY-MM-DD
+        try:
+            dt = datetime.strptime(last_date_str, "%d.%m.%Y")
+            result = dt.strftime("%Y-%m-%d")
+            logger.info(f"📅 Остання дата в Sheets: {last_date_str} ({result})")
+            return result
+        except Exception as e:
+            logger.warning(f"⚠️ Не вдалося розпарсити останню дату '{last_date_str}': {e}")
+            return None
+            
+    except Exception as e:
+        logger.error(f"❌ Помилка пошуку останньої дати: {e}")
+        return None
+
+
+def _aggregate_logs_by_date(from_date: str | None = None):
     """Зчитує всі логи з БД і групує по датах.
+    
+    Якщо from_date вказано, бере тільки дні >= from_date.
     
     Повертає dict[date_str] = {
         'shifts': { 'm': {'start': dt, 'end': dt, 'start_user': str, 'end_user': str}, ... },
@@ -163,6 +211,10 @@ def _aggregate_logs_by_date():
         days[d]['fuel_start'] = prev_fuel
         prev_fuel = days[d]['fuel_end']
     
+    # Фільтруємо по даті якщо потрібно
+    if from_date:
+        days = {d: data for d, data in days.items() if d >= from_date}
+    
     return days
 
 
@@ -264,16 +316,28 @@ def _build_export_rows(days_data):
     return rows
 
 
-def _build_events_rows():
-    """Будує рядки для вкладки ПОДІЇ (всі логи)"""
+def _build_events_rows(from_date: str | None = None):
+    """Будує рядки для вкладки ПОДІЇ (всі логи).
+    
+    Якщо from_date вказано, бере тільки події >= from_date.
+    """
     conn = db.get_connection()
     cur = conn.cursor()
     
-    cur.execute("""
-        SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-        FROM logs
-        ORDER BY timestamp ASC
-    """)
+    if from_date:
+        cur.execute("""
+            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
+            FROM logs
+            WHERE timestamp >= ?
+            ORDER BY timestamp ASC
+        """, (f"{from_date} 00:00:00",))
+    else:
+        cur.execute("""
+            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
+            FROM logs
+            ORDER BY timestamp ASC
+        """)
+    
     rows = cur.fetchall()
     conn.close()
     
@@ -299,53 +363,86 @@ def _build_events_rows():
 
 
 def full_export():
-    """Повний експорт з БД в Google Sheets.
+    """Повний експорт з БД в Google Sheets (інкрементальний).
     
-    Записує:
-    - Основну вкладку (A-AC)
-    - Вкладку ПОДІЇ (всі логи)
+    Логіка:
+    1. Знаходимо останню дату в Sheets
+    2. Експортуємо тільки дні >= цієї дати (оновлюємо поточний + дописуємо нові)
+    3. Записуємо в основну вкладку (A-AC)
+    4. Оновлюємо вкладку ПОДІЇ (тільки нові події)
     """
-    logger.info("📤 Починаємо експорт з БД в Sheets...")
-    
-    # Агрегуємо дані
-    days_data = _aggregate_logs_by_date()
-    
-    # Будуємо рядки
-    main_rows = _build_export_rows(days_data)
-    events_rows = _build_events_rows()
-    
-    logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки")
-    logger.info(f"📄 Підготовлено {len(events_rows)} подій")
+    logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
     
     # Підключаємось до Sheets
     client = make_client()
     ss = open_spreadsheet(client)
     main_sheet = open_main_worksheet(ss)
     
-    # Записуємо основну вкладку (починаємо з рядка 3, перші 2 — шапка)
+    # Знаходимо останню дату в Sheets
+    last_date = _find_last_date_in_sheet(main_sheet)
+    
+    # Агрегуємо дані (тільки >= last_date)
+    days_data = _aggregate_logs_by_date(from_date=last_date)
+    
+    if not days_data:
+        logger.info("ℹ️ Немає нових даних для експорту")
+        return
+    
+    # Будуємо рядки
+    main_rows = _build_export_rows(days_data)
+    events_rows = _build_events_rows(from_date=last_date)
+    
+    logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {last_date or 'початку'})")
+    logger.info(f"📄 Підготовлено {len(events_rows)} подій")
+    
+    # Записуємо основну вкладку
     if main_rows:
-        start_row = 3
+        # Якщо є last_date — знаходимо рядок з цією датою і перезаписуємо від нього
+        # Якщо немає — дописуємо в кінець
+        
+        if last_date:
+            # Шукаємо рядок з last_date і видаляємо його (щоб перезаписати)
+            all_values = main_sheet.get_all_values()
+            start_row = 3  # За замовчуванням дописуємо після шапки
+            
+            # Шукаємо рядок з last_date
+            last_date_fmt = datetime.strptime(last_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+            for i, row in enumerate(all_values[2:], start=3):  # Починаємо з рядка 3
+                if row and row[0].strip() == last_date_fmt:
+                    start_row = i
+                    logger.info(f"📍 Знайдено останню дату в рядку {start_row}, перезаписуємо від нього")
+                    break
+            else:
+                # Не знайшли — дописуємо в кінець
+                start_row = len(all_values) + 1
+                logger.info(f"📍 Останню дату не знайдено в таблиці, дописуємо в кінець (рядок {start_row})")
+        else:
+            # Немає last_date — записуємо з рядка 3
+            start_row = 3
+        
+        end_row = start_row + len(main_rows) - 1
         main_sheet.update(
-            f"A{start_row}:AC{start_row + len(main_rows) - 1}",
+            f"A{start_row}:AC{end_row}",
             main_rows,
             value_input_option="USER_ENTERED"
         )
-        logger.info(f"✅ Основна вкладка оновлена ({len(main_rows)} рядків)")
+        logger.info(f"✅ Основна вкладка оновлена (рядки {start_row}-{end_row})")
     
-    # Записуємо вкладку ПОДІЇ
-    try:
-        events_sheet = ss.worksheet("ПОДІЇ")
-    except Exception:
-        # Створюємо, якщо немає
-        events_sheet = ss.add_worksheet("ПОДІЇ", rows=1000, cols=7)
-        # Шапка
-        events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
-    
+    # Записуємо вкладку ПОДІЇ (додаємо в кінець)
     if events_rows:
-        events_sheet.clear()
-        # Шапка + дані
-        all_events = [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]] + events_rows
-        events_sheet.update("A1", all_events, value_input_option="USER_ENTERED")
-        logger.info(f"✅ Вкладка ПОДІЇ оновлена ({len(events_rows)} подій)")
+        try:
+            events_sheet = ss.worksheet("ПОДІЇ")
+        except Exception:
+            # Створюємо, якщо немає
+            events_sheet = ss.add_worksheet("ПОДІЇ", rows=1000, cols=7)
+            # Шапка
+            events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
+        
+        # Дописуємо в кінець
+        all_events = events_sheet.get_all_values()
+        next_row = len(all_events) + 1
+        
+        events_sheet.append_rows(events_rows, value_input_option="USER_ENTERED")
+        logger.info(f"✅ Вкладка ПОДІЇ оновлена (+{len(events_rows)} подій, починаючи з рядка {next_row})")
     
     logger.info("✅ Експорт завершено!")
