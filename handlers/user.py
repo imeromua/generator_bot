@@ -149,15 +149,6 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
     return f"• {ts_pretty} — <b>{event_type}</b>{tail} ({who})"
 
 
-router = Router()
-
-
-class RefillForm(StatesGroup):
-    driver = State()
-    liters = State()
-    receipt = State()
-
-
 @router.callback_query(F.data == "events_last")
 async def events_last(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -188,12 +179,6 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
             raise
 
     await cb.answer()
-
-
-class RefillForm(StatesGroup):
-    driver = State()
-    liters = State()
-    receipt = State()
 
 
 def _sheet_name_to_month(sheet_name: str):
