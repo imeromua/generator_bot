@@ -241,33 +241,37 @@ def sheet_is_offline() -> bool:
 
 
 def get_state():
+    """Повертає поточний стан генератора.
+
+    Робимо максимально "невбивно": якщо якихось ключів немає/БД частково зламана —
+    повертаємо дефолти замість падіння IndexError/TypeError.
+    """
     with get_connection() as conn:
-        c = conn.cursor()
-        status = c.execute("SELECT value FROM generator_state WHERE key='status'").fetchone()[0]
-        start_time = c.execute("SELECT value FROM generator_state WHERE key='last_start_time'").fetchone()[0]
+        def _get(k: str, default: str = "") -> str:
+            try:
+                row = conn.execute("SELECT value FROM generator_state WHERE key = ?", (k,)).fetchone()
+                if not row or row[0] is None:
+                    return default
+                return str(row[0])
+            except Exception:
+                return default
 
-        try:
-            start_date = c.execute("SELECT value FROM generator_state WHERE key='last_start_date'").fetchone()[0]
-        except (TypeError, IndexError):
-            start_date = ''
+        status = _get("status", "OFF")
+        start_time = _get("last_start_time", "")
+        start_date = _get("last_start_date", "")
+        active_shift = _get("active_shift", "none")
 
-        total = float(c.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
-        last_oil = float(c.execute("SELECT value FROM generator_state WHERE key='last_oil_change'").fetchone()[0])
+        def _get_f(k: str, default: float = 0.0) -> float:
+            v = _get(k, str(default))
+            try:
+                return float(v or 0.0)
+            except Exception:
+                return float(default)
 
-        try:
-            last_spark = float(c.execute("SELECT value FROM generator_state WHERE key='last_spark_change'").fetchone()[0])
-        except (TypeError, ValueError):
-            last_spark = 0.0
-
-        try:
-            fuel = float(c.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
-        except (TypeError, ValueError):
-            fuel = 0.0
-
-        try:
-            active_shift = c.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
-        except (TypeError, IndexError):
-            active_shift = "none"
+        total = _get_f("total_hours", 0.0)
+        last_oil = _get_f("last_oil_change", 0.0)
+        last_spark = _get_f("last_spark_change", 0.0)
+        fuel = _get_f("current_fuel", 0.0)
 
         return {
             "status": status,
