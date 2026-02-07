@@ -48,9 +48,6 @@ def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="🔌 Режим Google Sheets", callback_data="sheet_mode_menu")],
-        [InlineKeyboardButton(text="📤 Експорт подій (вчора, Excel)", callback_data="export_logs_yesterday")],
-        [InlineKeyboardButton(text="📤 Експорт подій (останні 7 днів, Excel)", callback_data="export_logs_7d")],
-        [InlineKeyboardButton(text="📤 Місячний лист (Excel)", callback_data="export_month_sheet")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
