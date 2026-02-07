@@ -237,11 +237,9 @@ async def scheduler_loop(bot):
 
                     active_shift = (state.get('active_shift', 'none') or 'none').strip()
                     code = active_shift.split('_')[0] if ('_' in active_shift) else active_shift
-                    end_event = None
-                    if code in ("m", "d", "e", "x"):
-                        end_event = f"{code}_end"
+                    end_event = f"{code}_end" if code in ("m", "d", "e", "x") else None
 
-                    # Розрахунок тривалості
+                    # Розрахунок тривалості (для повідомлення/обліку OFFLINE)
                     try:
                         start_date_str = state.get('start_date', '')
                         start_time_str = state.get('start_time', '')
@@ -268,43 +266,71 @@ async def scheduler_loop(bot):
 
                     fuel_consumed = dur * config.FUEL_CONSUMPTION
 
-                    # OFFLINE: локально обліковуємо паливо/години (як у user handler)
+                    # 1) Прагнемо закрити атомарно (щоб не було race з ручним STOP)
+                    close_ok = False
+                    close_reason = ""
+                    forced_close = False
+
+                    if end_event:
+                        try:
+                            res = db.try_stop_shift(end_event, 'System', now)
+                            close_ok = bool(res.get("ok"))
+                            close_reason = str(res.get("reason", "") or "")
+                        except Exception as e:
+                            close_ok = False
+                            close_reason = f"error:{e}"
+                    else:
+                        close_ok = False
+                        close_reason = "no_end_event"
+
+                    if not close_ok:
+                        # якщо вже закрито кимось іншим — не дублюємо логи/облік
+                        if close_reason == "already_off":
+                            logger.info("🤖 Auto-close: зміна вже закрита, пропускаємо")
+                            auto_close_done_today = True
+                            await asyncio.sleep(60)
+                            continue
+
+                        # fallback: щоб не лишати генератор у ON при поламаному state
+                        forced_close = True
+                        db.set_state('status', 'OFF')
+                        db.set_state('active_shift', 'none')
+                        logger.warning(f"⚠️ Auto-close fallback: forced OFF (reason={close_reason}, active_shift={active_shift})")
+
+                    # 2) OFFLINE: локально обліковуємо паливо/години тільки якщо ми реально закрили
                     remaining_fuel = None
                     try:
-                        if db.sheet_is_offline():
+                        if db.sheet_is_offline() and (close_ok or forced_close):
                             db.update_hours(dur)
                             remaining_fuel = db.update_fuel(-fuel_consumed)
                     except Exception:
                         pass
 
-                    # Скидання статусу
-                    db.set_state('status', 'OFF')
-                    db.set_state('active_shift', 'none')
-
-                    # Логування: закриваємо саме активну зміну, а також пишемо технічний auto_close
+                    # 3) Технічний лог auto_close (idempotent тут не гарантуємо, але в нормі буде 1 раз/день)
                     ts = now.strftime("%Y-%m-%d %H:%M:%S")
                     try:
-                        if end_event:
-                            db.add_log(end_event, 'System', ts=ts)
+                        if close_ok or forced_close:
+                            db.add_log('auto_close', 'System', ts=ts)
                     except Exception:
                         pass
 
-                    try:
-                        db.add_log('auto_close', 'System', ts=ts)
-                    except Exception:
-                        pass
-
-                    logger.info(f"🤖 Авто-закриття виконано: shift={active_shift}, {dur:.2f} год, витрачено {fuel_consumed:.1f}л")
+                    logger.info(
+                        f"🤖 Авто-закриття: shift={active_shift}, end_event={end_event}, "
+                        f"ok={close_ok}, forced={forced_close}, dur={dur:.2f}h, fuel={fuel_consumed:.1f}l"
+                    )
 
                     # Сповіщення адмінів
                     dur_hhmm = format_hours_hhmm(dur)
                     rem_line = f"\n⛽ Залишок: <b>{remaining_fuel:.1f} л</b>" if (remaining_fuel is not None) else ""
+                    warn_line = "\n⚠️ <b>Fallback</b>: закрито примусово" if forced_close else ""
+
                     admin_txt = (
                         f"🤖 <b>Авто-закриття зміни</b>\n\n"
                         f"🧩 Зміна: <b>{active_shift}</b>\n"
                         f"⏱ Працював: <b>{dur_hhmm}</b>\n"
                         f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>"
-                        f"{rem_line}\n"
+                        f"{rem_line}"
+                        f"{warn_line}\n"
                         f"🕐 Час закриття: {now.strftime('%H:%M')}"
                     )
 
