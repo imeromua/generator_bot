@@ -43,6 +43,12 @@ def init_db():
         ('fuel_ordered_date', ''),
         ('fuel_alert_last_sent_ts', ''),
         ('stop_reminder_sent_date', ''),
+
+        # --- sheet connectivity / offline-mode ---
+        ('sheet_last_ok_ts', ''),
+        ('sheet_first_fail_ts', ''),
+        ('sheet_offline', '0'),
+        ('sheet_offline_since_ts', ''),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))

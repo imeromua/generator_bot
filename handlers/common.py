@@ -5,6 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramBadRequest
 
 import asyncio
+from datetime import datetime
 
 import database.db_api as db
 import config
@@ -38,8 +39,35 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     if os.getenv("MODE") == "TEST":
         mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
 
+    offline_mark = ""
+    try:
+        if db.sheet_is_offline():
+            since_ts = str(db.get_state_value("sheet_offline_since_ts", "") or "").strip()
+            since_s = ""
+            if since_ts:
+                try:
+                    dt = datetime.fromtimestamp(int(float(since_ts)), tz=config.KYIV)
+                    since_s = dt.strftime("%d.%m %H:%M")
+                except Exception:
+                    since_s = ""
+
+            if since_s:
+                offline_mark = (
+                    f"🔌 <b>OFFLINE</b> — немає доступу до Google Sheets з {since_s}.\n"
+                    f"Дані накопичуються локально; синхронізація відбудеться після відновлення.\n"
+                    f"➖➖➖➖➖➖\n"
+                )
+            else:
+                offline_mark = (
+                    "🔌 <b>OFFLINE</b> — немає доступу до Google Sheets.\n"
+                    "Дані накопичуються локально; синхронізація відбудеться після відновлення.\n"
+                    "➖➖➖➖➖➖\n"
+                )
+    except Exception:
+        pass
+
     txt = (
-        f"{mode_mark}"
+        f"{mode_mark}{offline_mark}"
         f"🔋 <b>Генератор:</b> {status_icon}\n"
         f"⛽ Залишок палива: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"

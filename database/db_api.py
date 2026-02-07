@@ -1,9 +1,13 @@
 import sqlite3
 import logging
+import time
 from datetime import datetime
 
 import config
 from database.models import get_connection
+
+_OFFLINE_THRESHOLD_SECONDS = 24 * 60 * 60
+
 
 # --- USER ---
 def register_user(user_id, name):
@@ -156,6 +160,55 @@ def get_state_value(key: str, default=None):
         if not row or row[0] is None:
             return default
         return row[0]
+
+
+def sheet_mark_ok(ts: int | None = None):
+    """Позначає, що з'єднання з таблицею є, та скидає offline-стан."""
+    now_ts = int(ts or time.time())
+    try:
+        set_state("sheet_last_ok_ts", str(now_ts))
+        set_state("sheet_first_fail_ts", "")
+        set_state("sheet_offline", "0")
+        set_state("sheet_offline_since_ts", "")
+    except Exception:
+        pass
+
+
+def sheet_mark_fail(ts: int | None = None):
+    """Фіксує перший момент, коли таблиця стала недоступною (для відліку 24 год)."""
+    now_ts = int(ts or time.time())
+    try:
+        first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
+        if not first:
+            set_state("sheet_first_fail_ts", str(now_ts))
+    except Exception:
+        pass
+
+
+def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
+    """True якщо offline уже активний або якщо помилка доступу триває >= threshold_seconds."""
+    try:
+        if str(get_state_value("sheet_offline", "0") or "0").strip() == "1":
+            return True
+
+        first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
+        if not first:
+            return False
+
+        first_ts = int(float(first))
+        if (time.time() - first_ts) >= int(threshold_seconds):
+            set_state("sheet_offline", "1")
+            set_state("sheet_offline_since_ts", str(int(time.time())))
+            return True
+
+        return False
+
+    except Exception:
+        return False
+
+
+def sheet_is_offline() -> bool:
+    return bool(sheet_check_offline())
 
 
 def get_state():

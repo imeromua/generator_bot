@@ -378,7 +378,21 @@ async def gen_start(cb: types.CallbackQuery):
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
-    sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+    offline = db.sheet_is_offline()
+    sheet_ok, open_shift, completed_sheet, start_times = (False, None, set(), {})
+
+    if not offline:
+        try:
+            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+            if sheet_ok:
+                db.sheet_mark_ok()
+            else:
+                db.sheet_mark_fail()
+                db.sheet_check_offline()
+        except Exception:
+            db.sheet_mark_fail()
+            db.sheet_check_offline()
+
     if sheet_ok and open_shift:
         _sync_db_from_sheet_open_shift(open_shift, start_times)
         return await cb.answer(
@@ -452,7 +466,20 @@ async def gen_stop(cb: types.CallbackQuery):
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_")[0]
 
-    sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+    offline = db.sheet_is_offline()
+    sheet_ok, open_shift, completed_sheet, start_times = (False, None, set(), {})
+
+    if not offline:
+        try:
+            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+            if sheet_ok:
+                db.sheet_mark_ok()
+            else:
+                db.sheet_mark_fail()
+                db.sheet_check_offline()
+        except Exception:
+            db.sheet_mark_fail()
+            db.sheet_check_offline()
 
     # Якщо в таблиці вже закрито — кнопкою СТОП нічого не пишемо, тільки синхронізуємо стан
     if sheet_ok and expected_code in completed_sheet:
@@ -536,11 +563,28 @@ async def gen_stop(cb: types.CallbackQuery):
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
     fuel_consumed = dur * config.FUEL_CONSUMPTION
+
+    # OFFLINE: ведемо локальний облік палива та мотогодин
+    if db.sheet_is_offline():
+        try:
+            db.update_fuel(-float(fuel_consumed or 0.0))
+        except Exception:
+            pass
+        try:
+            db.update_hours(float(dur or 0.0))
+        except Exception:
+            pass
+        st = db.get_state()  # оновити для банера
+
     try:
         canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
     except Exception:
         canonical_fuel = 0.0
-    remaining_est = canonical_fuel - fuel_consumed
+
+    if db.sheet_is_offline():
+        remaining_est = canonical_fuel
+    else:
+        remaining_est = canonical_fuel - fuel_consumed
 
     db.set_state('status', 'OFF')
     db.set_state('active_shift', 'none')
@@ -654,6 +698,12 @@ async def refill_save(msg: types.Message, state: FSMContext):
 
     log_val = f"{liters}|{receipt_num}"
     db.add_log("refill", operator_personnel, log_val, driver)
+
+    if db.sheet_is_offline():
+        try:
+            db.update_fuel(float(liters or 0.0))
+        except Exception:
+            pass
 
     await state.clear()
 

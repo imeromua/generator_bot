@@ -224,8 +224,12 @@ def _sync_canonical_state_from_sheet(sheet):
 def sync_canonical_state_once():
     """Разове оновлення еталонного стану (Sheet -> БД). Викликається з /start для актуального дашборду."""
     if not config.SHEET_ID:
+        db.sheet_mark_fail()
+        db.sheet_check_offline()
         return
     if not os.path.exists("service_account.json"):
+        db.sheet_mark_fail()
+        db.sheet_check_offline()
         return
 
     global _LAST_CANONICAL_SYNC_TS
@@ -244,12 +248,16 @@ def sync_canonical_state_once():
         creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
         client = gspread.authorize(creds)
         sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
+
+        db.sheet_mark_ok()
         _sync_canonical_state_from_sheet(sheet)
 
     except Exception as e:
         # Дозволяємо швидку повторну спробу при падінні (не кешуємо помилку)
         with _CANONICAL_SYNC_LOCK:
             _LAST_CANONICAL_SYNC_TS = 0.0
+        db.sheet_mark_fail()
+        db.sheet_check_offline()
         logging.error(f"❌ sync_canonical_state_once error: {e}")
 
 
@@ -469,10 +477,14 @@ async def sync_loop():
     """Фоновий процес синхронізації"""
     if not config.SHEET_ID:
         logging.error("❌ SHEET_ID не знайдено! Синхронізацію вимкнено.")
+        db.sheet_mark_fail()
+        db.sheet_check_offline()
         return
 
     if not os.path.exists("service_account.json"):
         logging.error("❌ Файл service_account.json не знайдено! Синхронізацію вимкнено.")
+        db.sheet_mark_fail()
+        db.sheet_check_offline()
         return
 
     print(f"🚀 Google Sync запущено. Таблиця: {config.SHEET_NAME}")
@@ -491,6 +503,8 @@ async def sync_loop():
             sheet = ss.worksheet(config.SHEET_NAME)
             logs_ws = _ensure_logs_worksheet(ss)
             _ensure_logs_header(logs_ws)
+
+            db.sheet_mark_ok()
 
             _import_initial_state_from_sheet(sheet)
 
@@ -632,10 +646,16 @@ async def sync_loop():
             _sync_canonical_state_from_sheet(sheet)
 
         except gspread.exceptions.APIError as e:
+            db.sheet_mark_fail()
+            db.sheet_check_offline()
             logging.error(f"❌ Google API Error: {e}")
         except gspread.exceptions.SpreadsheetNotFound:
+            db.sheet_mark_fail()
+            db.sheet_check_offline()
             logging.error(f"❌ Таблиця з ID {config.SHEET_ID} не знайдена!")
         except Exception as e:
+            db.sheet_mark_fail()
+            db.sheet_check_offline()
             logging.error(f"❌ Sync Error: {e}")
 
         await asyncio.sleep(60)
