@@ -80,6 +80,30 @@ async def maybe_auto_close_shift(
                 logger.info("🤖 Auto-close: зміна вже закрита, пропускаємо")
                 return True, True
 
+            # wrong_shift означає: status=ON, але active_shift не відповідає expected_start.
+            # Тут НЕ можна робити forced OFF, бо це зламає інваріант: "ON без end-log".
+            # Краще просто сповістити адмінів і залишити стан як є (вони закриють вручну).
+            if close_reason == "wrong_shift":
+                logger.warning(
+                    f"⚠️ Auto-close: wrong_shift (active_shift={active_shift}). "
+                    f"Не робимо forced OFF, потрібна ручна перевірка."
+                )
+
+                admin_txt = (
+                    f"⚠️ <b>Авто-закриття НЕ виконано</b>\n\n"
+                    f"Причина: <b>wrong_shift</b>\n"
+                    f"Активна зміна в state: <b>{active_shift}</b>\n\n"
+                    f"Перевірте і закрийте зміну вручну (СТОП)."
+                )
+
+                for admin_id in config.ADMIN_IDS:
+                    try:
+                        await bot.send_message(admin_id, admin_txt)
+                    except Exception:
+                        pass
+
+                return True, True
+
             # fallback: щоб не лишати генератор у ON при поламаному state
             forced_close = True
             db.set_state("status", "OFF")
