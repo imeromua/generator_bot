@@ -14,7 +14,7 @@ import config
 logger = logging.getLogger(__name__)
 
 
-_REQUIRED_COLS = ["timestamp", "event_type", "user_name", "liters", "receipt", "driver"]
+_REQUIRED_COLS = ["timestamp", "event_type", "user_name", "liters", "receipt", "driver", "value_raw"]
 
 
 def _normalize(val) -> str:
@@ -92,6 +92,8 @@ def _map_columns_by_header(ws, header_row: int) -> dict:
         "liters": {"liters", "літри", "літрів", "л", "l", "об'єм", "обʼєм", "обєм"},
         "receipt": {"receipt", "чек", "квитанція", "№ чека", "номер чека"},
         "driver": {"driver", "водій", "driver_name"},
+        "value_raw": {"value_raw", "value", "значення"},
+        "log_id": {"log_id", "id", "#"},
     }
 
     mapping = {}
@@ -101,10 +103,9 @@ def _map_columns_by_header(ws, header_row: int) -> dict:
                 mapping[out_col] = idx
                 break
 
-    # Fallback: assume new logs sheet format with optional log_id at col 1
+    # Fallback: assume events sheet format: (id), ts, type, user, liters, receipt, driver, value
     if all(k not in mapping for k in _REQUIRED_COLS):
-        first = header_vals[0] if header_vals else ""
-        start_idx = 2 if first in {"log_id", "id", "#"} else 1
+        start_idx = 2 if (header_vals and header_vals[0] in {"log_id", "id", "#"}) else 1
         mapping = {
             "timestamp": start_idx,
             "event_type": start_idx + 1,
@@ -112,6 +113,7 @@ def _map_columns_by_header(ws, header_row: int) -> dict:
             "liters": start_idx + 3,
             "receipt": start_idx + 4,
             "driver": start_idx + 5,
+            "value_raw": start_idx + 6,
         }
 
     return mapping
@@ -152,6 +154,42 @@ def _cell_to_date(val):
     return None
 
 
+def _cell_to_datetime(val) -> datetime | None:
+    if val is None or val == "":
+        return None
+
+    if isinstance(val, datetime):
+        return val
+
+    if isinstance(val, (int, float)):
+        try:
+            dt = from_excel(val, offset=0)
+            if isinstance(dt, datetime):
+                return dt
+        except Exception:
+            return None
+
+    s = str(val).strip()
+    fmts = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%d.%m.%Y",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+    ]
+
+    for f in fmts:
+        try:
+            return datetime.strptime(s, f)
+        except Exception:
+            continue
+
+    return None
+
+
 def _copy_cell(src_cell, dst_cell):
     dst_cell.value = src_cell.value
 
@@ -176,15 +214,76 @@ def _copy_column_dimensions(src_ws, dst_ws, src_col_idx: int, dst_col_idx: int):
         dst_dim.outlineLevel = src_dim.outlineLevel
 
 
+def _pretty_shift(val: str) -> str:
+    v = (val or "").strip()
+    if not v:
+        return ""
+
+    key = v.lower()
+    if key in {"m", "1", "зміна 1", "зміна1"}:
+        return "🟦 Зміна 1"
+    if key in {"d", "2", "зміна 2", "зміна2"}:
+        return "🟩 Зміна 2"
+    if key in {"e", "3", "зміна 3", "зміна3"}:
+        return "🟪 Зміна 3"
+    if key in {"x", "екстра", "extra"}:
+        return "⚡ Екстра"
+
+    return v
+
+
+def _format_event_line(ts, event_type, user_name, liters, receipt, driver, value_raw) -> str:
+    dt = _cell_to_datetime(ts)
+    dt_part = dt.strftime("%d.%m %H:%M") if dt else ""
+
+    et = _normalize(event_type)
+    user = ("" if user_name is None else str(user_name).strip())
+
+    def suffix_user() -> str:
+        return f" ({user})" if user else ""
+
+    # Fuel/refill
+    if any(k in et for k in {"палив", "refill", "fuel", "прийом"}):
+        l = "" if liters in (None, "") else str(liters).strip()
+        chk = "" if receipt in (None, "") else str(receipt).strip()
+        drv = "" if driver in (None, "") else str(driver).strip()
+
+        parts = []
+        if l:
+            parts.append(f"{l} л")
+        if chk:
+            parts.append(f"чек {chk}")
+        if drv:
+            parts.append(f"водій {drv}")
+
+        body = ": ".join([
+            "⛽ Прийом палива",
+            ", ".join(parts) if parts else "",
+        ]).rstrip(": ")
+        return f"• {dt_part} — {body}{suffix_user()}".strip()
+
+    # Start/stop
+    if any(k in et for k in {"старт", "start", "почат"}):
+        shift = _pretty_shift("" if value_raw is None else str(value_raw))
+        return f"• {dt_part} — ▶️ Старт: {shift}{suffix_user()}".strip()
+
+    if any(k in et for k in {"стоп", "stop", "кінец", "конец", "end"}):
+        shift = _pretty_shift("" if value_raw is None else str(value_raw))
+        return f"• {dt_part} — ⏹ Стоп: {shift}{suffix_user()}".strip()
+
+    # Fallback
+    label = "Тип події" if not event_type else str(event_type).strip()
+    val = ("" if value_raw is None else str(value_raw).strip())
+    tail = f": {val}" if val else ""
+    return f"• {dt_part} — {label}{tail}{suffix_user()}".strip()
+
+
 async def generate_logs_report_xlsx(
     start_date: str,
     end_date: str,
     sheet_name: str | None = None,
 ):
-    """Generate XLSX with original styles but only required columns for a given date range.
-
-    Reads data from monthly sheet (sheet_name, default config.SHEET_NAME).
-    """
+    """Generate XLSX events report from sheet (default: 'ПОДІЇ') for a given date range."""
 
     if not config.SHEET_ID:
         return None, "❌ SHEET_ID не знайдено"
@@ -198,7 +297,7 @@ async def generate_logs_report_xlsx(
     except Exception:
         return None, "❌ Некоректний формат дати (очікується YYYY-MM-DD)"
 
-    period_title = sheet_name or config.SHEET_NAME
+    period_title = sheet_name or "ПОДІЇ"
 
     ts = datetime.now(config.KYIV).strftime("%Y%m%d_%H%M%S")
     exported = f"_source_export_{ts}.xlsx"
@@ -249,27 +348,58 @@ async def generate_logs_report_xlsx(
             out_ws.row_dimensions[1].height = src_ws.row_dimensions[header_row].height
 
         out_r = 2
+        preview_lines: list[str] = []
+
         for src_r in data_rows:
             if src_ws.row_dimensions.get(src_r):
                 out_ws.row_dimensions[out_r].height = src_ws.row_dimensions[src_r].height
 
+            row_vals = {}
             for dst_i, key in enumerate(_REQUIRED_COLS, start=1):
                 src_i = col_map.get(key)
                 if not src_i:
                     continue
-                _copy_cell(src_ws.cell(row=src_r, column=src_i), out_ws.cell(row=out_r, column=dst_i))
+
+                src_cell = src_ws.cell(row=src_r, column=src_i)
+                dst_cell = out_ws.cell(row=out_r, column=dst_i)
+                _copy_cell(src_cell, dst_cell)
+                row_vals[key] = src_cell.value
+
+            preview_lines.append(
+                _format_event_line(
+                    row_vals.get("timestamp"),
+                    row_vals.get("event_type"),
+                    row_vals.get("user_name"),
+                    row_vals.get("liters"),
+                    row_vals.get("receipt"),
+                    row_vals.get("driver"),
+                    row_vals.get("value_raw"),
+                )
+            )
 
             out_r += 1
 
         out_wb.save(out_file)
 
+        # Telegram caption is limited, so cap preview
+        preview_lines = [ln for ln in preview_lines if ln]
+        preview_tail = preview_lines[-15:]
+
+        start_ui = datetime.strptime(start_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+        end_ui = datetime.strptime(end_date, "%Y-%m-%d").strftime("%d.%m.%Y")
+
         caption = (
             f"📤 <b>Експорт подій (Excel)</b>\n"
-            f"Період: <b>{start_date}</b> — <b>{end_date}</b>\n"
+            f"Період: <b>{start_ui}</b> — <b>{end_ui}</b>\n"
             f"Джерело: <b>{period_title}</b>\n"
-            f"Колонки: <code>timestamp,event_type,user_name,liters,receipt,driver</code>\n"
-            f"Рядків: <b>{len(data_rows)}</b>"
+            f"Подій: <b>{len(data_rows)}</b>\n\n"
+            f"🕘 <b>Останні події ({len(preview_tail)})</b>\n"
+            + "\n".join(preview_tail)
         )
+
+        # hard safety
+        if len(caption) > 950:
+            caption = caption[:940] + "…"
 
         return out_file, caption
 
