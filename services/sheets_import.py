@@ -13,6 +13,8 @@ from services.google_sync_parts.client import make_client, open_spreadsheet, ope
 
 logger = logging.getLogger(__name__)
 
+FUEL_CONSUMPTION_RATE = 0.8  # літрів на годину
+
 
 def _parse_date(date_str: str) -> str | None:
     """Парсить DD.MM.YYYY в YYYY-MM-DD"""
@@ -56,7 +58,7 @@ def _restore_generator_state():
     """Відновлює generator_state з логів.
     
     Обчислює:
-    - current_fuel (поточний залишок палива)
+    - current_fuel (поточний залишок палива з врахуванням витрат)
     - total_hours (загальні мотогодини)
     - last_oil_change, last_spark_change (останнє ТО)
     """
@@ -65,7 +67,6 @@ def _restore_generator_state():
     conn = get_connection()
     cur = conn.cursor()
     
-    # Читаємо всі логи
     cur.execute("""
         SELECT event_type, timestamp, value
         FROM logs
@@ -73,7 +74,6 @@ def _restore_generator_state():
     """)
     rows = cur.fetchall()
     
-    # Читаємо ТО
     cur.execute("""
         SELECT date, type, hours
         FROM maintenance
@@ -82,44 +82,34 @@ def _restore_generator_state():
     """)
     mnt_rows = cur.fetchall()
     
-    # Обчислюємо стан
     running_fuel = 0.0
     running_hours = 0.0
+    active_shifts = {}  # {shift: start_time}
     
     for event, ts_str, value in rows:
         if event == 'refill':
             running_fuel += float(value or 0)
         elif event == 'fuel_set':
             running_fuel = float(value or 0)
-        elif event.endswith('_end'):
-            # Обчислюємо години зі змін
-            # (просте обчислення: шукаємо відповідний _start)
+        elif event.endswith('_start'):
             shift = event.split('_')[0]
-            start_event = f"{shift}_start"
-            
-            # Шукаємо останній start для цієї зміни
-            cur2 = conn.cursor()
-            cur2.execute("""
-                SELECT timestamp FROM logs
-                WHERE event_type = ? AND timestamp < ?
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """, (start_event, ts_str))
-            start_row = cur2.fetchone()
-            
-            if start_row:
+            active_shifts[shift] = ts_str
+        elif event.endswith('_end'):
+            shift = event.split('_')[0]
+            if shift in active_shifts:
                 try:
-                    start_ts = datetime.strptime(start_row[0], "%Y-%m-%d %H:%M:%S")
+                    start_ts = datetime.strptime(active_shifts[shift], "%Y-%m-%d %H:%M:%S")
                     end_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
                     delta = (end_ts - start_ts).total_seconds() / 3600.0
                     running_hours += delta
+                    # FIX #5: Віднімаємо витрати палива
+                    running_fuel -= delta * FUEL_CONSUMPTION_RATE
                 except Exception:
                     pass
-        
+                del active_shifts[shift]
         elif event == 'total_hours_set':
             running_hours = float(value or 0)
     
-    # Знаходимо останнє ТО
     last_oil = ""
     last_spark = ""
     
@@ -132,7 +122,6 @@ def _restore_generator_state():
         if last_oil and last_spark:
             break
     
-    # Записуємо в generator_state
     conn.execute("UPDATE generator_state SET value = ? WHERE key = 'current_fuel'", (str(running_fuel),))
     conn.execute("UPDATE generator_state SET value = ? WHERE key = 'total_hours'", (str(running_hours),))
     
@@ -141,7 +130,6 @@ def _restore_generator_state():
     if last_spark:
         conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_spark_change'", (last_spark,))
     
-    # Скидаємо статус (генератор вимкнений після імпорту)
     conn.execute("UPDATE generator_state SET value = 'OFF' WHERE key = 'status'")
     conn.execute("UPDATE generator_state SET value = 'none' WHERE key = 'active_shift'")
     
@@ -176,12 +164,10 @@ def _import_main_sheet(sheet):
         if len(row) < 29:
             row.extend([""] * (29 - len(row)))
         
-        # A: дата
         date_str = _parse_date(row[0])
         if not date_str:
             continue
         
-        # B-I: часи старт/стоп змін (m/d/e/x)
         shifts = [
             ('m', row[1], row[2]),
             ('d', row[3], row[4]),
@@ -189,7 +175,6 @@ def _import_main_sheet(sheet):
             ('x', row[7], row[8]),
         ]
         
-        # S-Z: відповідальні за зміни (start_user, end_user)
         shift_users = [
             (row[18], row[19]),
             (row[20], row[21]),
@@ -197,7 +182,6 @@ def _import_main_sheet(sheet):
             (row[24], row[25]),
         ]
         
-        # Записуємо зміни в logs
         for i, (shift_code, start_time, end_time) in enumerate(shifts):
             start_user, end_user = shift_users[i]
             
@@ -222,18 +206,14 @@ def _import_main_sheet(sheet):
                 if end_user and end_user.strip():
                     all_personnel.add(end_user.strip())
         
-        # N: привезено палива
         refill_str = row[13].strip() if len(row) > 13 and row[13] else ""
         if refill_str:
             try:
                 refill_amount = float(refill_str)
                 if refill_amount > 0:
-                    # AA: хто привіз паливо
                     driver = row[26].strip() if len(row) > 26 and row[26] else ""
-                    # P: номер чека
                     receipt = row[15].strip() if len(row) > 15 and row[15] else ""
                     
-                    # Час refill — кінець останньої зміни або 23:59
                     refill_time = "23:59:00"
                     for shift_code, start_time, end_time in reversed(shifts):
                         if _parse_time(end_time):
@@ -251,14 +231,11 @@ def _import_main_sheet(sheet):
             except Exception as e:
                 logger.warning(f"⚠️ Не вдалося розпарсити refill в рядку {row_idx}: {e}")
         
-        # R: ТО дата
         mnt_date = row[17].strip() if len(row) > 17 and row[17] else ""
         if mnt_date:
-            # Q: мотогодини
             hours_str = row[16].strip() if len(row) > 16 and row[16] else "0"
             try:
                 hours = float(hours_str)
-                # Записуємо в maintenance
                 conn.execute(
                     "INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)",
                     (date_str, "oil", hours, "import")
@@ -268,7 +245,6 @@ def _import_main_sheet(sheet):
     
     conn.commit()
     
-    # Записуємо водіїв і персонал
     for driver in all_drivers:
         try:
             conn.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (driver,))
@@ -321,25 +297,19 @@ def full_import():
     - Вкладку ПОДІЇ (опціонально)
     
     Відновлює logs, maintenance, drivers, personnel в БД.
-    Після імпорту відновлює generator_state (паливо, мотогодини, ТО).
+    Після імпорту відновлює generator_state (паливо з врахуванням витрат, мотогодини, ТО).
     """
     logger.info("📥 Починаємо імпорт з Sheets в БД...")
     
-    # Очищаємо БД
     _clear_db()
     
-    # Підключаємось до Sheets
     client = make_client()
     ss = open_spreadsheet(client)
     main_sheet = open_main_worksheet(ss)
     
-    # Імпортуємо основну вкладку
     _import_main_sheet(main_sheet)
-    
-    # Імпортуємо вкладку ПОДІЇ (опціонально)
     _import_events_sheet(ss)
     
-    # FIX #3: Відновлюємо стан генератора
     _restore_generator_state()
     
     logger.info("✅ Імпорт завершено!")

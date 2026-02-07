@@ -35,6 +35,8 @@ from services.google_sync_parts.client import make_client, open_spreadsheet, ope
 
 logger = logging.getLogger(__name__)
 
+FUEL_CONSUMPTION_RATE = 0.8  # літрів на годину
+
 
 def _parse_ts(ts_str: str) -> datetime | None:
     """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)"""
@@ -104,13 +106,13 @@ def _get_fuel_before_date(from_date: str) -> float:
     """Знаходить fuel_end з дня ПЕРЕД from_date.
     
     Це потрібно для правильного розрахунку fuel_start при інкрементальному експорті.
+    Враховує витрати палива!
     """
     conn = db.get_connection()
     cur = conn.cursor()
     
-    # Читаємо всі логи до from_date
     cur.execute("""
-        SELECT event_type, value
+        SELECT event_type, timestamp, value
         FROM logs
         WHERE timestamp < ?
         ORDER BY timestamp ASC
@@ -120,11 +122,32 @@ def _get_fuel_before_date(from_date: str) -> float:
     conn.close()
     
     running_fuel = 0.0
-    for event, value in rows:
+    running_hours = 0.0
+    active_shifts = {}  # {shift: start_time}
+    
+    for event, ts_str, value in rows:
         if event == 'refill':
             running_fuel += float(value or 0)
         elif event == 'fuel_set':
             running_fuel = float(value or 0)
+        elif event.endswith('_start'):
+            shift = event.split('_')[0]
+            active_shifts[shift] = ts_str
+        elif event.endswith('_end'):
+            shift = event.split('_')[0]
+            if shift in active_shifts:
+                try:
+                    start_ts = datetime.strptime(active_shifts[shift], "%Y-%m-%d %H:%M:%S")
+                    end_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    delta = (end_ts - start_ts).total_seconds() / 3600.0
+                    running_hours += delta
+                    # FIX #6: Віднімаємо витрати палива
+                    running_fuel -= delta * FUEL_CONSUMPTION_RATE
+                except Exception:
+                    pass
+                del active_shifts[shift]
+        elif event == 'total_hours_set':
+            running_hours = float(value or 0)
     
     logger.info(f"🛢 Залишок палива перед {from_date}: {running_fuel:.1f}л")
     return running_fuel
@@ -147,7 +170,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     conn = db.get_connection()
     cur = conn.cursor()
     
-    # Читаємо всі логи (сортуємо по часу)
     cur.execute("""
         SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
         FROM logs
@@ -155,7 +177,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     """)
     rows = cur.fetchall()
     
-    # Читаємо maintenance
     cur.execute("""
         SELECT date, type, hours
         FROM maintenance
@@ -165,7 +186,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     
     conn.close()
     
-    # Структура даних по датах
     days = defaultdict(lambda: {
         'shifts': {'m': {}, 'd': {}, 'e': {}, 'x': {}},
         'refills': [],
@@ -175,7 +195,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         'fuel_end': 0.0,
     })
     
-    # Обробляємо логи
     running_hours = 0.0
     running_fuel = 0.0
     
@@ -188,7 +207,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         date_str = dt.strftime("%Y-%m-%d")
         day = days[date_str]
         
-        # Старт/стоп змін
         if event.endswith('_start'):
             shift = event.split('_')[0]
             day['shifts'][shift]['start'] = dt
@@ -204,35 +222,30 @@ def _aggregate_logs_by_date(from_date: str | None = None):
             if start and end:
                 delta = (end - start).total_seconds() / 3600.0
                 running_hours += delta
+                # FIX #6: Віднімаємо витрати палива
+                running_fuel -= delta * FUEL_CONSUMPTION_RATE
         
-        # Заправка
         elif event == 'refill':
             amount = float(value or 0)
             running_fuel += amount
             day['refills'].append((amount, driver or "", receipt or ""))
         
-        # Корекція палива
         elif event == 'fuel_set':
             running_fuel = float(value or 0)
         
-        # Корекція мотогодин
         elif event == 'total_hours_set':
             running_hours = float(value or 0)
         
-        # Зберігаємо стан на кінець дня
         day['total_hours_end'] = running_hours
         day['fuel_end'] = running_fuel
     
-    # Обробляємо maintenance
     for row in mnt_rows:
         date_str, mnt_type, hours = row
         if date_str in days:
             days[date_str]['maintenance'].append((mnt_type, hours))
     
-    # Обчислюємо fuel_start для кожного дня
     sorted_dates = sorted(days.keys())
     
-    # FIX #1: Якщо є from_date, беремо fuel_end з попереднього дня
     if from_date:
         prev_fuel = _get_fuel_before_date(from_date)
     else:
@@ -242,7 +255,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         days[d]['fuel_start'] = prev_fuel
         prev_fuel = days[d]['fuel_end']
     
-    # Фільтруємо по даті якщо потрібно
     if from_date:
         days = {d: data for d, data in days.items() if d >= from_date}
     
@@ -258,19 +270,16 @@ def _build_export_rows(days_data):
     for date_str in sorted_dates:
         day = days_data[date_str]
         
-        # A: дата (DD.MM.YYYY)
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         date_fmt = dt.strftime("%d.%m.%Y")
         
         row = [date_fmt]
         
-        # B-I: часи старт/стоп по змінах (m/d/e/x)
         for shift in ['m', 'd', 'e', 'x']:
             s = day['shifts'].get(shift, {})
             row.append(_time_to_hhmm(s.get('start')))
             row.append(_time_to_hhmm(s.get('end')))
         
-        # J: всього годин за день
         total_day_hours = 0.0
         for shift in ['m', 'd', 'e', 'x']:
             s = day['shifts'].get(shift, {})
@@ -281,58 +290,46 @@ def _build_export_rows(days_data):
                 total_day_hours += delta
         row.append(_hours_to_hhmm(total_day_hours))
         
-        # K: залишок палива на ранок
         fuel_start = day['fuel_start']
         row.append(f"{fuel_start:.1f}" if fuel_start > 0 else "")
         
-        # L: витрати палива (обчислюється як 0.8л/год)
-        fuel_consumed = total_day_hours * 0.8
+        fuel_consumed = total_day_hours * FUEL_CONSUMPTION_RATE
         row.append(f"{fuel_consumed:.1f}" if fuel_consumed > 0 else "")
         
-        # M: залишок після витрат
         fuel_after = fuel_start - fuel_consumed
         row.append(f"{fuel_after:.1f}" if fuel_after != 0 else "")
         
-        # N: привезено палива (сума refill)
         total_refill = sum(r[0] for r in day['refills'])
         row.append(f"{total_refill:.1f}" if total_refill > 0 else "")
         
-        # O: залишок ввечері
         fuel_end = day['fuel_end']
         row.append(f"{fuel_end:.1f}" if fuel_end > 0 else "")
         
-        # P: номер чека (перший receipt_number з refill)
         receipt = ""
         if day['refills']:
             receipt = day['refills'][0][2]
         row.append(receipt or "")
         
-        # Q: мотогодини на кінець дня
         row.append(f"{day['total_hours_end']:.1f}" if day['total_hours_end'] > 0 else "")
         
-        # R: ТО дата (тільки в день заміни)
         mnt_date = ""
         if day['maintenance']:
             mnt_date = date_fmt
         row.append(mnt_date)
         
-        # S-Z: відповідальні за зміни (start_user, end_user)
         for shift in ['m', 'd', 'e', 'x']:
             s = day['shifts'].get(shift, {})
             row.append(s.get('start_user', ""))
             row.append(s.get('end_user', ""))
         
-        # AA: хто привіз паливо (перший driver з refill)
         driver = ""
         if day['refills']:
             driver = day['refills'][0][1]
         row.append(driver or "")
         
-        # AB: водії (список унікальних drivers з refill)
         drivers = list(set(r[1] for r in day['refills'] if r[1]))
         row.append(", ".join(drivers) if drivers else "")
         
-        # AC: персонал (список унікальних users зі змін)
         users = set()
         for shift in ['m', 'd', 'e', 'x']:
             s = day['shifts'].get(shift, {})
@@ -358,27 +355,22 @@ def full_export():
     """
     logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
     
-    # Підключаємось до Sheets
     client = make_client()
     ss = open_spreadsheet(client)
     main_sheet = open_main_worksheet(ss)
     
-    # Знаходимо останню дату в Sheets
     last_date = _find_last_date_in_sheet(main_sheet)
     
-    # Агрегуємо дані (тільки >= last_date)
     days_data = _aggregate_logs_by_date(from_date=last_date)
     
     if not days_data:
         logger.info("ℹ️ Немає нових даних для експорту")
         return
     
-    # Будуємо рядки
     main_rows = _build_export_rows(days_data)
     
     logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {last_date or 'початку'})")
     
-    # Записуємо основну вкладку
     if main_rows:
         if last_date:
             all_values = main_sheet.get_all_values()
@@ -404,7 +396,6 @@ def full_export():
         )
         logger.info(f"✅ Основна вкладка оновлена (рядки {start_row}-{end_row})")
     
-    # FIX #2: ПОВНІСТЮ ПЕРЕЗАПИСУЄМО вкладку ПОДІЇ (щоб уникнути дублювання)
     logger.info("📄 Експортуємо вкладку ПОДІЇ (повна перезапис)...")
     
     try:
@@ -412,13 +403,9 @@ def full_export():
     except Exception:
         events_sheet = ss.add_worksheet("ПОДІЇ", rows=10000, cols=7)
     
-    # Очищаємо вкладку
     events_sheet.clear()
-    
-    # Записуємо шапку
     events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
     
-    # Читаємо ВСІ події з БД
     conn = db.get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -447,7 +434,6 @@ def full_export():
         ])
     
     if events:
-        # Записуємо всі події одним батчем
         events_sheet.update(
             f"A2:G{len(events) + 1}",
             events,
