@@ -16,25 +16,94 @@ def ensure_logs_worksheet(ss):
             return None
 
 
-def ensure_logs_header(ws):
+def _format_logs_header(ws):
+    """Оформлення заголовка вкладки логів так само як в основних вкладках."""
     if not ws:
         return
-    header = ["log_id", "timestamp", "event_type", "user_name", "liters", "receipt", "driver", "value_raw"]
+
     try:
-        row1 = ws.row_values(1)
-        if row1 and (row1[0].strip().lower() == "log_id"):
-            return
+        # 1) Формат клітинок заголовка
+        ws.format(
+            "A1:H1",
+            {
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+                "textFormat": {"bold": True},
+                # Яскраво-ніжно голубий (пастельний)
+                "backgroundColor": {"red": 0.70, "green": 0.90, "blue": 1.00},
+            },
+        )
     except Exception:
         pass
 
     try:
-        ws.update(
-            range_name="A1:H1",
-            values=[header],
-            value_input_option="RAW"
-        )
+        # 2) Висота 1-го рядка (вдвічі вище за стандарт)
+        sheet_id = getattr(ws, "id", None)
+        if sheet_id is None and hasattr(ws, "_properties"):
+            sheet_id = ws._properties.get("sheetId")
+
+        if sheet_id is not None:
+            ws.spreadsheet.batch_update(
+                {
+                    "requests": [
+                        {
+                            "updateDimensionProperties": {
+                                "range": {
+                                    "sheetId": sheet_id,
+                                    "dimension": "ROWS",
+                                    "startIndex": 0,
+                                    "endIndex": 1,
+                                },
+                                "properties": {"pixelSize": 40},
+                                "fields": "pixelSize",
+                            }
+                        }
+                    ]
+                }
+            )
     except Exception:
         pass
+
+
+def ensure_logs_header(ws):
+    if not ws:
+        return
+
+    # Українські назви колонок
+    header = [
+        "ID",
+        "Дата/час",
+        "Тип події",
+        "Користувач",
+        "Літри",
+        "Чек",
+        "Водій",
+        "Значення",
+    ]
+
+    need_update = True
+    try:
+        row1 = ws.row_values(1)
+        if row1:
+            # Якщо заголовок вже такий самий — не переписуємо, але формат все одно забезпечимо
+            normalized = [str(x).strip() for x in row1[: len(header)]]
+            if normalized == header:
+                need_update = False
+    except Exception:
+        pass
+
+    if need_update:
+        try:
+            ws.update(
+                range_name="A1:H1",
+                values=[header],
+                value_input_option="RAW",
+            )
+        except Exception:
+            pass
+
+    _format_logs_header(ws)
 
 
 def ensure_logs_rows(ws, needed_row: int):
@@ -94,5 +163,5 @@ def upsert_log_row(ws, lid: int, ltime: str, ltype: str, luser: str, lval: str, 
     ws.update(
         range_name=f"A{row}:H{row}",
         values=[values],
-        value_input_option='USER_ENTERED'
+        value_input_option="USER_ENTERED",
     )
