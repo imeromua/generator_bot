@@ -196,11 +196,24 @@ def _conn_get_state_float(conn, key: str, default: float = 0.0) -> float:
         return float(default)
 
 
+def sheet_is_forced_offline() -> bool:
+    """True якщо адмін примусово увімкнув OFFLINE (навіть якщо Sheets доступний)."""
+    try:
+        return str(get_state_value("sheet_offline_forced", "0") or "0").strip() == "1"
+    except Exception:
+        return False
+
+
 def sheet_mark_ok(ts: int | None = None):
-    """Позначає, що з'єднання з таблицею є, та скидає offline-стан."""
+    """Позначає, що з'єднання з таблицею є.
+
+    Якщо OFFLINE примусовий (sheet_offline_forced=1) — не вимикаємо його автоматично.
+    """
     now_ts = int(ts or time.time())
     try:
         set_state("sheet_last_ok_ts", str(now_ts))
+        if sheet_is_forced_offline():
+            return
         set_state("sheet_first_fail_ts", "")
         set_state("sheet_offline", "0")
         set_state("sheet_offline_since_ts", "")
@@ -223,6 +236,8 @@ def sheet_force_offline(ts: int | None = None):
     """Примусово вмикає offline-режим (адмінська дія)."""
     now_ts = int(ts or time.time())
     try:
+        set_state("sheet_offline_forced", "1")
+
         # якщо перша помилка ще не зафіксована — ставимо, щоб було видно в адмінці
         first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
         if not first:
@@ -241,6 +256,7 @@ def sheet_force_online(ts: int | None = None):
     """
     now_ts = int(ts or time.time())
     try:
+        set_state("sheet_offline_forced", "0")
         set_state("sheet_offline", "0")
         set_state("sheet_offline_since_ts", "")
         set_state("sheet_first_fail_ts", "")
@@ -249,8 +265,11 @@ def sheet_force_online(ts: int | None = None):
 
 
 def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
-    """True якщо offline уже активний або якщо помилка доступу триває >= threshold_seconds."""
+    """True якщо offline активний (авто або примусово) або якщо помилка доступу триває >= threshold_seconds."""
     try:
+        if sheet_is_forced_offline():
+            return True
+
         if str(get_state_value("sheet_offline", "0") or "0").strip() == "1":
             return True
 

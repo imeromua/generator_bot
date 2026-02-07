@@ -20,6 +20,11 @@ _CANONICAL_SYNC_LOCK = threading.Lock()
 _LAST_CANONICAL_SYNC_TS = 0.0
 _CANONICAL_SYNC_TTL_SECONDS = 30
 
+# --- Offline probe (avoid hammering Sheets when offline) ---
+_OFFLINE_PROBE_LOCK = threading.Lock()
+_LAST_OFFLINE_PROBE_TS = 0.0
+_OFFLINE_PROBE_INTERVAL_SECONDS = 5 * 60
+
 
 def _sheet_name_to_month(sheet_name: str):
     if not sheet_name:
@@ -497,8 +502,28 @@ async def sync_loop():
 
     print(f"🚀 Google Sync запущено. Таблиця: {config.SHEET_NAME}")
 
+    global _LAST_OFFLINE_PROBE_TS
+
     while True:
         try:
+            # Якщо OFFLINE активний — не хард-лупимо Google кожну хвилину.
+            # - Примусовий OFFLINE: взагалі не ходимо в Sheets.
+            # - Авто OFFLINE: робимо пробу раз на N хвилин, щоб можна було відновитись.
+            try:
+                if db.sheet_is_offline():
+                    if hasattr(db, "sheet_is_forced_offline") and db.sheet_is_forced_offline():
+                        await asyncio.sleep(60)
+                        continue
+
+                    now_probe = time.monotonic()
+                    with _OFFLINE_PROBE_LOCK:
+                        if (now_probe - _LAST_OFFLINE_PROBE_TS) < _OFFLINE_PROBE_INTERVAL_SECONDS:
+                            await asyncio.sleep(60)
+                            continue
+                        _LAST_OFFLINE_PROBE_TS = now_probe
+            except Exception:
+                pass
+
             scopes = [
                 "https://spreadsheets.google.com/feeds",
                 "https://www.googleapis.com/auth/drive"
