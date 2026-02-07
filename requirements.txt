@@ -1,4 +1,5 @@
-aiogram
+aiogram>=3.0,<4.0
+aiohttp>=3.8
 gspread
 google-auth
 google-auth-oauthlib
