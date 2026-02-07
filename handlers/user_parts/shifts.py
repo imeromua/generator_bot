@@ -19,6 +19,17 @@ from utils.time import format_hours_hhmm, now_kiev
 router = Router()
 
 
+def _within_work_window(now_t, start_t, end_t) -> bool:
+    """True if now_t is inside [start_t, end_t) window.
+
+    Works for windows that do NOT cross midnight (start<=end) and windows that DO cross midnight.
+    """
+    if start_t <= end_t:
+        return start_t <= now_t < end_t
+    # crosses midnight, e.g. 22:00-06:00
+    return now_t >= start_t or now_t < end_t
+
+
 # --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
 async def gen_start(cb: types.CallbackQuery):
@@ -80,10 +91,19 @@ async def gen_start(cb: types.CallbackQuery):
 
     now = now_kiev()
 
-    if cb.data != "x_start":
-        start_time_limit = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
-        if now.time() < start_time_limit:
-            return await cb.answer(f"😴 Ще рано! Робота з {config.WORK_START_TIME}", show_alert=True)
+    # 🔒 Забороняємо відкриття змін поза робочим часом (комендантська година)
+    try:
+        start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
+        end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
+        if not _within_work_window(now.time(), start_t, end_t):
+            return await cb.answer(
+                f"⛔ Заборонено відкривати зміни поза робочим часом ({config.WORK_START_TIME}-{config.WORK_END_TIME}).\n"
+                f"Зараз: {now.strftime('%H:%M')}",
+                show_alert=True,
+            )
+    except Exception:
+        # якщо конфіг часу некоректний — не блокуємо, але це має бути видно в логах (в іншому місці)
+        pass
 
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
