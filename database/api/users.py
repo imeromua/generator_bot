@@ -4,7 +4,10 @@ from database.models import get_connection
 def register_user(user_id, name):
     with get_connection() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO users (user_id, full_name) VALUES (?, ?)",
+            """
+            INSERT INTO users (user_id, full_name) VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET full_name = excluded.full_name
+            """,
             (user_id, name),
         )
 

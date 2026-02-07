@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 
 import config
-from database.models import get_connection
+from database.models import get_connection, begin_transaction
 from database.api.state import _conn_get_state_float, _conn_get_state_value, _conn_set_state_value
 
 
@@ -54,7 +54,7 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
     ts = dt.strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            begin_transaction(conn)
 
             # self-heal мінімальних ключів, якщо state частково відсутній
             _conn_set_state_value(conn, "status", _conn_get_state_value(conn, "status", "OFF") or "OFF")
@@ -99,7 +99,7 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
 
     with get_connection() as conn:
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            begin_transaction(conn)
 
             # self-heal мінімальних ключів
             _conn_set_state_value(conn, "status", _conn_get_state_value(conn, "status", "OFF") or "OFF")
