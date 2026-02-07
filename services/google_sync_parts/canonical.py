@@ -3,8 +3,6 @@ import threading
 import time
 from datetime import datetime
 
-import gspread
-
 import database.db_api as db
 import config
 
