@@ -2,28 +2,14 @@ import asyncio
 import logging
 from datetime import datetime, time, timedelta
 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 import config
 import database.db_api as db
+from utils.time import format_hours_hhmm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def _format_hours_hhmm(hours_float: float) -> str:
-    """Конвертує години (float) у формат ГГ:ХХ. Підтримує від'ємні значення."""
-    try:
-        h = float(hours_float)
-    except Exception:
-        h = 0.0
-
-    sign = "-" if h < 0 else ""
-    h = abs(h)
-
-    total_minutes = int(round(h * 60.0))
-    hh = total_minutes // 60
-    mm = total_minutes % 60
-
-    return f"{sign}{hh:02d}:{mm:02d}"
 
 
 def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
@@ -95,11 +81,27 @@ def _yesterday_shifts_summary(now: datetime) -> str:
     return "\n".join(lines)
 
 
+def _parse_state_dt(value: str) -> datetime | None:
+    if not value:
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            dt = datetime.strptime(value.strip(), fmt)
+            return config.KYIV.localize(dt.replace(tzinfo=None))
+        except Exception:
+            continue
+
+    return None
+
+
 async def scheduler_loop(bot):
     """
     Фоновий процес для автоматичних нагадувань та перевірок.
     - Щоранковий брифінг строго о 07:30 (вікно 2 хв), тільки для юзерів (не адмінів)
     - Авто-закриття зміни о WORK_END_TIME
+    - Алерти по паливу (адмінам) + кнопка "Паливо замовлено"
+    - Нагадування "натисніть СТОП" за N хв до WORK_END_TIME
     """
     logger.info("⏰ Scheduler запущено")
 
@@ -113,6 +115,7 @@ async def scheduler_loop(bot):
         try:
             now = datetime.now(config.KYIV)
             current_date = now.date()
+            today_str = current_date.strftime("%Y-%m-%d")
 
             # Скидаємо прапорці на початку нового дня
             if last_check_date != current_date:
@@ -138,7 +141,6 @@ async def scheduler_loop(bot):
             if (0 <= diff_s < brief_window_seconds) and (not brief_sent_today):
                 logger.info(f"📢 Час ранкового брифінгу: {brief_time.strftime('%H:%M')}")
 
-                today_str = now.strftime("%Y-%m-%d")
                 schedule = db.get_schedule(today_str)
                 ranges = _schedule_to_ranges(schedule)
                 total_off = sum((e - s) for s, e in ranges)
@@ -150,10 +152,10 @@ async def scheduler_loop(bot):
                     current_fuel = 0.0
 
                 hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
-                hours_left_hhmm = _format_hours_hhmm(hours_left)
+                hours_left_hhmm = format_hours_hhmm(hours_left)
 
                 to_service = config.MAINTENANCE_LIMIT - (st["total_hours"] - st["last_oil"])
-                to_service_hhmm = _format_hours_hhmm(to_service)
+                to_service_hhmm = format_hours_hhmm(to_service)
 
                 now_h = now.hour
                 now_status = "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now_h, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
@@ -184,7 +186,7 @@ async def scheduler_loop(bot):
 
                 # Нагадування
                 reminders = []
-                if current_fuel < 20:
+                if current_fuel < config.FUEL_ALERT_THRESHOLD_L:
                     reminders.append(f"⚠️ Низький рівень палива: <b>{current_fuel:.1f} л</b>")
                 if to_service <= 0:
                     reminders.append(f"⚠️ ТО прострочене: <b>{to_service_hhmm}</b>")
@@ -289,10 +291,87 @@ async def scheduler_loop(bot):
 
                 auto_close_done_today = True
 
-            # === 3. ПЕРЕВІРКА ПАЛИВА ===
-            fuel_level = db.get_state().get('current_fuel', 0)
-            if fuel_level < 20:
-                logger.warning(f"⚠️ Низький рівень палива: {fuel_level:.1f}л")
+            # === 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" ===
+            try:
+                reminder_min = max(1, int(getattr(config, "STOP_REMINDER_MIN_BEFORE_END", 15)))
+            except Exception:
+                reminder_min = 15
+
+            try:
+                close_dt = config.KYIV.localize(datetime.combine(current_date, close_time).replace(tzinfo=None))
+                reminder_dt = close_dt - timedelta(minutes=reminder_min)
+            except Exception:
+                close_dt = None
+                reminder_dt = None
+
+            state = db.get_state()
+            if reminder_dt and close_dt and state.get("status") == "ON":
+                sent_date = db.get_state_value("stop_reminder_sent_date", "") or ""
+                if (reminder_dt <= now < close_dt) and (sent_date != today_str):
+                    active = state.get("active_shift", "none")
+                    st_time = state.get("start_time", "")
+                    txt = (
+                        f"⏰ <b>Нагадування</b>\n\n"
+                        f"До кінця робочого дня лишилось <b>{reminder_min} хв</b>.\n"
+                        f"Якщо генератор вже вимкнули — натисніть <b>СТОП</b> в боті, щоб закрити зміну.\n\n"
+                        f"Поточний стан: <b>ON</b>\n"
+                        f"Активна зміна: <b>{active}</b>\n"
+                        f"Старт був о: <b>{st_time}</b>"
+                    )
+
+                    for admin_id in config.ADMIN_IDS:
+                        try:
+                            await bot.send_message(admin_id, txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                                [InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]
+                            ]))
+                        except Exception as e:
+                            logger.warning(f"⚠️ STOP reminder: не вдалося надіслати адміну {admin_id}: {e}")
+
+                    db.set_state("stop_reminder_sent_date", today_str)
+
+            # === 4. АЛЕРТИ ПО ПАЛИВУ (АДМІНАМ) ===
+            try:
+                fuel_level = float(state.get("current_fuel", 0.0) or 0.0)
+            except Exception:
+                fuel_level = 0.0
+
+            threshold = float(getattr(config, "FUEL_ALERT_THRESHOLD_L", 40.0) or 40.0)
+            cooldown_min = int(getattr(config, "FUEL_ALERT_COOLDOWN_MIN", 60) or 60)
+
+            ordered_date = (db.get_state_value("fuel_ordered_date", "") or "").strip()
+
+            # Якщо паливо відновилось — знімаємо прапорець "замовлено"
+            if fuel_level >= threshold and ordered_date:
+                db.set_state("fuel_ordered_date", "")
+
+            if fuel_level < threshold and ordered_date != today_str:
+                last_sent_raw = (db.get_state_value("fuel_alert_last_sent_ts", "") or "").strip()
+                last_sent_dt = _parse_state_dt(last_sent_raw)
+                can_send = (last_sent_dt is None) or ((now - last_sent_dt) >= timedelta(minutes=cooldown_min))
+
+                if can_send:
+                    hours_left = fuel_level / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
+                    hours_left_hhmm = format_hours_hhmm(hours_left)
+
+                    txt = (
+                        f"⛽ <b>Низький рівень палива</b>\n\n"
+                        f"Поточний залишок: <b>{fuel_level:.1f} л</b> (поріг: {threshold:.0f} л)\n"
+                        f"Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
+                        f"Якщо паливо вже замовили — натисніть кнопку нижче, і нагадування вимкнеться до заправки."
+                    )
+
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Паливо замовлено", callback_data="fuel_ordered")],
+                        [InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")],
+                    ])
+
+                    for admin_id in config.ADMIN_IDS:
+                        try:
+                            await bot.send_message(admin_id, txt, reply_markup=kb)
+                        except Exception as e:
+                            logger.warning(f"⚠️ Fuel alert: не вдалося надіслати адміну {admin_id}: {e}")
+
+                    db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
 
         except Exception as e:
             logger.error(f"❌ Scheduler Error: {e}", exc_info=True)

@@ -37,7 +37,12 @@ def init_db():
         ('active_shift', 'none'),
         ('last_start_time', ''),
         ('last_start_date', ''),
-        ('current_fuel', '0.0')
+        ('current_fuel', '0.0'),
+
+        # --- alerts / anti-spam (scheduler) ---
+        ('fuel_ordered_date', ''),
+        ('fuel_alert_last_sent_ts', ''),
+        ('stop_reminder_sent_date', ''),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))

@@ -137,8 +137,23 @@ def delete_driver(name):
 
 # --- STATE & LOGS ---
 def set_state(key, value):
+    """Безпечний set для generator_state (upsert)."""
     with get_connection() as conn:
-        conn.execute("UPDATE generator_state SET value = ? WHERE key = ?", (str(value), key))
+        conn.execute(
+            """
+            INSERT INTO generator_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (str(key), str(value))
+        )
+
+
+def get_state_value(key: str, default=None):
+    with get_connection() as conn:
+        row = conn.execute("SELECT value FROM generator_state WHERE key = ?", (str(key),)).fetchone()
+        if not row or row[0] is None:
+            return default
+        return row[0]
 
 
 def get_state():

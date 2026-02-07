@@ -77,6 +77,23 @@ else:
     print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
     FUEL_CONSUMPTION = 5.3
 
+# Пороги та анти-спам для алертів по паливу
+try:
+    FUEL_ALERT_THRESHOLD_L = float(os.getenv("FUEL_ALERT_THRESHOLD", "40"))
+except Exception:
+    FUEL_ALERT_THRESHOLD_L = 40.0
+
+try:
+    FUEL_ALERT_COOLDOWN_MIN = int(os.getenv("FUEL_ALERT_COOLDOWN_MIN", "60"))
+except Exception:
+    FUEL_ALERT_COOLDOWN_MIN = 60
+
+# Нагадування "натисніть СТОП" за N хв до WORK_END_TIME
+try:
+    STOP_REMINDER_MIN_BEFORE_END = int(os.getenv("STOP_REMINDER_MIN", "15"))
+except Exception:
+    STOP_REMINDER_MIN_BEFORE_END = 15
+
 # --- ІНФОРМАЦІЯ ПРО КОНФІГУРАЦІЮ ---
 if __name__ == "__main__":
     print("\n" + "=" * 60)
@@ -88,5 +105,8 @@ if __name__ == "__main__":
     print(f"Адміни: {ADMIN_IDS}")
     print(f"Витрата палива: {FUEL_CONSUMPTION} л/год")
     print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")
+    print(f"Поріг алерту палива: {FUEL_ALERT_THRESHOLD_L} л")
+    print(f"Cooldown алерту: {FUEL_ALERT_COOLDOWN_MIN} хв")
+    print(f"Нагадування СТОП: за {STOP_REMINDER_MIN_BEFORE_END} хв")
     print(f"Реєстрація: {'Відкрита' if REGISTRATION_OPEN else 'Закрита'}")
     print("=" * 60 + "\n")

@@ -35,6 +35,45 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_text("⚙️ <b>Адмін Панель</b>", reply_markup=admin_panel())
 
 
+# --- ПАЛИВО: замовлено ---
+@router.callback_query(F.data == "fuel_ordered")
+async def fuel_ordered(cb: types.CallbackQuery):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    now = datetime.now(config.KYIV)
+    today_str = now.strftime("%Y-%m-%d")
+
+    db.set_state("fuel_ordered_date", today_str)
+    db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
+
+    user = db.get_user(cb.from_user.id)
+    try:
+        db.add_log("fuel_ordered", user[1] if user else str(cb.from_user.id), ts=now.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        pass
+
+    # Оновлюємо повідомлення (якщо можемо)
+    try:
+        orig = getattr(cb.message, "html_text", None) or getattr(cb.message, "text", "") or ""
+        note = "\n\n✅ <b>Паливо замовлено.</b> Нагадування вимкнено до заправки (поки паливо знову не стане ≥ порогу)."
+        new_text = (orig + note).strip() if orig else note.strip()
+
+        # прибираємо кнопку, залишаємо лише "На головну" для зручності
+        kb = types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]
+        ])
+
+        await cb.message.edit_text(new_text, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"fuel_ordered edit failed: {e}")
+    except Exception as e:
+        logger.warning(f"fuel_ordered edit failed: {e}")
+
+    await cb.answer("✅ Прийнято", show_alert=True)
+
+
 # --- ПЕРСОНАЛ: меню ---
 @router.callback_query(F.data == "personnel_menu")
 async def personnel_menu(cb: types.CallbackQuery):
