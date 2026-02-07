@@ -9,8 +9,8 @@ def main_dashboard(role, active_shift, completed_shifts):
 
     def pretty(code: str) -> str:
         return {
-            "m": "🟦 Зміна 1",
-            "d": "🟩 Зміна 2",
+            "m": "🟬 Зміна 1",
+            "d": "🟪 Зміна 2",
             "e": "🟪 Зміна 3",
             "x": "⚡ Екстра",
         }.get(code, code.upper())
@@ -68,6 +68,7 @@ def sync_menu():
 def correction_menu():
     kb = [
         [InlineKeyboardButton(text="⛽️ Корекція залишку палива", callback_data="corr_fuel_set")],
+        [InlineKeyboardButton(text="📊 Корекція витрати палива (л/год)", callback_data="corr_fuel_consumption_set")],
         [InlineKeyboardButton(text="⏱ Корекція мотогодин", callback_data="corr_total_hours_set")],
         [InlineKeyboardButton(text="🛢 Корекція: остання заміна мастила", callback_data="corr_last_oil_set")],
         [InlineKeyboardButton(text="🕯 Корекція: остання заміна свічок", callback_data="corr_last_spark_set")],
