@@ -13,6 +13,7 @@ import database.db_api as db
 import database.models as db_models
 import config
 from utils.sheets_dates import find_row_by_date_in_column_a
+from utils.sheets_guard import sheets_forced_offline
 
 logging.basicConfig(level=logging.INFO)
 
@@ -423,7 +424,7 @@ async def sync_loop():
         try:
             # Примусовий OFFLINE: взагалі не ходимо в Sheets.
             try:
-                if db.sheet_is_forced_offline():
+                if sheets_forced_offline():
                     await asyncio.sleep(60)
                     continue
             except Exception:

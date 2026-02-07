@@ -16,6 +16,7 @@ from keyboards.builders import main_dashboard, drivers_list
 from handlers.common import show_dash
 from utils.time import format_hours_hhmm, now_kiev
 from utils.sheets_dates import find_row_by_date_in_column_a
+from utils.sheets_guard import sheets_forced_offline
 
 
 router = Router()
@@ -189,6 +190,9 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
 
 
 def _open_ws_sync():
+    if sheets_forced_offline():
+        return None
+
     if not config.SHEET_ID:
         return None
     if not os.path.exists("service_account.json"):
