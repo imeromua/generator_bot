@@ -2,21 +2,22 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramBadRequest
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 
 import asyncio
-import os
-
-import gspread
-from google.oauth2.service_account import Credentials
 
 import config
 import database.db_api as db
 from keyboards.builders import main_dashboard, drivers_list
 from handlers.common import show_dash
+from handlers.user_parts.sheets_shift import (
+    get_sheet_shift_info_sync,
+    shift_pretty,
+    shift_prev_required,
+    sync_db_from_sheet_open_shift,
+)
+from handlers.user_parts.utils import ensure_user, get_operator_personnel_name
 from utils.time import format_hours_hhmm, now_kiev
-from utils.sheets_dates import find_row_by_date_in_column_a
-from utils.sheets_guard import sheets_forced_offline
 
 
 router = Router()
@@ -26,30 +27,6 @@ class RefillForm(StatesGroup):
     driver = State()
     liters = State()
     receipt = State()
-
-
-def _ensure_user(user_id: int, first_name: str | None = None):
-    """Повертає (user_id, full_name) з БД. Якщо адмін без запису — авто-реєструє."""
-    user = db.get_user(user_id)
-    if user:
-        return user
-
-    if user_id in config.ADMIN_IDS:
-        name = f"Admin {first_name or ''}".strip()
-        if not name:
-            name = f"Admin {user_id}"
-        db.register_user(user_id, name)
-        return db.get_user(user_id)
-
-    return None
-
-
-def _get_operator_personnel_name(user_id: int) -> str | None:
-    """Повертає ПІБ з 'ПЕРСОНАЛ' для запису у таблицю. Якщо не призначено — None."""
-    try:
-        return db.get_personnel_for_user(user_id)
-    except Exception:
-        return None
 
 
 def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
@@ -75,36 +52,6 @@ def _fmt_range(start_h: int, end_h: int) -> str:
     return f"{s} - {e}"
 
 
-_SHIFT_COLS = {
-    "m": (2, 3),
-    "d": (4, 5),
-    "e": (6, 7),
-    "x": (8, 9),
-}
-
-
-def _shift_pretty(code_or_event: str) -> str:
-    code = code_or_event
-    if "_" in code_or_event:
-        code = code_or_event.split("_", 1)[0]
-
-    # Можемо в майбутньому повністю перейменувати кнопки,
-    # але зараз міняємо тільки відображення (тексти).
-    return {
-        "m": "🟦 Зміна 1",
-        "d": "🟩 Зміна 2",
-        "e": "🟪 Зміна 3",
-        "x": "⚡ Екстра",
-    }.get(code, code_or_event)
-
-
-def _shift_prev_required(code: str) -> str | None:
-    return {
-        "d": "m",
-        "e": "d",
-    }.get(code)
-
-
 def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | None, driver: str | None) -> str:
     # ts: 'YYYY-mm-dd HH:MM:SS'
     try:
@@ -116,9 +63,9 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
     who = (user_name or "").strip()
 
     if event_type.endswith("_start"):
-        return f"• {ts_pretty} — ▶️ Старт: <b>{_shift_pretty(event_type)}</b> ({who})"
+        return f"• {ts_pretty} — ▶️ Старт: <b>{shift_pretty(event_type)}</b> ({who})"
     if event_type.endswith("_end"):
-        return f"• {ts_pretty} — ⏹ Стоп: <b>{_shift_pretty(event_type)}</b> ({who})"
+        return f"• {ts_pretty} — ⏹ Стоп: <b>{shift_pretty(event_type)}</b> ({who})"
 
     if event_type == "refill":
         liters = ""
@@ -160,7 +107,7 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
 async def events_last(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
 
-    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
@@ -188,94 +135,6 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-
-def _open_ws_sync():
-    if sheets_forced_offline():
-        return None
-
-    if not config.SHEET_ID:
-        return None
-    if not os.path.exists("service_account.json"):
-        return None
-
-    scopes = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive.readonly",
-    ]
-    creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
-    client = gspread.authorize(creds)
-    ss = client.open_by_key(config.SHEET_ID)
-    return ss.worksheet(config.SHEET_NAME)
-
-
-def _get_sheet_shift_info_sync():
-    """Повертає (sheet_ok, open_shift_code|None, completed_set, start_time_by_shift)."""
-    ws = _open_ws_sync()
-    if not ws:
-        return False, None, set(), {}
-
-    today = now_kiev().date()
-    row = find_row_by_date_in_column_a(ws, today, config.SHEET_NAME)
-    if not row:
-        return False, None, set(), {}
-
-    rng = ws.get(f"A{row}:I{row}")
-    vals = (rng[0] if rng else [])
-
-    def cell(col: int) -> str:
-        idx = col - 1
-        if idx < 0:
-            return ""
-        if idx >= len(vals):
-            return ""
-        v = vals[idx]
-        if v is None:
-            return ""
-        return str(v).strip()
-
-    completed = set()
-    start_times = {}
-    open_shift = None
-
-    for code, (c_start, c_end) in _SHIFT_COLS.items():
-        s = cell(c_start)
-        e = cell(c_end)
-        if e:
-            completed.add(code)
-        if s:
-            start_times[code] = s
-        if s and not e and open_shift is None:
-            open_shift = code
-
-    return True, open_shift, completed, start_times
-
-
-def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
-    """Якщо таблиця показує відкриту зміну — синхронізуємо мінімальний стан в БД для блокування."""
-    try:
-        db.set_state("status", "ON")
-        db.set_state("active_shift", f"{open_shift_code}_start")
-
-        st_time = (start_times.get(open_shift_code, "") or "").strip()
-        if st_time:
-            hhmm = st_time[:5]
-            db.set_state("last_start_time", hhmm)
-
-            # Якщо зараз після півночі, а старт був "вчора ввечері" — ставимо дату вчора.
-            try:
-                start_t = datetime.strptime(hhmm, "%H:%M").time()
-                now = now_kiev()
-                start_date = now.date()
-                if now.time() < start_t:
-                    start_date = start_date - timedelta(days=1)
-                db.set_state("last_start_date", start_date.strftime("%Y-%m-%d"))
-            except Exception:
-                db.set_state("last_start_date", now_kiev().strftime("%Y-%m-%d"))
-
-    except Exception:
-        pass
-
-
 @router.callback_query(F.data == "schedule_today")
 async def schedule_today(cb: types.CallbackQuery):
     now = now_kiev()
@@ -298,7 +157,7 @@ async def schedule_today(cb: types.CallbackQuery):
 
     banner += now_status
 
-    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
@@ -311,7 +170,7 @@ async def schedule_today(cb: types.CallbackQuery):
 async def gen_start(cb: types.CallbackQuery):
     st = db.get_state()
 
-    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
@@ -320,7 +179,7 @@ async def gen_start(cb: types.CallbackQuery):
 
     if not offline:
         try:
-            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(get_sheet_shift_info_sync)
             if sheet_ok:
                 db.sheet_mark_ok()
             else:
@@ -331,13 +190,13 @@ async def gen_start(cb: types.CallbackQuery):
             db.sheet_check_offline()
 
     if sheet_ok and open_shift:
-        _sync_db_from_sheet_open_shift(open_shift, start_times)
+        sync_db_from_sheet_open_shift(open_shift, start_times)
         return await cb.answer(
-            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(open_shift)})",
+            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(open_shift)})",
             show_alert=True
         )
 
-    shift_code = cb.data.split("_")[0]
+    shift_code = cb.data.split("_", 1)[0]
 
     if sheet_ok and shift_code in completed_sheet:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
@@ -345,7 +204,7 @@ async def gen_start(cb: types.CallbackQuery):
     if st['status'] == 'ON':
         active = st.get('active_shift', 'none')
         return await cb.answer(
-            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(active)})",
+            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
             show_alert=True
         )
 
@@ -355,10 +214,10 @@ async def gen_start(cb: types.CallbackQuery):
         completed_total |= set(completed_sheet)
 
     # Черга змін: 1 -> 2 -> 3 (екстра без черги)
-    prev_required = _shift_prev_required(shift_code)
+    prev_required = shift_prev_required(shift_code)
     if prev_required and (prev_required not in completed_total):
         return await cb.answer(
-            f"⛔ Спочатку закрийте {_shift_pretty(prev_required)}.",
+            f"⛔ Спочатку закрийте {shift_pretty(prev_required)}.",
             show_alert=True
         )
 
@@ -372,7 +231,7 @@ async def gen_start(cb: types.CallbackQuery):
         if now.time() < start_time_limit:
             return await cb.answer(f"😴 Ще рано! Робота з {config.WORK_START_TIME}", show_alert=True)
 
-    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
@@ -381,12 +240,12 @@ async def gen_start(cb: types.CallbackQuery):
         if res.get("reason") == "already_on":
             active = res.get('active_shift', 'none')
             return await cb.answer(
-                f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {_shift_pretty(active)})",
+                f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
                 show_alert=True
             )
         return await cb.answer("❌ Помилка старту. Спробуйте ще раз.", show_alert=True)
 
-    banner = f"✅ <b>{_shift_pretty(cb.data)}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
+    banner = f"✅ <b>{shift_pretty(cb.data)}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
     await show_dash(cb.message, user[0], user[1], banner=banner)
     await cb.answer()
 
@@ -396,19 +255,19 @@ async def gen_start(cb: types.CallbackQuery):
 async def gen_stop(cb: types.CallbackQuery):
     st = db.get_state()
 
-    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
     expected_start = cb.data.replace("_end", "_start")
-    expected_code = expected_start.split("_")[0]
+    expected_code = expected_start.split("_", 1)[0]
 
     offline = db.sheet_is_offline()
     sheet_ok, open_shift, completed_sheet, start_times = (False, None, set(), {})
 
     if not offline:
         try:
-            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(_get_sheet_shift_info_sync)
+            sheet_ok, open_shift, completed_sheet, start_times = await asyncio.to_thread(get_sheet_shift_info_sync)
             if sheet_ok:
                 db.sheet_mark_ok()
             else:
@@ -423,11 +282,11 @@ async def gen_stop(cb: types.CallbackQuery):
         db.set_state('status', 'OFF')
         db.set_state('active_shift', 'none')
 
-        user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+        user = ensure_user(cb.from_user.id, cb.from_user.first_name)
         if not user:
             return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
-        banner = f"ℹ️ {_shift_pretty(expected_code)} вже закрито в таблиці. Стан оновлено."
+        banner = f"ℹ️ {shift_pretty(expected_code)} вже закрито в таблиці. Стан оновлено."
         await show_dash(cb.message, user[0], user[1], banner=banner)
         await cb.answer()
         return
@@ -435,7 +294,7 @@ async def gen_stop(cb: types.CallbackQuery):
     # Якщо таблиця каже, що відкрита інша зміна
     if sheet_ok and open_shift and open_shift != expected_code:
         return await cb.answer(
-            f"⛔ Помилка! Зараз активний {_shift_pretty(open_shift)}.\nНатисніть відповідну кнопку СТОП.",
+            f"⛔ Помилка! Зараз активний {shift_pretty(open_shift)}.\nНатисніть відповідну кнопку СТОП.",
             show_alert=True
         )
 
@@ -444,7 +303,7 @@ async def gen_stop(cb: types.CallbackQuery):
         db.set_state('status', 'OFF')
         db.set_state('active_shift', 'none')
 
-        user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+        user = ensure_user(cb.from_user.id, cb.from_user.first_name)
         if not user:
             return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
@@ -486,7 +345,7 @@ async def gen_stop(cb: types.CallbackQuery):
     except Exception:
         dur = 0.0
 
-    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
@@ -497,7 +356,7 @@ async def gen_stop(cb: types.CallbackQuery):
         if res.get("reason") == "wrong_shift":
             active = res.get("active_shift", "none")
             return await cb.answer(
-                f"⛔ Помилка! Зараз активний {_shift_pretty(active)}.\nНатисніть відповідну кнопку СТОП.",
+                f"⛔ Помилка! Зараз активний {shift_pretty(active)}.\nНатисніть відповідну кнопку СТОП.",
                 show_alert=True
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
@@ -534,7 +393,7 @@ async def gen_stop(cb: types.CallbackQuery):
     dur_hhmm = format_hours_hhmm(dur)
 
     banner = (
-        f"🏁 <b>{_shift_pretty(expected_code)} закрито!</b>\n"
+        f"🏁 <b>{shift_pretty(expected_code)} закрито!</b>\n"
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
         f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
         f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
@@ -548,7 +407,7 @@ async def gen_stop(cb: types.CallbackQuery):
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
-    operator_personnel = _get_operator_personnel_name(cb.from_user.id)
+    operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
@@ -649,7 +508,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
     liters = data.get('liters')
     driver = data.get('driver')
 
-    user = _ensure_user(msg.from_user.id, msg.from_user.first_name)
+    user = ensure_user(msg.from_user.id, msg.from_user.first_name)
     if not user:
         await state.clear()
         try:
@@ -658,7 +517,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
             pass
         return
 
-    operator_personnel = _get_operator_personnel_name(msg.from_user.id)
+    operator_personnel = get_operator_personnel_name(msg.from_user.id)
     if not operator_personnel:
         await state.clear()
         try:
@@ -693,7 +552,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
 async def go_home(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
 
-    user = _ensure_user(cb.from_user.id, cb.from_user.first_name)
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
         return
