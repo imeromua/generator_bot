@@ -26,6 +26,26 @@ def _translate_qmarks(query: str) -> str:
     return query.replace("?", "%s")
 
 
+def _safe_postgres_target(dsn: str) -> str:
+    """Return safe (password-free) string like user@host:port/db."""
+    try:
+        u = urlparse(dsn)
+        user = u.username or "?"
+        host = u.hostname or "localhost"
+        port = u.port or 5432
+        db = (u.path or "").lstrip("/") or "?"
+        return f"{user}@{host}:{port}/{db}"
+    except Exception:
+        return "(invalid POSTGRES_DSN)"
+
+
+def db_target_info() -> str:
+    if not _is_postgres():
+        db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
+        return f"sqlite:{db_path}"
+    return f"postgres:{_safe_postgres_target(getattr(config, 'POSTGRES_DSN', '') or '')}"
+
+
 class CursorProxy:
     def __init__(self, cur):
         self._cur = cur

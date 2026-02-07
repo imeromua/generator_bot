@@ -3,6 +3,7 @@ import logging
 import random
 import sys
 from datetime import datetime
+from urllib.parse import urlparse
 
 import aiohttp
 from aiogram import Bot, Dispatcher, Router, F, types
@@ -40,6 +41,17 @@ from handlers import common, user, admin
 from services.google_sync import sync_loop
 from services.scheduler import scheduler_loop
 from services.parser import parse_dtek_message
+
+
+def _safe_redis_target(url: str) -> str:
+    try:
+        u = urlparse(url)
+        host = u.hostname or "localhost"
+        port = u.port or 6379
+        db = (u.path or "/0").lstrip("/") or "0"
+        return f"{host}:{port}/{db}"
+    except Exception:
+        return "(invalid REDIS_URL)"
 
 
 # --- ЛОГІКА ПАРСЕРА ДТЕК ---
@@ -120,6 +132,8 @@ def _is_transient_network_error(exc: Exception) -> bool:
         return True
     if "превышен таймаут семафора" in msg:
         return True
+    if "превышен таймаут семафора" in msg:
+        return True
 
     return False
 
@@ -164,14 +178,19 @@ def build_dispatcher() -> Dispatcher:
     """
 
     storage = MemoryStorage()
+
     if getattr(config, "REDIS_ENABLED", False):
+        target = _safe_redis_target(getattr(config, "REDIS_URL", ""))
         try:
             redis = Redis.from_url(getattr(config, "REDIS_URL", "redis://localhost:6379/0"))
             storage = RedisStorage(redis=redis)
-            logger.info("🧠 FSM storage: Redis")
+            logger.info(f"🧠 FSM storage: Redis ({target})")
         except Exception as e:
-            logger.error(f"❌ Не вдалося підключити Redis FSM storage: {e}. Використовую MemoryStorage")
+            logger.error(f"❌ Не вдалося підключити Redis FSM storage ({target}): {e}. Використовую MemoryStorage")
             storage = MemoryStorage()
+            logger.info("🧠 FSM storage: Memory")
+    else:
+        logger.info("🧠 FSM storage: Memory (REDIS_ENABLED=0)")
 
     dp = Dispatcher(storage=storage)
 
@@ -205,6 +224,7 @@ async def run_polling_once(dp: Dispatcher):
     tasks = []
 
     try:
+        logger.info(f"🗄 DB backend: {getattr(config, 'DB_BACKEND', 'sqlite')} ({db_models.db_target_info()})")
         logger.info("🔧 Ініціалізація бази даних...")
         db_models.init_db()
 
