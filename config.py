@@ -45,6 +45,9 @@ else:
 
 SHEET_NAME = os.getenv("SHEET_NAME", "ЛЮТИЙ")
 
+# Окрема вкладка для журналу подій (крок 4)
+LOGS_SHEET_NAME = os.getenv("LOGS_SHEET_NAME", "ПОДІЇ")
+
 # --- ЧАС ТА МІСЦЕ ---
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Kyiv")
 KYIV = pytz.timezone(TIMEZONE)
@@ -102,6 +105,7 @@ if __name__ == "__main__":
     print(f"Режим: {'TEST' if IS_TEST_MODE else 'PROD'}")
     print(f"Таблиця: {SHEET_NAME}")
     print(f"ID таблиці: {SHEET_ID}")
+    print(f"Вкладка логів: {LOGS_SHEET_NAME}")
     print(f"Адміни: {ADMIN_IDS}")
     print(f"Витрата палива: {FUEL_CONSUMPTION} л/год")
     print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")

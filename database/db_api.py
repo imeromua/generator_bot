@@ -337,7 +337,7 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
 
 def get_unsynced():
     with get_connection() as conn:
-        return conn.execute("SELECT * FROM logs WHERE is_synced = 0").fetchall()
+        return conn.execute("SELECT * FROM logs WHERE is_synced = 0 ORDER BY id ASC").fetchall()
 
 
 def mark_synced(ids):
@@ -361,6 +361,20 @@ def get_logs_for_period(start_date, end_date):
             ORDER BY timestamp ASC
         """
         return conn.execute(query, (start_date + " 00:00:00", end_date + " 23:59:59")).fetchall()
+
+
+def get_refills_for_date(date_str: str):
+    """Повертає всі заправки за дату (для агрегації і idempotent sync у Sheet)."""
+    if not date_str:
+        return []
+    with get_connection() as conn:
+        query = """
+            SELECT timestamp, user_name, value, driver_name
+            FROM logs
+            WHERE event_type = 'refill' AND timestamp LIKE ?
+            ORDER BY timestamp ASC
+        """
+        return conn.execute(query, (f"{date_str}%",)).fetchall()
 
 
 # --- MAINTENANCE ---
