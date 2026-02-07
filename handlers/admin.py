@@ -1,6 +1,7 @@
 from aiogram import Router
 
 from handlers.admin_parts.correction import router as correction_router
+from handlers.admin_parts.db_cleanup import router as db_cleanup_router
 from handlers.admin_parts.drivers import router as drivers_router
 from handlers.admin_parts.fuel import router as fuel_router
 from handlers.admin_parts.home import router as home_router
@@ -9,6 +10,7 @@ from handlers.admin_parts.personnel import router as personnel_router
 from handlers.admin_parts.reports import router as reports_router
 from handlers.admin_parts.schedule import router as schedule_router
 from handlers.admin_parts.sheet_mode import router as sheet_mode_router
+from handlers.admin_parts.sync import router as sync_router
 from handlers.admin_parts.users import router as users_router
 
 router = Router()
@@ -22,3 +24,5 @@ router.include_router(drivers_router)
 router.include_router(fuel_router)
 router.include_router(users_router)
 router.include_router(correction_router)
+router.include_router(sync_router)
+router.include_router(db_cleanup_router)
