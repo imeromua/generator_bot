@@ -162,6 +162,40 @@ def get_state_value(key: str, default=None):
         return row[0]
 
 
+def _conn_get_state_value(conn, key: str, default: str = "") -> str:
+    """Читання generator_state в межах вже відкритого conn/транзакції."""
+    try:
+        row = conn.execute("SELECT value FROM generator_state WHERE key = ?", (str(key),)).fetchone()
+        if not row or row[0] is None:
+            return default
+        return str(row[0])
+    except Exception:
+        return default
+
+
+def _conn_set_state_value(conn, key: str, value: str):
+    """Upsert generator_state в межах вже відкритого conn/транзакції."""
+    try:
+        conn.execute(
+            """
+            INSERT INTO generator_state (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (str(key), str(value))
+        )
+    except Exception:
+        # не валимо критичні операції, якщо state тимчасово битий
+        pass
+
+
+def _conn_get_state_float(conn, key: str, default: float = 0.0) -> float:
+    v = _conn_get_state_value(conn, key, str(default))
+    try:
+        return float(v or 0.0)
+    except Exception:
+        return float(default)
+
+
 def sheet_mark_ok(ts: int | None = None):
     """Позначає, що з'єднання з таблицею є, та скидає offline-стан."""
     now_ts = int(ts or time.time())
@@ -248,13 +282,7 @@ def get_state():
     """
     with get_connection() as conn:
         def _get(k: str, default: str = "") -> str:
-            try:
-                row = conn.execute("SELECT value FROM generator_state WHERE key = ?", (k,)).fetchone()
-                if not row or row[0] is None:
-                    return default
-                return str(row[0])
-            except Exception:
-                return default
+            return _conn_get_state_value(conn, k, default)
 
         status = _get("status", "OFF")
         start_time = _get("last_start_time", "")
@@ -262,11 +290,7 @@ def get_state():
         active_shift = _get("active_shift", "none")
 
         def _get_f(k: str, default: float = 0.0) -> float:
-            v = _get(k, str(default))
-            try:
-                return float(v or 0.0)
-            except Exception:
-                return float(default)
+            return _conn_get_state_float(conn, k, default)
 
         total = _get_f("total_hours", 0.0)
         last_oil = _get_f("last_oil_change", 0.0)
@@ -323,16 +347,14 @@ def update_fuel(liters_delta):
     """Локальне паливо (state.current_fuel). Якщо таблиця еталон — бажано НЕ викликати це з хендлерів."""
     try:
         with get_connection() as conn:
-            try:
-                cur = float(conn.execute("SELECT value FROM generator_state WHERE key='current_fuel'").fetchone()[0])
-            except (TypeError, ValueError):
-                cur = 0.0
-
-            new_val = cur + liters_delta
+            cur = _conn_get_state_float(conn, "current_fuel", 0.0)
+            new_val = cur + float(liters_delta or 0.0)
             if new_val < 0:
-                new_val = 0
-            conn.execute("UPDATE generator_state SET value = ? WHERE key='current_fuel'", (str(new_val),))
+                new_val = 0.0
+
+            _conn_set_state_value(conn, "current_fuel", str(new_val))
             return new_val
+
     except Exception as e:
         logging.error(f"Помилка оновлення палива: {e}")
         return 0.0
@@ -354,18 +376,24 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
         try:
             conn.execute("BEGIN IMMEDIATE")
 
+            # self-heal мінімальних ключів, якщо state частково відсутній
+            _conn_set_state_value(conn, "status", _conn_get_state_value(conn, "status", "OFF") or "OFF")
+            _conn_set_state_value(conn, "active_shift", _conn_get_state_value(conn, "active_shift", "none") or "none")
+            _conn_set_state_value(conn, "last_start_time", _conn_get_state_value(conn, "last_start_time", "") or "")
+            _conn_set_state_value(conn, "last_start_date", _conn_get_state_value(conn, "last_start_date", "") or "")
+
             cur = conn.execute(
                 "UPDATE generator_state SET value = 'ON' WHERE key = 'status' AND value = 'OFF'"
             )
             if cur.rowcount == 0:
-                active = conn.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
-                st_time = conn.execute("SELECT value FROM generator_state WHERE key='last_start_time'").fetchone()[0]
+                active = _conn_get_state_value(conn, "active_shift", "none")
+                st_time = _conn_get_state_value(conn, "last_start_time", "")
                 conn.commit()
                 return {"ok": False, "reason": "already_on", "active_shift": active, "start_time": st_time}
 
-            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'active_shift'", (event_type,))
-            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_start_time'", (dt.strftime("%H:%M"),))
-            conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_start_date'", (dt.strftime("%Y-%m-%d"),))
+            _conn_set_state_value(conn, "active_shift", event_type)
+            _conn_set_state_value(conn, "last_start_time", dt.strftime("%H:%M"))
+            _conn_set_state_value(conn, "last_start_date", dt.strftime("%Y-%m-%d"))
 
             conn.execute(
                 "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
@@ -393,18 +421,22 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
         try:
             conn.execute("BEGIN IMMEDIATE")
 
-            status = conn.execute("SELECT value FROM generator_state WHERE key='status'").fetchone()[0]
+            # self-heal мінімальних ключів
+            _conn_set_state_value(conn, "status", _conn_get_state_value(conn, "status", "OFF") or "OFF")
+            _conn_set_state_value(conn, "active_shift", _conn_get_state_value(conn, "active_shift", "none") or "none")
+
+            status = _conn_get_state_value(conn, "status", "OFF")
             if status != "ON":
                 conn.commit()
                 return {"ok": False, "reason": "already_off"}
 
-            active = conn.execute("SELECT value FROM generator_state WHERE key='active_shift'").fetchone()[0]
+            active = _conn_get_state_value(conn, "active_shift", "none")
             if active != expected_start:
                 conn.commit()
                 return {"ok": False, "reason": "wrong_shift", "active_shift": active}
 
-            conn.execute("UPDATE generator_state SET value = 'OFF' WHERE key = 'status'")
-            conn.execute("UPDATE generator_state SET value = 'none' WHERE key = 'active_shift'")
+            _conn_set_state_value(conn, "status", "OFF")
+            _conn_set_state_value(conn, "active_shift", "none")
 
             conn.execute(
                 "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
@@ -467,25 +499,31 @@ def get_refills_for_date(date_str: str):
 
 # --- MAINTENANCE ---
 def update_hours(h):
-    with get_connection() as conn:
-        cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
-        conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(cur + h),))
+    try:
+        with get_connection() as conn:
+            cur = _conn_get_state_float(conn, "total_hours", 0.0)
+            _conn_set_state_value(conn, "total_hours", str(cur + float(h or 0.0)))
+    except Exception as e:
+        logging.error(f"Помилка update_hours: {e}")
 
 
 def set_total_hours(new_val):
-    with get_connection() as conn:
-        conn.execute("UPDATE generator_state SET value = ? WHERE key='total_hours'", (str(new_val),))
+    try:
+        with get_connection() as conn:
+            _conn_set_state_value(conn, "total_hours", str(float(new_val or 0.0)))
+    except Exception as e:
+        logging.error(f"Помилка set_total_hours: {e}")
 
 
 def record_maintenance(action, admin):
     date_s = datetime.now(config.KYIV).strftime("%Y-%m-%d")
     with get_connection() as conn:
-        cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
+        cur = _conn_get_state_float(conn, "total_hours", 0.0)
         conn.execute("INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)", (date_s, action, cur, admin))
         if action == "oil":
-            conn.execute("UPDATE generator_state SET value = ? WHERE key='last_oil_change'", (str(cur),))
+            _conn_set_state_value(conn, "last_oil_change", str(cur))
         elif action == "spark":
-            conn.execute("UPDATE generator_state SET value = ? WHERE key='last_spark_change'", (str(cur),))
+            _conn_set_state_value(conn, "last_spark_change", str(cur))
 
 
 # --- SCHEDULE ---
