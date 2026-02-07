@@ -2,7 +2,6 @@ from aiogram import Router, F, types
 
 import config
 import database.db_api as db
-from keyboards.builders import admin_panel
 
 router = Router()
 
