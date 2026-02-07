@@ -609,9 +609,6 @@ async def sync_loop():
                             elif ltype == "x_end":
                                 col = 9
                                 user_col = 26
-                            elif ltype == "auto_close":
-                                col = 7
-                                user_col = 24
 
                             if col and r:
                                 try:

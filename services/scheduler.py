@@ -232,23 +232,32 @@ async def scheduler_loop(bot):
                 state = db.get_state()
 
                 # Перевіряємо чи зміна активна
-                if state['status'] == 'ON':
+                if state.get('status') == 'ON':
                     logger.info(f"🌙 Час авто-закриття: {config.WORK_END_TIME}")
+
+                    active_shift = (state.get('active_shift', 'none') or 'none').strip()
+                    code = active_shift.split('_')[0] if ('_' in active_shift) else active_shift
+                    end_event = None
+                    if code in ("m", "d", "e", "x"):
+                        end_event = f"{code}_end"
 
                     # Розрахунок тривалості
                     try:
                         start_date_str = state.get('start_date', '')
-                        start_time_str = state['start_time']
+                        start_time_str = state.get('start_time', '')
 
-                        if start_date_str:
-                            start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+                        if start_time_str:
+                            if start_date_str:
+                                start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+                            else:
+                                start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
+                                if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
+                                    start_dt = start_dt - timedelta(days=1)
+
+                            start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
+                            dur = (now - start_dt).total_seconds() / 3600.0
                         else:
-                            start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
-                            if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
-                                start_dt = start_dt - timedelta(days=1)
-
-                        start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
-                        dur = (now - start_dt).total_seconds() / 3600.0
+                            dur = 0.0
 
                         if dur < 0 or dur > 24:
                             dur = 0.0
@@ -257,26 +266,45 @@ async def scheduler_loop(bot):
                         logger.error(f"Помилка розрахунку тривалості: {e}")
                         dur = 0.0
 
-                    # Оновлення годин та палива
-                    db.update_hours(dur)
                     fuel_consumed = dur * config.FUEL_CONSUMPTION
-                    remaining_fuel = db.update_fuel(-fuel_consumed)
 
-                    # ⚠️ КРИТИЧНО: Скидання статусу
+                    # OFFLINE: локально обліковуємо паливо/години (як у user handler)
+                    remaining_fuel = None
+                    try:
+                        if db.sheet_is_offline():
+                            db.update_hours(dur)
+                            remaining_fuel = db.update_fuel(-fuel_consumed)
+                    except Exception:
+                        pass
+
+                    # Скидання статусу
                     db.set_state('status', 'OFF')
                     db.set_state('active_shift', 'none')
 
-                    # Логування
-                    db.add_log('auto_close', 'System')
+                    # Логування: закриваємо саме активну зміну, а також пишемо технічний auto_close
+                    ts = now.strftime("%Y-%m-%d %H:%M:%S")
+                    try:
+                        if end_event:
+                            db.add_log(end_event, 'System', ts=ts)
+                    except Exception:
+                        pass
 
-                    logger.info(f"🤖 Авто-закриття виконано: {dur:.2f} год, витрачено {fuel_consumed:.1f}л")
+                    try:
+                        db.add_log('auto_close', 'System', ts=ts)
+                    except Exception:
+                        pass
+
+                    logger.info(f"🤖 Авто-закриття виконано: shift={active_shift}, {dur:.2f} год, витрачено {fuel_consumed:.1f}л")
 
                     # Сповіщення адмінів
+                    dur_hhmm = format_hours_hhmm(dur)
+                    rem_line = f"\n⛽ Залишок: <b>{remaining_fuel:.1f} л</b>" if (remaining_fuel is not None) else ""
                     admin_txt = (
                         f"🤖 <b>Авто-закриття зміни</b>\n\n"
-                        f"⏱ Працював: <b>{dur:.2f} год</b>\n"
-                        f"📉 Використано: <b>{fuel_consumed:.1f} л</b>\n"
-                        f"⛽ Залишок: <b>{remaining_fuel:.1f} л</b>\n"
+                        f"🧩 Зміна: <b>{active_shift}</b>\n"
+                        f"⏱ Працював: <b>{dur_hhmm}</b>\n"
+                        f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>"
+                        f"{rem_line}\n"
                         f"🕐 Час закриття: {now.strftime('%H:%M')}"
                     )
 
