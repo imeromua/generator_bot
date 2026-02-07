@@ -1,12 +1,12 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.exceptions import TelegramBadRequest
 from datetime import datetime
 import logging
 
 import config
 import database.db_api as db
+from handlers.admin_parts.drivers import router as drivers_router
 from handlers.admin_parts.export_logs import router as export_logs_router
 from handlers.admin_parts.maintenance import router as maintenance_router
 from handlers.admin_parts.personnel import router as personnel_router
@@ -17,10 +17,7 @@ from handlers.admin_parts.utils import (
     actor_name as _actor_name,
     fmt_state_ts as _fmt_state_ts,
 )
-from keyboards.builders import (
-    admin_panel,
-    back_to_admin, after_add_menu,
-)
+from keyboards.builders import admin_panel
 
 router = Router()
 router.include_router(sheet_mode_router)
@@ -29,12 +26,9 @@ router.include_router(personnel_router)
 router.include_router(schedule_router)
 router.include_router(maintenance_router)
 router.include_router(reports_router)
+router.include_router(drivers_router)
 
 logger = logging.getLogger(__name__)
-
-
-class AddDriverForm(StatesGroup):
-    name = State()
 
 
 # --- ВХІД В АДМІНКУ ---
@@ -124,40 +118,3 @@ async def users_view(cb: types.CallbackQuery):
 
     kb = types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]])
     await cb.message.edit_text(txt, reply_markup=kb)
-
-
-# --- ВОДІЇ ---
-@router.callback_query(F.data == "add_driver_start")
-async def drv_add(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    await cb.message.edit_text("✍️ Введіть прізвище водія:", reply_markup=back_to_admin())
-    await state.set_state(AddDriverForm.name)
-
-
-@router.message(AddDriverForm.name)
-async def drv_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    driver_name = msg.text.strip()
-
-    if not driver_name:
-        return await msg.answer("❌ Ім'я не може бути порожнім", reply_markup=back_to_admin())
-
-    if len(driver_name) > 50:
-        return await msg.answer("❌ Ім'я занадто довге (максимум 50 символів)", reply_markup=back_to_admin())
-
-    success = db.add_driver(driver_name)
-
-    actor = _actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-
-    if success:
-        logger.info(f"🚛 {actor} додав водія: {driver_name}")
-        await msg.answer(f"✅ {driver_name} доданий.", reply_markup=after_add_menu())
-    else:
-        await msg.answer(f"⚠️ Водій {driver_name} вже існує.", reply_markup=after_add_menu())
-
-    await state.clear()
