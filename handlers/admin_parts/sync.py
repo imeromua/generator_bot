@@ -6,6 +6,7 @@ import config
 import database.db_api as db
 from keyboards.builders import sync_menu, back_to_admin
 from services.sheets_export import full_export
+from services.sheets_import import full_import
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -19,7 +20,8 @@ async def show_sync_menu(cb: types.CallbackQuery):
     txt = (
         "🔄 <b>Синхронізація з Google Sheets</b>\n\n"
         "📥 <b>Імпорт</b> — читає дані з Sheets і перезаписує в БД\n"
-        "📤 <b>Експорт</b> — записує дані з БД у Sheets (A-AC + вкладка ПОДІЇ)\n"
+        "📤 <b>Експорт</b> — записує дані з БД у Sheets (A-AC + вкладка ПОДІЇ)\n\n"
+        "⚠️ Імпорт повністю очищає БД перед завантаженням!\n"
     )
     await cb.message.edit_text(txt, reply_markup=sync_menu())
     await cb.answer()
@@ -34,14 +36,14 @@ async def sync_import(cb: types.CallbackQuery):
     await cb.message.edit_text("⏳ <b>Імпорт з Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
     try:
-        # TODO: реалізувати читання з Sheets і запис в БД (services/sheets_import.py)
-        # from services.sheets_import import full_import
-        # await full_import()
+        full_import()
         
         txt = (
             "✅ <b>Імпорт завершено!</b>\n\n"
-            "📄 Дані з Sheets завантажені в БД.\n\n"
-            "⚠️ <i>Функції імпорту потребує реалізація в services/sheets_import.py</i>"
+            "📄 Дані з Sheets завантажені в БД:\n"
+            "• Основна вкладка (A-AC)\n"
+            "• Вкладка ПОДІЇ (опціонально)\n\n"
+            "⚠️ Старі дані БД було видалено."
         )
         await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
