@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import logging
 import csv
 import os
+import asyncio
 
 import config
 import database.db_api as db
@@ -26,6 +27,36 @@ class AddDriverForm(StatesGroup):
 
 class SetHoursForm(StatesGroup):
     hours = State()
+
+
+def _ensure_admin_user(user_id: int, first_name: str | None = None):
+    """Гарантує, що адмін є в таблиці users, щоб не падати на user[1]."""
+    user = db.get_user(user_id)
+    if user:
+        return user
+
+    if user_id in config.ADMIN_IDS:
+        name = f"Admin {first_name or ''}".strip()
+        if not name:
+            name = f"Admin {user_id}"
+        try:
+            db.register_user(user_id, name)
+        except Exception:
+            pass
+        return db.get_user(user_id)
+
+    return None
+
+
+def _actor_name(user_id: int, first_name: str | None = None) -> str:
+    user = db.get_user(user_id)
+    if user and user[1]:
+        return str(user[1])
+    if user_id in config.ADMIN_IDS:
+        user = _ensure_admin_user(user_id, first_name=first_name)
+        if user and user[1]:
+            return str(user[1])
+    return str(user_id)
 
 
 def _fmt_state_ts(ts_raw: str | None) -> str:
@@ -228,9 +259,9 @@ async def fuel_ordered(cb: types.CallbackQuery):
     db.set_state("fuel_ordered_date", today_str)
     db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
 
-    user = db.get_user(cb.from_user.id)
+    actor = _actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     try:
-        db.add_log("fuel_ordered", user[1] if user else str(cb.from_user.id), ts=now.strftime("%Y-%m-%d %H:%M:%S"))
+        db.add_log("fuel_ordered", actor, ts=now.strftime("%Y-%m-%d %H:%M:%S"))
     except Exception:
         pass
 
@@ -519,9 +550,11 @@ async def mnt_oil(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    user = db.get_user(cb.from_user.id)
-    db.record_maintenance("oil", user[1])
-    logger.info(f"🛢 {user[1]} виконав заміну мастила")
+    user = _ensure_admin_user(cb.from_user.id, first_name=cb.from_user.first_name)
+    actor = (user[1] if user and user[1] else _actor_name(cb.from_user.id, first_name=cb.from_user.first_name))
+
+    db.record_maintenance("oil", actor)
+    logger.info(f"🛢 {actor} виконав заміну мастила")
     await cb.answer("✅ Мастило замінено!", show_alert=True)
     await mnt_view(cb)
 
@@ -531,9 +564,11 @@ async def mnt_spark(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    user = db.get_user(cb.from_user.id)
-    db.record_maintenance("spark", user[1])
-    logger.info(f"🕯 {user[1]} виконав заміну свічок")
+    user = _ensure_admin_user(cb.from_user.id, first_name=cb.from_user.first_name)
+    actor = (user[1] if user and user[1] else _actor_name(cb.from_user.id, first_name=cb.from_user.first_name))
+
+    db.record_maintenance("spark", actor)
+    logger.info(f"🕯 {actor} виконав заміну свічок")
     await cb.answer("✅ Свічки замінено!", show_alert=True)
     await mnt_view(cb)
 
@@ -565,8 +600,8 @@ async def save_hours(msg: types.Message, state: FSMContext):
             return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_mnt())
 
         db.set_total_hours(val)
-        user = db.get_user(msg.from_user.id)
-        logger.info(f"⏱ {user[1]} встановив мотогодини: {val}")
+        actor = _actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
+        logger.info(f"⏱ {actor} встановив мотогодини: {val}")
         await msg.answer(f"✅ Встановлено: <b>{val} год</b>")
 
         st = db.get_state()
@@ -616,7 +651,6 @@ async def report_gen(cb: types.CallbackQuery):
 
         await cb.message.answer_document(file, caption=caption, reply_markup=nav_kb)
 
-        import os
         os.remove(file_path)
         logger.info(f"📊 Звіт згенеровано: {period}")
 
@@ -674,14 +708,12 @@ async def drv_save(msg: types.Message, state: FSMContext):
 
     success = db.add_driver(driver_name)
 
+    actor = _actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
+
     if success:
-        user = db.get_user(msg.from_user.id)
-        logger.info(f"🚛 {user[1]} додав водія: {driver_name}")
+        logger.info(f"🚛 {actor} додав водія: {driver_name}")
         await msg.answer(f"✅ {driver_name} доданий.", reply_markup=after_add_menu())
     else:
         await msg.answer(f"⚠️ Водій {driver_name} вже існує.", reply_markup=after_add_menu())
 
     await state.clear()
-
-
-import asyncio

@@ -331,10 +331,23 @@ def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
     try:
         db.set_state("status", "ON")
         db.set_state("active_shift", f"{open_shift_code}_start")
-        st_time = start_times.get(open_shift_code, "")
+
+        st_time = (start_times.get(open_shift_code, "") or "").strip()
         if st_time:
-            db.set_state("last_start_time", st_time[:5])
-            db.set_state("last_start_date", now_kiev().strftime("%Y-%m-%d"))
+            hhmm = st_time[:5]
+            db.set_state("last_start_time", hhmm)
+
+            # Якщо зараз після півночі, а старт був "вчора ввечері" — ставимо дату вчора.
+            try:
+                start_t = datetime.strptime(hhmm, "%H:%M").time()
+                now = now_kiev()
+                start_date = now.date()
+                if now.time() < start_t:
+                    start_date = start_date - timedelta(days=1)
+                db.set_state("last_start_date", start_date.strftime("%Y-%m-%d"))
+            except Exception:
+                db.set_state("last_start_date", now_kiev().strftime("%Y-%m-%d"))
+
     except Exception:
         pass
 
@@ -679,21 +692,50 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
 @router.message(RefillForm.receipt)
 async def refill_save(msg: types.Message, state: FSMContext):
     receipt_num = (msg.text or "").strip()
-    if not receipt_num or len(receipt_num) > 50:
-        return
 
     data = await state.get_data()
+    chat_id = int(data.get("ui_chat_id", msg.chat.id))
+    message_id = int(data.get("ui_message_id", 0))
+
+    if (not receipt_num) or (len(receipt_num) > 50):
+        err_txt = "❌ Введіть коректний номер чека (1..50 символів)."
+        if message_id:
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=err_txt,
+                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await msg.answer(err_txt)
+            except Exception:
+                pass
+        # Важливо: стан не чистимо, користувач лишається у вводі чека
+        return
+
     liters = data.get('liters')
     driver = data.get('driver')
 
     user = _ensure_user(msg.from_user.id, msg.from_user.first_name)
     if not user:
         await state.clear()
+        try:
+            await msg.answer("⚠️ Спочатку натисніть /start")
+        except Exception:
+            pass
         return
 
     operator_personnel = _get_operator_personnel_name(msg.from_user.id)
     if not operator_personnel:
         await state.clear()
+        try:
+            await msg.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.")
+        except Exception:
+            pass
         return
 
     log_val = f"{liters}|{receipt_num}"

@@ -34,10 +34,12 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
     hours_left_hhmm = format_hours_hhmm(hours_left)
 
-    import os
     mode_mark = ""
-    if os.getenv("MODE") == "TEST":
-        mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
+    try:
+        if bool(getattr(config, "IS_TEST_MODE", False)):
+            mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
+    except Exception:
+        pass
 
     offline_mark = ""
     try:
