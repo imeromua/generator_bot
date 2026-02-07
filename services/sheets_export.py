@@ -68,17 +68,14 @@ def _find_last_date_in_sheet(sheet) -> str | None:
     Повертає дату у форматі YYYY-MM-DD або None якщо таблиця порожня.
     """
     try:
-        # Читаємо всю колонку A (починаючи з рядка 3)
-        col_a = sheet.col_values(1)  # Колонка A = індекс 1
+        col_a = sheet.col_values(1)
         
         if len(col_a) < 3:
             logger.info("📋 Sheets порожня, експортуємо всі дані")
             return None
         
-        # Перші 2 рядки — шапка, шукаємо з рядка 3
         data_rows = col_a[2:]
         
-        # Шукаємо останню непорожню комірку з датою
         last_date_str = None
         for cell in reversed(data_rows):
             if cell and cell.strip():
@@ -89,7 +86,6 @@ def _find_last_date_in_sheet(sheet) -> str | None:
             logger.info("📋 Немає даних в Sheets, експортуємо всі дані")
             return None
         
-        # Парсимо DD.MM.YYYY → YYYY-MM-DD
         try:
             dt = datetime.strptime(last_date_str, "%d.%m.%Y")
             result = dt.strftime("%Y-%m-%d")
@@ -102,6 +98,36 @@ def _find_last_date_in_sheet(sheet) -> str | None:
     except Exception as e:
         logger.error(f"❌ Помилка пошуку останньої дати: {e}")
         return None
+
+
+def _get_fuel_before_date(from_date: str) -> float:
+    """Знаходить fuel_end з дня ПЕРЕД from_date.
+    
+    Це потрібно для правильного розрахунку fuel_start при інкрементальному експорті.
+    """
+    conn = db.get_connection()
+    cur = conn.cursor()
+    
+    # Читаємо всі логи до from_date
+    cur.execute("""
+        SELECT event_type, value
+        FROM logs
+        WHERE timestamp < ?
+        ORDER BY timestamp ASC
+    """, (f"{from_date} 00:00:00",))
+    
+    rows = cur.fetchall()
+    conn.close()
+    
+    running_fuel = 0.0
+    for event, value in rows:
+        if event == 'refill':
+            running_fuel += float(value or 0)
+        elif event == 'fuel_set':
+            running_fuel = float(value or 0)
+    
+    logger.info(f"🛢 Залишок палива перед {from_date}: {running_fuel:.1f}л")
+    return running_fuel
 
 
 def _aggregate_logs_by_date(from_date: str | None = None):
@@ -164,7 +190,7 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         
         # Старт/стоп змін
         if event.endswith('_start'):
-            shift = event.split('_')[0]  # m/d/e/x
+            shift = event.split('_')[0]
             day['shifts'][shift]['start'] = dt
             day['shifts'][shift]['start_user'] = user or ""
         
@@ -173,7 +199,6 @@ def _aggregate_logs_by_date(from_date: str | None = None):
             day['shifts'][shift]['end'] = dt
             day['shifts'][shift]['end_user'] = user or ""
             
-            # Обчислюємо години
             start = day['shifts'][shift].get('start')
             end = day['shifts'][shift].get('end')
             if start and end:
@@ -204,9 +229,15 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         if date_str in days:
             days[date_str]['maintenance'].append((mnt_type, hours))
     
-    # Обчислюємо fuel_start для кожного дня (залишок попереднього дня)
+    # Обчислюємо fuel_start для кожного дня
     sorted_dates = sorted(days.keys())
-    prev_fuel = 0.0
+    
+    # FIX #1: Якщо є from_date, беремо fuel_end з попереднього дня
+    if from_date:
+        prev_fuel = _get_fuel_before_date(from_date)
+    else:
+        prev_fuel = 0.0
+    
     for d in sorted_dates:
         days[d]['fuel_start'] = prev_fuel
         prev_fuel = days[d]['fuel_end']
@@ -273,7 +304,7 @@ def _build_export_rows(days_data):
         # P: номер чека (перший receipt_number з refill)
         receipt = ""
         if day['refills']:
-            receipt = day['refills'][0][2]  # (amount, driver, receipt)
+            receipt = day['refills'][0][2]
         row.append(receipt or "")
         
         # Q: мотогодини на кінець дня
@@ -282,7 +313,7 @@ def _build_export_rows(days_data):
         # R: ТО дата (тільки в день заміни)
         mnt_date = ""
         if day['maintenance']:
-            mnt_date = date_fmt  # Дата ТО = дата рядка
+            mnt_date = date_fmt
         row.append(mnt_date)
         
         # S-Z: відповідальні за зміни (start_user, end_user)
@@ -316,52 +347,6 @@ def _build_export_rows(days_data):
     return rows
 
 
-def _build_events_rows(from_date: str | None = None):
-    """Будує рядки для вкладки ПОДІЇ (всі логи).
-    
-    Якщо from_date вказано, бере тільки події >= from_date.
-    """
-    conn = db.get_connection()
-    cur = conn.cursor()
-    
-    if from_date:
-        cur.execute("""
-            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-            FROM logs
-            WHERE timestamp >= ?
-            ORDER BY timestamp ASC
-        """, (f"{from_date} 00:00:00",))
-    else:
-        cur.execute("""
-            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-            FROM logs
-            ORDER BY timestamp ASC
-        """)
-    
-    rows = cur.fetchall()
-    conn.close()
-    
-    events = []
-    for row in rows:
-        event, ts_str, user, value, driver, receipt = row
-        dt = _parse_ts(ts_str)
-        if not dt:
-            continue
-        
-        # Формат: [дата, час, подія, користувач, значення, водій, чек]
-        events.append([
-            dt.strftime("%d.%m.%Y"),
-            dt.strftime("%H:%M:%S"),
-            event,
-            user or "",
-            value or "",
-            driver or "",
-            receipt or ""
-        ])
-    
-    return events
-
-
 def full_export():
     """Повний експорт з БД в Google Sheets (інкрементальний).
     
@@ -369,7 +354,7 @@ def full_export():
     1. Знаходимо останню дату в Sheets
     2. Експортуємо тільки дні >= цієї дати (оновлюємо поточний + дописуємо нові)
     3. Записуємо в основну вкладку (A-AC)
-    4. Оновлюємо вкладку ПОДІЇ (тільки нові події)
+    4. ПОВНІСТЮ ПЕРЕЗАПИСУЄМО вкладку ПОДІЇ (щоб уникнути дублювання)
     """
     logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
     
@@ -390,34 +375,25 @@ def full_export():
     
     # Будуємо рядки
     main_rows = _build_export_rows(days_data)
-    events_rows = _build_events_rows(from_date=last_date)
     
     logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {last_date or 'початку'})")
-    logger.info(f"📄 Підготовлено {len(events_rows)} подій")
     
     # Записуємо основну вкладку
     if main_rows:
-        # Якщо є last_date — знаходимо рядок з цією датою і перезаписуємо від нього
-        # Якщо немає — дописуємо в кінець
-        
         if last_date:
-            # Шукаємо рядок з last_date і видаляємо його (щоб перезаписати)
             all_values = main_sheet.get_all_values()
-            start_row = 3  # За замовчуванням дописуємо після шапки
+            start_row = 3
             
-            # Шукаємо рядок з last_date
             last_date_fmt = datetime.strptime(last_date, "%Y-%m-%d").strftime("%d.%m.%Y")
-            for i, row in enumerate(all_values[2:], start=3):  # Починаємо з рядка 3
+            for i, row in enumerate(all_values[2:], start=3):
                 if row and row[0].strip() == last_date_fmt:
                     start_row = i
                     logger.info(f"📍 Знайдено останню дату в рядку {start_row}, перезаписуємо від нього")
                     break
             else:
-                # Не знайшли — дописуємо в кінець
                 start_row = len(all_values) + 1
                 logger.info(f"📍 Останню дату не знайдено в таблиці, дописуємо в кінець (рядок {start_row})")
         else:
-            # Немає last_date — записуємо з рядка 3
             start_row = 3
         
         end_row = start_row + len(main_rows) - 1
@@ -428,21 +404,55 @@ def full_export():
         )
         logger.info(f"✅ Основна вкладка оновлена (рядки {start_row}-{end_row})")
     
-    # Записуємо вкладку ПОДІЇ (додаємо в кінець)
-    if events_rows:
-        try:
-            events_sheet = ss.worksheet("ПОДІЇ")
-        except Exception:
-            # Створюємо, якщо немає
-            events_sheet = ss.add_worksheet("ПОДІЇ", rows=1000, cols=7)
-            # Шапка
-            events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
+    # FIX #2: ПОВНІСТЮ ПЕРЕЗАПИСУЄМО вкладку ПОДІЇ (щоб уникнути дублювання)
+    logger.info("📄 Експортуємо вкладку ПОДІЇ (повна перезапис)...")
+    
+    try:
+        events_sheet = ss.worksheet("ПОДІЇ")
+    except Exception:
+        events_sheet = ss.add_worksheet("ПОДІЇ", rows=10000, cols=7)
+    
+    # Очищаємо вкладку
+    events_sheet.clear()
+    
+    # Записуємо шапку
+    events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
+    
+    # Читаємо ВСІ події з БД
+    conn = db.get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
+        FROM logs
+        ORDER BY timestamp ASC
+    """)
+    rows = cur.fetchall()
+    conn.close()
+    
+    events = []
+    for row in rows:
+        event, ts_str, user, value, driver, receipt = row
+        dt = _parse_ts(ts_str)
+        if not dt:
+            continue
         
-        # Дописуємо в кінець
-        all_events = events_sheet.get_all_values()
-        next_row = len(all_events) + 1
-        
-        events_sheet.append_rows(events_rows, value_input_option="USER_ENTERED")
-        logger.info(f"✅ Вкладка ПОДІЇ оновлена (+{len(events_rows)} подій, починаючи з рядка {next_row})")
+        events.append([
+            dt.strftime("%d.%m.%Y"),
+            dt.strftime("%H:%M:%S"),
+            event,
+            user or "",
+            value or "",
+            driver or "",
+            receipt or ""
+        ])
+    
+    if events:
+        # Записуємо всі події одним батчем
+        events_sheet.update(
+            f"A2:G{len(events) + 1}",
+            events,
+            value_input_option="USER_ENTERED"
+        )
+        logger.info(f"✅ Вкладка ПОДІЇ оновлена ({len(events)} подій)")
     
     logger.info("✅ Експорт завершено!")
