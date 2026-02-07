@@ -19,6 +19,17 @@ class RegForm(StatesGroup):
     name = State()
 
 
+def _fmt_state_ts(ts_raw: str | None) -> str:
+    s = (ts_raw or "").strip()
+    if not s:
+        return ""
+    try:
+        dt = datetime.fromtimestamp(int(float(s)), tz=config.KYIV)
+        return dt.strftime("%d.%m %H:%M")
+    except Exception:
+        return ""
+
+
 def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) -> tuple[str, types.InlineKeyboardMarkup]:
     st = db.get_state()
     role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
@@ -44,27 +55,37 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     offline_mark = ""
     try:
         if db.sheet_is_offline():
-            since_ts = str(db.get_state_value("sheet_offline_since_ts", "") or "").strip()
-            since_s = ""
-            if since_ts:
-                try:
-                    dt = datetime.fromtimestamp(int(float(since_ts)), tz=config.KYIV)
-                    since_s = dt.strftime("%d.%m %H:%M")
-                except Exception:
-                    since_s = ""
+            forced_offline = False
+            try:
+                forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+            except Exception:
+                forced_offline = False
 
-            if since_s:
-                offline_mark = (
-                    f"🔌 <b>OFFLINE</b> — немає доступу до Google Sheets з {since_s}.\n"
-                    f"Дані накопичуються локально; синхронізація відбудеться після відновлення.\n"
-                    f"➖➖➖➖➖➖\n"
-                )
+            since_s = _fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
+            last_ok_s = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
+
+            if forced_offline:
+                offline_mark = "🔌 <b>OFFLINE (примусово)</b> — синхронізацію з Google Sheets вимкнено адміном.\n"
+                if last_ok_s:
+                    offline_mark += f"Останній успішний доступ: <b>{last_ok_s}</b>\n"
+                if since_s:
+                    offline_mark += f"OFFLINE з: <b>{since_s}</b>\n"
+                offline_mark += "Дані накопичуються локально; синхронізація відновиться після вимкнення OFFLINE в адмінці.\n"
+                offline_mark += "➖➖➖➖➖➖\n"
             else:
-                offline_mark = (
-                    "🔌 <b>OFFLINE</b> — немає доступу до Google Sheets.\n"
-                    "Дані накопичуються локально; синхронізація відбудеться після відновлення.\n"
-                    "➖➖➖➖➖➖\n"
-                )
+                if since_s:
+                    offline_mark = (
+                        f"🔌 <b>OFFLINE (авто)</b> — немає доступу до Google Sheets з {since_s}.\n"
+                        f"Дані накопичуються локально; синхронізація відбудеться після відновлення доступу.\n"
+                        f"➖➖➖➖➖➖\n"
+                    )
+                else:
+                    offline_mark = (
+                        "🔌 <b>OFFLINE (авто)</b> — немає доступу до Google Sheets.\n"
+                        "Дані накопичуються локально; синхронізація відбудеться після відновлення доступу.\n"
+                        "➖➖➖➖➖➖\n"
+                    )
+
     except Exception:
         pass
 
