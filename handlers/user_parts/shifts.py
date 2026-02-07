@@ -238,7 +238,12 @@ async def gen_stop(cb: types.CallbackQuery):
     # FIX #7: Витрати палива обчислюються з логів при експорті/імпорті
     # В handler НІКОЛИ не треба міняти current_fuel вручну!
     # Обчислюємо тільки для відображення
-    fuel_consumed = dur * config.FUEL_CONSUMPTION
+    try:
+        fuel_consumption_rate = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+    except Exception:
+        fuel_consumption_rate = config.FUEL_CONSUMPTION
+    
+    fuel_consumed = dur * fuel_consumption_rate
 
     # Оновлюємо мотогодини (це правильно, бо вони не обчислюються з логів)
     try:
