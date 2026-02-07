@@ -88,16 +88,26 @@ async def sheet_mode_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
 
     is_offline = False
+    forced_offline = False
+
     try:
         is_offline = db.sheet_is_offline()
     except Exception:
         is_offline = False
 
+    try:
+        forced_offline = bool(getattr(db, "sheet_is_forced_offline", lambda: False)())
+    except Exception:
+        forced_offline = False
+
     last_ok = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
     first_fail = _fmt_state_ts(db.get_state_value("sheet_first_fail_ts", ""))
     offline_since = _fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
 
-    status_line = "🔌 <b>OFFLINE</b> увімкнено" if is_offline else "🌐 <b>ONLINE</b> (OFFLINE вимкнено)"
+    if not is_offline:
+        status_line = "🌐 <b>ONLINE</b> (OFFLINE вимкнено)"
+    else:
+        status_line = "🔌 <b>OFFLINE</b> (примусово)" if forced_offline else "🔌 <b>OFFLINE</b> (авто)"
 
     txt = (
         "🔧 <b>Google Sheets: режим</b>\n\n"
@@ -108,7 +118,7 @@ async def sheet_mode_menu(cb: types.CallbackQuery, state: FSMContext):
         "⚠️ Примусовий ONLINE не гарантує доступність Sheets — лише вимикає офлайн-облік як режим."
     )
 
-    await cb.message.edit_text(txt, reply_markup=sheet_mode_kb(is_offline))
+    await cb.message.edit_text(txt, reply_markup=sheet_mode_kb(is_offline, forced_offline))
     await cb.answer()
 
 

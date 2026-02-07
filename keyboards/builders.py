@@ -60,9 +60,17 @@ def admin_panel():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def sheet_mode_kb(is_offline: bool):
-    state_btn = "🔌 Примусово OFFLINE" if not is_offline else "🔌 OFFLINE увімкнено"
-    online_btn = "🌐 Примусово ONLINE" if is_offline else "🌐 ONLINE (зняти OFFLINE)"
+def sheet_mode_kb(is_offline: bool, forced_offline: bool = False):
+    if not is_offline:
+        state_btn = "🔌 Примусово OFFLINE"
+        online_btn = "🌐 ONLINE"
+    else:
+        if forced_offline:
+            state_btn = "🔌 OFFLINE (примусово) ✅"
+            online_btn = "🌐 Зняти примусовий OFFLINE"
+        else:
+            state_btn = "🔌 OFFLINE активний ✅"
+            online_btn = "🌐 Примусово ONLINE (зняти OFFLINE)"
 
     kb = [
         [InlineKeyboardButton(text=state_btn, callback_data="sheet_force_offline")],
