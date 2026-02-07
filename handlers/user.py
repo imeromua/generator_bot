@@ -541,17 +541,20 @@ async def gen_stop(cb: types.CallbackQuery):
 
     try:
         start_date_str = st.get('start_date', '')
-        start_time_str = st['start_time']
+        start_time_str = st.get('start_time', '')
 
-        if start_date_str:
-            start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+        if start_time_str:
+            if start_date_str:
+                start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+            else:
+                start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
+                if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
+                    start_dt = start_dt - timedelta(days=1)
+
+            start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
+            dur = (now - start_dt).total_seconds() / 3600.0
         else:
-            start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
-            if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
-                start_dt = start_dt - timedelta(days=1)
-
-        start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
-        dur = (now - start_dt).total_seconds() / 3600.0
+            dur = 0.0
 
         if dur < 0 or dur > 24:
             dur = 0.0
@@ -587,7 +590,12 @@ async def gen_stop(cb: types.CallbackQuery):
             db.update_hours(float(dur or 0.0))
         except Exception:
             pass
-        st = db.get_state()  # оновити для банера
+
+    # Оновлюємо стан після закриття/обліку
+    try:
+        st = db.get_state()
+    except Exception:
+        st = {}
 
     try:
         canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
@@ -598,9 +606,6 @@ async def gen_stop(cb: types.CallbackQuery):
         remaining_est = canonical_fuel
     else:
         remaining_est = canonical_fuel - fuel_consumed
-
-    db.set_state('status', 'OFF')
-    db.set_state('active_shift', 'none')
 
     dur_hhmm = format_hours_hhmm(dur)
 
