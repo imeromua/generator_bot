@@ -40,7 +40,10 @@ parser_router = Router()
 
 @parser_router.message(F.text & ~F.text.startswith("/"), StateFilter(None))
 async def check_dtek_post(msg: types.Message):
-    """Перевіряє кожен текст: чи це графік?"""
+    """Перевіряє кожен текст: чи це графік? (тільки для адмінів)"""
+    if msg.from_user.id not in config.ADMIN_IDS:
+        return
+
     ranges = parse_dtek_message(msg.text)
 
     if ranges:
@@ -56,7 +59,10 @@ async def check_dtek_post(msg: types.Message):
 
 @parser_router.callback_query(F.data.startswith("apply_"))
 async def apply_schedule_range(cb: types.CallbackQuery):
-    """Записує знайдений графік у БД"""
+    """Записує знайдений графік у БД (тільки для адмінів)"""
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
     try:
         parts = cb.data.split("_")
         s_str, e_str = parts[1], parts[2]

@@ -15,6 +15,7 @@ import config
 import database.db_api as db
 from keyboards.builders import main_dashboard, drivers_list
 from handlers.common import show_dash
+from utils.time import format_hours_hhmm, now_kiev
 
 
 router = Router()
@@ -48,23 +49,6 @@ def _get_operator_personnel_name(user_id: int) -> str | None:
         return db.get_personnel_for_user(user_id)
     except Exception:
         return None
-
-
-def format_hours_hhmm(hours_float: float) -> str:
-    """Конвертує години (float) у формат ГГ:ХХ."""
-    try:
-        h = float(hours_float)
-    except Exception:
-        h = 0.0
-
-    sign = "-" if h < 0 else ""
-    h = abs(h)
-
-    total_minutes = int(round(h * 60.0))
-    hh = total_minutes // 60
-    mm = total_minutes % 60
-
-    return f"{sign}{hh:02d}:{mm:02d}"
 
 
 def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
@@ -229,7 +213,7 @@ def _get_sheet_shift_info_sync():
     if not ws:
         return False, None, set(), {}
 
-    today = datetime.now(config.KYIV).date()
+    today = now_kiev().date()
     row = _find_row_by_date_in_column_a(ws, today, config.SHEET_NAME)
     if not row:
         return False, None, set(), {}
@@ -268,14 +252,14 @@ def _sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
         st_time = start_times.get(open_shift_code, "")
         if st_time:
             db.set_state("last_start_time", st_time[:5])
-            db.set_state("last_start_date", datetime.now(config.KYIV).strftime("%Y-%m-%d"))
+            db.set_state("last_start_date", now_kiev().strftime("%Y-%m-%d"))
     except Exception:
         pass
 
 
 @router.callback_query(F.data == "schedule_today")
 async def schedule_today(cb: types.CallbackQuery):
-    now = datetime.now(config.KYIV)
+    now = now_kiev()
     today_str = now.strftime("%Y-%m-%d")
     schedule = db.get_schedule(today_str)
 
@@ -348,7 +332,7 @@ async def gen_start(cb: types.CallbackQuery):
     if shift_code in completed_db:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
-    now = datetime.now(config.KYIV)
+    now = now_kiev()
 
     if cb.data != "x_start":
         start_time_limit = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
@@ -431,7 +415,7 @@ async def gen_stop(cb: types.CallbackQuery):
     if sheet_ok and (not open_shift) and st['status'] == 'OFF':
         return await cb.answer("⛔ Вже вимкнено.", show_alert=True)
 
-    now = datetime.now(config.KYIV)
+    now = now_kiev()
 
     try:
         start_date_str = st.get('start_date', '')

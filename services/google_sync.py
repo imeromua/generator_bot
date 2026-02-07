@@ -3,6 +3,8 @@ import gspread
 import logging
 import os
 import re
+import threading
+import time
 from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 from datetime import datetime, date, timedelta
@@ -12,6 +14,11 @@ import database.models as db_models
 import config
 
 logging.basicConfig(level=logging.INFO)
+
+# --- Canonical sync cache (avoid hitting Google Sheet on every dashboard open) ---
+_CANONICAL_SYNC_LOCK = threading.Lock()
+_LAST_CANONICAL_SYNC_TS = 0.0
+_CANONICAL_SYNC_TTL_SECONDS = 30
 
 
 def _sheet_name_to_month(sheet_name: str):
@@ -221,6 +228,14 @@ def sync_canonical_state_once():
     if not os.path.exists("service_account.json"):
         return
 
+    global _LAST_CANONICAL_SYNC_TS
+
+    now_ts = time.monotonic()
+    with _CANONICAL_SYNC_LOCK:
+        if (now_ts - _LAST_CANONICAL_SYNC_TS) < _CANONICAL_SYNC_TTL_SECONDS:
+            return
+        _LAST_CANONICAL_SYNC_TS = now_ts
+
     try:
         scopes = [
             "https://spreadsheets.google.com/feeds",
@@ -230,7 +245,11 @@ def sync_canonical_state_once():
         client = gspread.authorize(creds)
         sheet = client.open_by_key(config.SHEET_ID).worksheet(config.SHEET_NAME)
         _sync_canonical_state_from_sheet(sheet)
+
     except Exception as e:
+        # Дозволяємо швидку повторну спробу при падінні (не кешуємо помилку)
+        with _CANONICAL_SYNC_LOCK:
+            _LAST_CANONICAL_SYNC_TS = 0.0
         logging.error(f"❌ sync_canonical_state_once error: {e}")
 
 
