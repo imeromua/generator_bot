@@ -302,7 +302,12 @@ def _get_sheet_shift_info_sync():
         idx = col - 1
         if idx < 0:
             return ""
-        return (vals[idx] if idx < len(vals) else "").strip()
+        if idx >= len(vals):
+            return ""
+        v = vals[idx]
+        if v is None:
+            return ""
+        return str(v).strip()
 
     completed = set()
     start_times = {}

@@ -1,6 +1,8 @@
 import sqlite3
 import logging
 from datetime import datetime
+
+import config
 from database.models import get_connection
 
 # --- USER ---
@@ -198,7 +200,7 @@ def get_state():
 
 
 def get_today_completed_shifts():
-    date_str = datetime.now().strftime("%Y-%m-%d")
+    date_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
     with get_connection() as conn:
         query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end')"
         rows = conn.execute(query, (f"{date_str}%",)).fetchall()
@@ -251,7 +253,7 @@ def update_fuel(liters_delta):
 
 
 def add_log(event, user, val=None, driver=None, ts: str | None = None):
-    ts_val = ts or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts_val = ts or datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         conn.execute(
             "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
@@ -390,10 +392,10 @@ def set_total_hours(new_val):
 
 
 def record_maintenance(action, admin):
-    date = datetime.now().strftime("%Y-%m-%d")
+    date_s = datetime.now(config.KYIV).strftime("%Y-%m-%d")
     with get_connection() as conn:
         cur = float(conn.execute("SELECT value FROM generator_state WHERE key='total_hours'").fetchone()[0])
-        conn.execute("INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)", (date, action, cur, admin))
+        conn.execute("INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)", (date_s, action, cur, admin))
         if action == "oil":
             conn.execute("UPDATE generator_state SET value = ? WHERE key='last_oil_change'", (str(cur),))
         elif action == "spark":

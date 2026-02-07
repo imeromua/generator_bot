@@ -329,6 +329,67 @@ def _ensure_logs_header(ws):
         pass
 
 
+def _ensure_logs_rows(ws, needed_row: int):
+    """Гарантує, що worksheet має мінімум needed_row рядків."""
+    if not ws:
+        return
+
+    try:
+        current_rows = int(getattr(ws, "row_count", 0) or 0)
+    except Exception:
+        current_rows = 0
+
+    if current_rows >= needed_row:
+        return
+
+    new_rows = max(needed_row, current_rows + 500)
+    try:
+        ws.resize(rows=new_rows)
+    except Exception:
+        pass
+
+
+def _logs_row_for_id(log_id: int) -> int:
+    """1-й рядок = заголовок, дані починаються з 2-го. log_id=1 -> row=2."""
+    try:
+        lid = int(log_id)
+    except Exception:
+        lid = 0
+    return max(2, lid + 1)
+
+
+def _upsert_log_row(ws, lid: int, ltime: str, ltype: str, luser: str, lval: str, ldriver: str):
+    """Idempotent write у вкладку логів: один log_id = один рядок."""
+    if not ws:
+        return
+
+    row = _logs_row_for_id(lid)
+    _ensure_logs_rows(ws, row)
+
+    liters = 0.0
+    receipt = ""
+
+    if (ltype or "") == "refill":
+        liters, receipt = _parse_refill_value(lval)
+
+    values = [
+        str(lid),
+        ltime or "",
+        ltype or "",
+        luser or "",
+        str(liters).replace(".", ",") if liters else "",
+        receipt or "",
+        ldriver or "",
+        lval or "",
+    ]
+
+    ws.update(
+        range_name=f"A{row}:H{row}",
+        values=[values],
+        value_input_option='USER_ENTERED'
+    )
+
+
 def _parse_refill_value(value_raw: str | None) -> tuple[float, str]:
     liters = 0.0
     receipt = ""
@@ -460,34 +521,26 @@ async def sync_loop():
                     lid, ltype, ltime, luser, lval, ldriver, _ = l
 
                     try:
-                        log_date_str = ltime.split(" ")[0]
-                        log_time_hhmm = ltime.split(" ")[1][:5]
+                        log_date_str = (ltime or "").split(" ")[0]
+                        log_time_hhmm = (ltime or "").split(" ")[1][:5]
                     except Exception:
                         log_date_str = ""
                         log_time_hhmm = ""
 
-                    # 1) Запис у ОКРЕМУ вкладку журналу (крок 4)
+                    # 1) Запис у ОКРЕМУ вкладку журналу (крок 4) — idempotent
                     if logs_ws:
                         try:
-                            liters, receipt = (0.0, "")
-                            if ltype == "refill":
-                                liters, receipt = _parse_refill_value(lval)
-
-                            logs_ws.append_row(
-                                [
-                                    str(lid),
-                                    ltime or "",
-                                    ltype or "",
-                                    luser or "",
-                                    str(liters).replace(".", ",") if liters else "",
-                                    receipt or "",
-                                    ldriver or "",
-                                    lval or "",
-                                ],
-                                value_input_option='USER_ENTERED'
+                            _upsert_log_row(
+                                logs_ws,
+                                lid,
+                                ltime or "",
+                                ltype or "",
+                                luser or "",
+                                lval or "",
+                                ldriver or "",
                             )
                         except Exception as e:
-                            logging.error(f"❌ Logs-tab append error lid={lid}: {e}")
+                            logging.error(f"❌ Logs-tab upsert error lid={lid}: {e}")
                             # якщо не змогли записати в журнал — не позначаємо synced
                             continue
 
