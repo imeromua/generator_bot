@@ -9,29 +9,13 @@ import asyncio
 import database.db_api as db
 import config
 from keyboards.builders import main_dashboard
+from utils.time import format_hours_hhmm
 
 router = Router()
 
 
 class RegForm(StatesGroup):
     name = State()
-
-
-def format_hours_hhmm(hours_float: float) -> str:
-    """Конвертує години (float) у формат ГГ:ХХ. Підтримує від'ємні значення."""
-    try:
-        h = float(hours_float)
-    except Exception:
-        h = 0.0
-
-    sign = "-" if h < 0 else ""
-    h = abs(h)
-
-    total_minutes = int(round(h * 60.0))
-    hh = total_minutes // 60
-    mm = total_minutes % 60
-
-    return f"{sign}{hh:02d}:{mm:02d}"
 
 
 def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) -> tuple[str, types.InlineKeyboardMarkup]:
