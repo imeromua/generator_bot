@@ -226,18 +226,26 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY, chat_id BIGINT, message_id BIGINT)''')
 
-    # Міграція: додати receipt_number якщо його немає
+    # FIX #4: Міграція receipt_number для SQLite і Postgres
     try:
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
+        logging.info("✅ Колонка receipt_number вже існує")
     except Exception:
+        logging.info("🔧 Додаємо колонку receipt_number...")
         try:
             if _is_postgres():
                 c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
+                logging.info("✅ Postgres: колонка receipt_number додана")
             else:
-                # SQLite не підтримує ALTER ADD без IF NOT EXISTS до 3.35, тож робимо через exception
-                pass
-        except Exception:
-            pass
+                # SQLite: робимо ALTER TABLE
+                c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
+                logging.info("✅ SQLite: колонка receipt_number додана")
+        except Exception as e:
+            # Якщо колонка вже існує, ігноруємо
+            if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                logging.info("✅ Колонка receipt_number вже існує")
+            else:
+                logging.warning(f"⚠️ Не вдалося додати receipt_number: {e}")
 
     defaults = [
         ('total_hours', '0.0'),
