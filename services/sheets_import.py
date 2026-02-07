@@ -30,7 +30,6 @@ def _parse_time(time_str: str) -> str | None:
     if not time_str or not time_str.strip():
         return None
     try:
-        # Перевіряємо формат
         parts = time_str.strip().split(":")
         if len(parts) == 2:
             return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
@@ -53,49 +52,149 @@ def _clear_db():
     logger.info("✅ БД очищено")
 
 
+def _restore_generator_state():
+    """Відновлює generator_state з логів.
+    
+    Обчислює:
+    - current_fuel (поточний залишок палива)
+    - total_hours (загальні мотогодини)
+    - last_oil_change, last_spark_change (останнє ТО)
+    """
+    logger.info("🔧 Відновлюємо стан генератора з логів...")
+    
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    # Читаємо всі логи
+    cur.execute("""
+        SELECT event_type, timestamp, value
+        FROM logs
+        ORDER BY timestamp ASC
+    """)
+    rows = cur.fetchall()
+    
+    # Читаємо ТО
+    cur.execute("""
+        SELECT date, type, hours
+        FROM maintenance
+        ORDER BY date DESC
+        LIMIT 10
+    """)
+    mnt_rows = cur.fetchall()
+    
+    # Обчислюємо стан
+    running_fuel = 0.0
+    running_hours = 0.0
+    
+    for event, ts_str, value in rows:
+        if event == 'refill':
+            running_fuel += float(value or 0)
+        elif event == 'fuel_set':
+            running_fuel = float(value or 0)
+        elif event.endswith('_end'):
+            # Обчислюємо години зі змін
+            # (просте обчислення: шукаємо відповідний _start)
+            shift = event.split('_')[0]
+            start_event = f"{shift}_start"
+            
+            # Шукаємо останній start для цієї зміни
+            cur2 = conn.cursor()
+            cur2.execute("""
+                SELECT timestamp FROM logs
+                WHERE event_type = ? AND timestamp < ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """, (start_event, ts_str))
+            start_row = cur2.fetchone()
+            
+            if start_row:
+                try:
+                    start_ts = datetime.strptime(start_row[0], "%Y-%m-%d %H:%M:%S")
+                    end_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    delta = (end_ts - start_ts).total_seconds() / 3600.0
+                    running_hours += delta
+                except Exception:
+                    pass
+        
+        elif event == 'total_hours_set':
+            running_hours = float(value or 0)
+    
+    # Знаходимо останнє ТО
+    last_oil = ""
+    last_spark = ""
+    
+    for date_str, mnt_type, hours in mnt_rows:
+        if mnt_type == "oil" and not last_oil:
+            last_oil = date_str
+        elif mnt_type == "spark" and not last_spark:
+            last_spark = date_str
+        
+        if last_oil and last_spark:
+            break
+    
+    # Записуємо в generator_state
+    conn.execute("UPDATE generator_state SET value = ? WHERE key = 'current_fuel'", (str(running_fuel),))
+    conn.execute("UPDATE generator_state SET value = ? WHERE key = 'total_hours'", (str(running_hours),))
+    
+    if last_oil:
+        conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_oil_change'", (last_oil,))
+    if last_spark:
+        conn.execute("UPDATE generator_state SET value = ? WHERE key = 'last_spark_change'", (last_spark,))
+    
+    # Скидаємо статус (генератор вимкнений після імпорту)
+    conn.execute("UPDATE generator_state SET value = 'OFF' WHERE key = 'status'")
+    conn.execute("UPDATE generator_state SET value = 'none' WHERE key = 'active_shift'")
+    
+    conn.commit()
+    conn.close()
+    
+    logger.info(f"✅ Стан відновлено: паливо={running_fuel:.1f}л, мотогодини={running_hours:.1f}")
+    if last_oil:
+        logger.info(f"✅ Останнє ТО (олива): {last_oil}")
+    if last_spark:
+        logger.info(f"✅ Останнє ТО (свічки): {last_spark}")
+
+
 def _import_main_sheet(sheet):
     """Імпорт з основної вкладки (A-AC)"""
     logger.info("📥 Читаємо основну вкладку...")
     
-    # Читаємо всі дані (починаючи з рядка 3, перші 2 — шапка)
     all_values = sheet.get_all_values()
     
     if len(all_values) < 3:
         logger.warning("⚠️ Таблиця порожня або немає даних")
         return
     
-    data_rows = all_values[2:]  # Пропускаємо шапку
+    data_rows = all_values[2:]
     
     conn = get_connection()
     
-    # Множини для водіїв і персоналу
     all_drivers = set()
     all_personnel = set()
     
     for row_idx, row in enumerate(data_rows, start=3):
-        if len(row) < 29:  # Принаймні до AC (29 колонок: A-AC)
-            # Доповнюємо порожніми комірками
+        if len(row) < 29:
             row.extend([""] * (29 - len(row)))
         
         # A: дата
         date_str = _parse_date(row[0])
         if not date_str:
-            continue  # Пропускаємо порожні рядки
+            continue
         
         # B-I: часи старт/стоп змін (m/d/e/x)
         shifts = [
-            ('m', row[1], row[2]),   # B-C
-            ('d', row[3], row[4]),   # D-E
-            ('e', row[5], row[6]),   # F-G
-            ('x', row[7], row[8]),   # H-I
+            ('m', row[1], row[2]),
+            ('d', row[3], row[4]),
+            ('e', row[5], row[6]),
+            ('x', row[7], row[8]),
         ]
         
         # S-Z: відповідальні за зміни (start_user, end_user)
         shift_users = [
-            (row[18], row[19]),  # S-T (зміна 1 = m)
-            (row[20], row[21]),  # U-V (зміна 2 = d)
-            (row[22], row[23]),  # W-X (зміна 3 = e)
-            (row[24], row[25]),  # Y-Z (зміна 4 = x)
+            (row[18], row[19]),
+            (row[20], row[21]),
+            (row[22], row[23]),
+            (row[24], row[25]),
         ]
         
         # Записуємо зміни в logs
@@ -159,7 +258,7 @@ def _import_main_sheet(sheet):
             hours_str = row[16].strip() if len(row) > 16 and row[16] else "0"
             try:
                 hours = float(hours_str)
-                # Записуємо в maintenance (тип = oil або spark, визначити не можемо, тож пишемо "oil")
+                # Записуємо в maintenance
                 conn.execute(
                     "INSERT INTO maintenance (date, type, hours, admin) VALUES (?,?,?,?)",
                     (date_str, "oil", hours, "import")
@@ -210,11 +309,7 @@ def _import_events_sheet(ss):
         logger.info("ℹ️ Вкладка ПОДІЇ порожня")
         return
     
-    # Формат: [Дата, Час, Подія, Користувач, Значення, Водій, Чек]
-    # Пропускаємо шапку
     events_rows = all_values[1:]
-    
-    # Просто логуємо кількість, не імпортуємо (щоб не дублювати)
     logger.info(f"ℹ️ Вкладка ПОДІЇ містить {len(events_rows)} подій (не імпортуємо, щоб уникнути дублювання)")
 
 
@@ -226,6 +321,7 @@ def full_import():
     - Вкладку ПОДІЇ (опціонально)
     
     Відновлює logs, maintenance, drivers, personnel в БД.
+    Після імпорту відновлює generator_state (паливо, мотогодини, ТО).
     """
     logger.info("📥 Починаємо імпорт з Sheets в БД...")
     
@@ -242,5 +338,8 @@ def full_import():
     
     # Імпортуємо вкладку ПОДІЇ (опціонально)
     _import_events_sheet(ss)
+    
+    # FIX #3: Відновлюємо стан генератора
+    _restore_generator_state()
     
     logger.info("✅ Імпорт завершено!")
