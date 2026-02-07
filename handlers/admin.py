@@ -152,6 +152,14 @@ async def sheet_force_offline(cb: types.CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
+    # Логуємо адмінську дію (для аудиту в БД/журналі)
+    try:
+        now = datetime.now(config.KYIV)
+        actor = _actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
+        db.add_log("sheet_force_offline", actor, ts=now.strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        pass
+
     await cb.answer("✅ OFFLINE увімкнено", show_alert=True)
     await sheet_mode_menu(cb, state)
 
@@ -163,6 +171,14 @@ async def sheet_force_online(cb: types.CallbackQuery, state: FSMContext):
 
     try:
         db.sheet_force_online()
+    except Exception:
+        pass
+
+    # Логуємо адмінську дію (для аудиту в БД/журналі)
+    try:
+        now = datetime.now(config.KYIV)
+        actor = _actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
+        db.add_log("sheet_force_online", actor, ts=now.strftime("%Y-%m-%d %H:%M:%S"))
     except Exception:
         pass
 
