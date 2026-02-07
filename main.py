@@ -37,8 +37,8 @@ from middlewares.error_handler import ErrorHandlerMiddleware, global_error_handl
 # Імпорт хендлерів
 from handlers import common, user, admin
 
-# Імпорт сервісів
-from services.google_sync import sync_loop
+# Імпорт сервісів (sync_loop тепер не використовується фонов о)
+# from services.google_sync import sync_loop
 from services.scheduler import scheduler_loop
 from services.parser import parse_dtek_message
 
@@ -132,8 +132,6 @@ def _is_transient_network_error(exc: Exception) -> bool:
         return True
     if "превышен таймаут семафора" in msg:
         return True
-    if "превышен таймаут семафора" in msg:
-        return True
 
     return False
 
@@ -216,7 +214,7 @@ async def run_polling_once(dp: Dispatcher):
     Один цикл polling:
     - ініціалізація БД (idempotent)
     - створення Bot
-    - старт фонових тасок (sync_loop / scheduler_loop)
+    - старт фонових тасок (тільки scheduler, sync вимкнено)
     - start_polling
     - коректне скасування тасок і закриття сесії
     """
@@ -234,7 +232,8 @@ async def run_polling_once(dp: Dispatcher):
         )
 
         logger.info("🚀 Запуск фонових процесів...")
-        tasks.append(asyncio.create_task(_run_background_forever("google_sync", sync_loop), name="google_sync"))
+        # Фоновий sync вимкнено: тепер тільки через кнопку в адмінці
+        # tasks.append(asyncio.create_task(_run_background_forever("google_sync", sync_loop), name="google_sync"))
         tasks.append(asyncio.create_task(_run_background_forever("scheduler", scheduler_loop, bot), name="scheduler"))
 
         logger.info("=" * 50)
@@ -243,18 +242,16 @@ async def run_polling_once(dp: Dispatcher):
         logger.info(f"📊 Таблиця: {config.SHEET_NAME}")
         logger.info(f"👥 Адмінів: {len(config.ADMIN_IDS)}")
         logger.info(f"🔓 Реєстрація: {'Відкрита' if config.REGISTRATION_OPEN else 'Закрита'}")
+        logger.info("ℹ️ Фоновий синх з Sheets ВИМКНЕНО (тільки через кнопку в адмінці)")
         logger.info("=" * 50)
         logger.info("Натисніть Ctrl+C для зупинки.")
 
-        # Очищення webhook (не критично)
         try:
             await bot.delete_webhook(drop_pending_updates=True)
             logger.info("✅ Webhook очищено")
         except Exception as e:
             logger.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
 
-        # Polling
-        # handle_signals=False — щоб повторні запуски polling у цьому ж процесі були стабільні
         await dp.start_polling(
             bot,
             handle_signals=False,
@@ -262,7 +259,6 @@ async def run_polling_once(dp: Dispatcher):
         )
 
     finally:
-        # Скасування фонових задач (щоб не дублювались)
         for t in tasks:
             try:
                 t.cancel()
@@ -275,7 +271,6 @@ async def run_polling_once(dp: Dispatcher):
             except Exception:
                 pass
 
-        # Закриття сесії
         if bot:
             try:
                 await bot.session.close()
@@ -307,7 +302,6 @@ async def main():
         try:
             await run_polling_once(dp)
 
-            # Якщо polling завершився без exception — це або ручна зупинка, або dp.stop_polling()
             logger.info("ℹ️ Polling завершився без помилок. Вихід з програми.")
             return
 

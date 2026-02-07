@@ -19,7 +19,6 @@ def main_dashboard(role, active_shift, completed_shifts):
         code = active_shift.split("_")[0]
         kb.append([InlineKeyboardButton(text=f"🏁 {pretty(code)} СТОП", callback_data=f"{code}_end")])
     else:
-        # Показуємо старт тільки наступної зміни по черзі (1 -> 2 -> 3)
         if 'm' not in completed_shifts:
             kb.append([InlineKeyboardButton(text=f"{pretty('m')} СТАРТ", callback_data="m_start")])
         elif 'd' not in completed_shifts:
@@ -27,15 +26,11 @@ def main_dashboard(role, active_shift, completed_shifts):
         elif 'e' not in completed_shifts:
             kb.append([InlineKeyboardButton(text=f"{pretty('e')} СТАРТ", callback_data="e_start")])
 
-        # ⚡ Екстра: показуємо тільки якщо 1/2/3 вже закриті, і сама Екстра ще не закрита
         if {'m', 'd', 'e'}.issubset(completed_shifts) and ('x' not in completed_shifts):
             kb.append([InlineKeyboardButton(text=f"{pretty('x')} СТАРТ", callback_data="x_start")])
 
-    # Графік відключень доступний для всіх
     kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
-
     kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")])
-
     kb.append([InlineKeyboardButton(text="🕘 Останні події", callback_data="events_last")])
 
     if role == 'admin':
@@ -48,13 +43,24 @@ def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="🔌 Режим Google Sheets", callback_data="sheet_mode_menu")],
+        [InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="🧮 Корекція", callback_data="corr_menu")],
         [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
         [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
+        [InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm")],
         [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def sync_menu():
+    kb = [
+        [InlineKeyboardButton(text="📥 Імпорт з Google Sheets", callback_data="sync_import")],
+        [InlineKeyboardButton(text="📤 Експорт в Google Sheets", callback_data="sync_export")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -72,7 +78,6 @@ def correction_menu():
 
 def back_to_corr():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
-
 
 
 def sheet_mode_kb(is_offline: bool, forced_offline: bool = False):
@@ -95,7 +100,6 @@ def sheet_mode_kb(is_offline: bool, forced_offline: bool = False):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- НОВЕ: Вибір дати (Сьогодні / Завтра) ---
 def schedule_date_selector(today_str, tom_str):
     d_today = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d-%m")
     d_tom = datetime.strptime(tom_str, "%Y-%m-%d").strftime("%d-%m")
@@ -108,7 +112,6 @@ def schedule_date_selector(today_str, tom_str):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- СІТКА ГРАФІКА (Оновлена) ---
 def schedule_grid(date_str, is_today_and_working=False):
     sched = db.get_schedule(date_str)
     kb = []
@@ -133,7 +136,6 @@ def schedule_grid(date_str, is_today_and_working=False):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- Інші допоміжні ---
 def maintenance_menu():
     kb = [
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
@@ -144,14 +146,12 @@ def maintenance_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
 def drivers_list(drivers):
     kb = []
     for d in drivers:
-        kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])])
+        kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])
     kb.append([InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
-
 
 
 def report_period():
@@ -163,20 +163,16 @@ def report_period():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
 def back_to_admin():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]])
-
 
 
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="home")]])
 
 
-
 def back_to_mnt():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
-
 
 
 def after_add_menu():
