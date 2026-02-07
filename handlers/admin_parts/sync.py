@@ -5,6 +5,7 @@ from aiogram import Router, F, types
 import config
 import database.db_api as db
 from keyboards.builders import sync_menu, back_to_admin
+from services.sheets_export import full_export
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -61,15 +62,13 @@ async def sync_export(cb: types.CallbackQuery):
     await cb.message.edit_text("⏳ <b>Експорт в Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
     try:
-        # TODO: реалізувати запис з БД у Sheets (services/sheets_export.py)
-        # Формат A-AC + вкладка ПОДІЇ
-        # from services.sheets_export import full_export
-        # await full_export()
+        full_export()
         
         txt = (
             "✅ <b>Експорт завершено!</b>\n\n"
-            "📄 Дані з БД записані в Sheets (A-AC + вкладка ПОДІЇ).\n\n"
-            "⚠️ <i>Функції експорту потребує реалізація в services/sheets_export.py</i>"
+            "📄 Дані з БД записані в Sheets:\n"
+            "• Основна вкладка (A-AC)\n"
+            "• Вкладка ПОДІЇ (всі логи)\n"
         )
         await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
