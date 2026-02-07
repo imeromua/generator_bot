@@ -96,13 +96,18 @@ REGISTRATION_OPEN = (BOT_STATUS == "ON")
 WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
 
 # --- ПАЛИВО ---
-FUEL_RATE_STR = os.getenv("FUEL_RATE")
+# Підтримуємо обидві назви для сумісності:
+# - FUEL_RATE (основна)
+# - FUEL_CONSUMPTION (аліас)
+FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")
 
 if FUEL_RATE_STR:
     try:
         FUEL_CONSUMPTION = float(FUEL_RATE_STR)
     except ValueError:
-        print(f"⚠️  УВАГА: FUEL_RATE='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням")
+        print(
+            f"⚠️  УВАГА: FUEL_RATE/FUEL_CONSUMPTION='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням"
+        )
         FUEL_CONSUMPTION = 5.3
 else:
     print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")

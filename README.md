@@ -122,7 +122,8 @@ STOP_REMINDER_MIN=30       # За скільки хвилин до WORK_END на
 
 #### Паливо:
 ```env
-FUEL_CONSUMPTION=0.8           # Витрата л/год
+FUEL_RATE=0.8                  # Витрата л/год
+# Також підтримується аліас: FUEL_CONSUMPTION=0.8
 FUEL_ALERT_THRESHOLD=15.0      # Поріг для алертів (літри)
 FUEL_ALERT_COOLDOWN_MIN=180    # Анти-спам алертів (хвилини)
 ```
