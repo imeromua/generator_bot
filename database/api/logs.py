@@ -32,7 +32,7 @@ def get_last_logs(limit: int = 15):
 
     with get_connection() as conn:
         query = """
-            SELECT event_type, timestamp, user_name, value, driver_name
+            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
             FROM logs
             ORDER BY id DESC
             LIMIT ?
@@ -40,12 +40,13 @@ def get_last_logs(limit: int = 15):
         return conn.execute(query, (lim,)).fetchall()
 
 
-def add_log(event, user, val=None, driver=None, ts: str | None = None):
+def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = None):
+    """Додає подію в журнал. Тепер підтримує receipt_number."""
     ts_val = ts or datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
-            (event, ts_val, user, val, driver),
+            "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
+            (event, ts_val, user, val, driver, receipt),
         )
 
 
@@ -76,8 +77,8 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
             _conn_set_state_value(conn, "last_start_date", dt.strftime("%Y-%m-%d"))
 
             conn.execute(
-                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
-                (event_type, ts, user_name, None, None),
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
+                (event_type, ts, user_name, None, None, None),
             )
 
             conn.commit()
@@ -119,8 +120,8 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
             _conn_set_state_value(conn, "active_shift", "none")
 
             conn.execute(
-                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name) VALUES (?,?,?,?,?)",
-                (end_event_type, ts, user_name, None, None),
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
+                (end_event_type, ts, user_name, None, None, None),
             )
 
             conn.commit()
@@ -158,7 +159,7 @@ def mark_synced(ids):
 def get_logs_for_period(start_date, end_date):
     with get_connection() as conn:
         query = """
-            SELECT event_type, timestamp, user_name, value, driver_name
+            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
             FROM logs
             WHERE timestamp >= ? AND timestamp <= ?
             ORDER BY timestamp ASC
@@ -175,7 +176,7 @@ def get_refills_for_date(date_str: str):
         return []
     with get_connection() as conn:
         query = """
-            SELECT timestamp, user_name, value, driver_name
+            SELECT timestamp, user_name, value, driver_name, receipt_number
             FROM logs
             WHERE event_type = 'refill' AND timestamp LIKE ?
             ORDER BY timestamp ASC
