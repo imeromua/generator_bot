@@ -12,7 +12,7 @@ import database.db_api as db
 from keyboards.builders import (
     admin_panel, schedule_grid, report_period,
     back_to_admin, after_add_menu, maintenance_menu, back_to_mnt,
-    schedule_date_selector
+    schedule_date_selector, sheet_mode_kb
 )
 from services.excel_report import generate_report
 
@@ -28,6 +28,17 @@ class SetHoursForm(StatesGroup):
     hours = State()
 
 
+def _fmt_state_ts(ts_raw: str | None) -> str:
+    s = (ts_raw or "").strip()
+    if not s:
+        return "—"
+    try:
+        dt = datetime.fromtimestamp(int(float(s)), tz=config.KYIV)
+        return dt.strftime("%d.%m %H:%M")
+    except Exception:
+        return s
+
+
 # --- ВХІД В АДМІНКУ ---
 @router.callback_query(F.data == "admin_home")
 async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
@@ -36,6 +47,67 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     logger.info(f"👤 Адмін {cb.from_user.id} відкрив панель")
     await cb.message.edit_text("⚙️ <b>Адмін Панель</b>", reply_markup=admin_panel())
+
+
+# --- Sheets mode menu ---
+@router.callback_query(F.data == "sheet_mode_menu")
+async def sheet_mode_menu(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+    await state.clear()
+
+    is_offline = False
+    try:
+        is_offline = db.sheet_is_offline()
+    except Exception:
+        is_offline = False
+
+    last_ok = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
+    first_fail = _fmt_state_ts(db.get_state_value("sheet_first_fail_ts", ""))
+    offline_since = _fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
+
+    status_line = "🔌 <b>OFFLINE</b> увімкнено" if is_offline else "🌐 <b>ONLINE</b> (OFFLINE вимкнено)"
+
+    txt = (
+        "🔧 <b>Google Sheets: режим</b>\n\n"
+        f"Стан: {status_line}\n"
+        f"Останній успішний доступ: <b>{last_ok}</b>\n"
+        f"Перша помилка доступу: <b>{first_fail}</b>\n"
+        f"OFFLINE з: <b>{offline_since}</b>\n\n"
+        "⚠️ Примусовий ONLINE не гарантує доступність Sheets — лише вимикає офлайн-облік як режим."
+    )
+
+    await cb.message.edit_text(txt, reply_markup=sheet_mode_kb(is_offline))
+    await cb.answer()
+
+
+@router.callback_query(F.data == "sheet_force_offline")
+async def sheet_force_offline(cb: types.CallbackQuery):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    try:
+        db.sheet_force_offline()
+    except Exception:
+        pass
+
+    await cb.answer("✅ OFFLINE увімкнено", show_alert=True)
+    await sheet_mode_menu(cb, state=FSMContext)  # will be ignored; fallback below
+
+
+@router.callback_query(F.data == "sheet_force_online")
+async def sheet_force_online(cb: types.CallbackQuery):
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    try:
+        db.sheet_force_online()
+    except Exception:
+        pass
+
+    await cb.answer("✅ OFFLINE вимкнено", show_alert=True)
+    await sheet_mode_menu(cb, state=FSMContext)
+
 
 
 def _export_logs_to_csv(path: str, rows) -> None:

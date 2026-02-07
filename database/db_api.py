@@ -185,6 +185,35 @@ def sheet_mark_fail(ts: int | None = None):
         pass
 
 
+def sheet_force_offline(ts: int | None = None):
+    """Примусово вмикає offline-режим (адмінська дія)."""
+    now_ts = int(ts or time.time())
+    try:
+        # якщо перша помилка ще не зафіксована — ставимо, щоб було видно в адмінці
+        first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
+        if not first:
+            set_state("sheet_first_fail_ts", str(now_ts))
+
+        set_state("sheet_offline", "1")
+        set_state("sheet_offline_since_ts", str(now_ts))
+    except Exception:
+        pass
+
+
+def sheet_force_online(ts: int | None = None):
+    """Примусово вимикає offline-режим (адмінська дія).
+
+    ВАЖЛИВО: ми не ставимо sheet_last_ok_ts, бо це не гарантує доступність Sheets.
+    """
+    now_ts = int(ts or time.time())
+    try:
+        set_state("sheet_offline", "0")
+        set_state("sheet_offline_since_ts", "")
+        set_state("sheet_first_fail_ts", "")
+    except Exception:
+        pass
+
+
 def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
     """True якщо offline уже активний або якщо помилка доступу триває >= threshold_seconds."""
     try:

@@ -47,6 +47,7 @@ def main_dashboard(role, active_shift, completed_shifts):
 def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
+        [InlineKeyboardButton(text="🔌 Режим Google Sheets", callback_data="sheet_mode_menu")],
         [InlineKeyboardButton(text="📤 Експорт CSV (вчора)", callback_data="export_logs_yesterday")],
         [InlineKeyboardButton(text="📤 Експорт CSV (останні 7 днів)", callback_data="export_logs_7d")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
@@ -55,6 +56,18 @@ def admin_panel():
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
         [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
         [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def sheet_mode_kb(is_offline: bool):
+    state_btn = "🔌 Примусово OFFLINE" if not is_offline else "🔌 OFFLINE увімкнено"
+    online_btn = "🌐 Примусово ONLINE" if is_offline else "🌐 ONLINE (зняти OFFLINE)"
+
+    kb = [
+        [InlineKeyboardButton(text=state_btn, callback_data="sheet_force_offline")],
+        [InlineKeyboardButton(text=online_btn, callback_data="sheet_force_online")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
