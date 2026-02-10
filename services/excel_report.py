@@ -1,6 +1,5 @@
 import logging
-import os
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, time
 
 import config
 import database.db_api as db
@@ -23,12 +22,11 @@ _UA_MONTHS = {
     12: "ГРУДЕНЬ",
 }
 
-
-# For collecting all shifts, but report only shows first 2 intervals
+# 4 intervals for the template
 _SHIFT_ORDER = ["m", "d", "e", "x"]
 
 
-def _month_range_kyiv(period: str) -> tuple[str, str, str]:
+def _month_range_kyiv(period: str) -> tuple[date, date, str]:
     """Return (start_date, end_date, label) for current/prev month in Kyiv tz."""
     now = datetime.now(config.KYIV)
 
@@ -40,13 +38,13 @@ def _month_range_kyiv(period: str) -> tuple[str, str, str]:
             next_m = date(start.year, start.month + 1, 1)
         end = next_m - timedelta(days=1)
         label = _UA_MONTHS.get(start.month, str(start.month))
-        return start.isoformat(), end.isoformat(), label
+        return start, end, label
 
     first_day_current = now.replace(day=1).date()
     end = first_day_current - timedelta(days=1)
     start = end.replace(day=1)
     label = _UA_MONTHS.get(start.month, str(start.month))
-    return start.isoformat(), end.isoformat(), label
+    return start, end, label
 
 
 def _parse_ts(ts: str) -> datetime | None:
@@ -56,34 +54,27 @@ def _parse_ts(ts: str) -> datetime | None:
         return None
 
 
-def _fmt_hhmm(dt: datetime | None) -> str:
-    return dt.strftime("%H:%M") if dt else ""
+def _dt_to_excel_time(dt: datetime | None) -> time | None:
+    """Return datetime.time to store as real Excel time (not text)."""
+    return dt.timetz().replace(tzinfo=None) if dt else None
 
 
-def _hours_between(a: datetime | None, b: datetime | None) -> float:
-    if not a or not b:
-        return 0.0
-    sec = (b - a).total_seconds()
-    if sec < 0:
-        return 0.0
-    return sec / 3600.0
+def _date_key(d: date) -> str:
+    return d.strftime("%d.%m.%Y")
+
+
+def _iso(d: date) -> str:
+    return d.strftime("%Y-%m-%d")
 
 
 async def generate_report(period: str):
-    """Generate Excel report from DB (month layout + 'ПОДІЇ') with formulas.
+    """Generate Excel report from DB using template-like layout (4 intervals).
 
-    The sample sheet uses formulas for:
-    - total hours (shown as ВІДПРАЦЬОВАНО, Г)
-    - fuel spent
-    - balances (morning/after/evening)
-
-    Shows only 2 shift intervals per day (matching template).
-    Removed: НОМЕР ЧЕКА, ВОДІЙ, ВІДПОВІДАЛЬНИЙ columns.
-
-    period: 'current' or 'prev'
+    Keeps columns: НОМЕР ЧЕКА, ПАЛИВО ПРЕВІЗ.
     """
     try:
-        start_date, end_date, month_label = _month_range_kyv(period) if False else _month_range_kyiv(period)
+        start_d, end_d, month_label = _month_range_kyiv(period)
+        start_date, end_date = start_d.isoformat(), end_d.isoformat()
         logs = db.get_logs_for_period(start_date, end_date)
 
         try:
@@ -93,7 +84,7 @@ async def generate_report(period: str):
         except Exception:
             fuel_rate = 5.3
 
-        # Build per-day structure (collect all shifts, but display only first 2 intervals)
+        # Collect shifts + refills
         days: dict[str, dict] = {}
         refills_by_day: dict[str, list] = {}
 
@@ -101,11 +92,15 @@ async def generate_report(period: str):
             dt = _parse_ts(ts)
             if not dt:
                 continue
-            day_key = dt.strftime("%d.%m.%Y")
-            day_iso = dt.strftime("%Y-%m-%d")
+
+            d = dt.date()
+            day_key = _date_key(d)
+            day_iso = _iso(d)
 
             if day_key not in days:
-                days[day_key] = {"shifts": {c: {"start": None, "end": None} for c in _SHIFT_ORDER}}
+                days[day_key] = {
+                    "shifts": {c: {"start": None, "end": None} for c in _SHIFT_ORDER},
+                }
 
             if event_type in ("m_start", "d_start", "e_start", "x_start"):
                 c = event_type.split("_", 1)[0]
@@ -122,122 +117,147 @@ async def generate_report(period: str):
                     liters = float(str(value or "0").replace(",", "."))
                 except Exception:
                     liters = 0.0
-                refills_by_day.setdefault(day_iso, []).append({"liters": liters})
+                refills_by_day.setdefault(day_iso, []).append(
+                    {
+                        "liters": liters,
+                        "receipt": receipt_number or "",
+                        "carrier": driver_name or "",  # stored in driver_name field in DB
+                    }
+                )
 
         from openpyxl import Workbook
         from openpyxl.styles import Font, Alignment, PatternFill
+        from openpyxl.utils import get_column_letter
 
         wb = Workbook()
         ws = wb.active
         ws.title = month_label
 
-        # Column map (1-based) - matching template with 2 shifts only
+        # Two-row header like template (simplified, with merges)
+        ws["A1"].value = "ДАТА"
+        ws.merge_cells("A1:A2")
+
+        # Groups 1..4 with start/end under each
+        groups = [("1", "B", "C"), ("2", "D", "E"), ("3", "F", "G"), ("4", "H", "I")]
+        for g, c1, c2 in groups:
+            ws[f"{c1}1"].value = int(g)
+            ws.merge_cells(f"{c1}1:{c2}1")
+            ws[f"{c1}2"].value = "ПОЧАТОК, Г"
+            ws[f"{c2}2"].value = "КІНЕЦЬ, Г"
+
+        ws["J1"].value = "РОЗХІД"
+        ws.merge_cells("J1:J2")
+
+        ws["K1"].value = fuel_rate
+        ws.merge_cells("K1:K2")
+
+        ws["L1"].value = "ВИТРАТИ ПАЛИВА"
+        ws.merge_cells("L1:L2")
+
+        # Second row (actual column headers for the rest)
+        ws["J2"].value = "ВСЬОГО ГОДИН"
+        ws["K2"].value = "ЗАЛИШОК ПАЛИВА НА РАНОК"
+        ws["L2"].value = "ВИТРАТИ ПАЛИВА"
+        ws["M2"].value = "ЗАЛИШОК"
+        ws["N2"].value = "ПРИВЕЗЕНО ПАЛИВА"
+        ws["O2"].value = "ЗАЛИШОК ПАЛИВА ВЕЧІР"
+        ws["P2"].value = "НОМЕР ЧЕКА"
+        ws["Q2"].value = "ПАЛИВО ПРЕВІЗ"
+
+        # Style header
+        fill = PatternFill("solid", fgColor="1F4E79")
+        for r in (1, 2):
+            for cell in ws[r]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = fill
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        # Column indices for formulas
         COL_DATE = 1
         COL_S1_START, COL_S1_END = 2, 3
         COL_S2_START, COL_S2_END = 4, 5
-        COL_TOTAL_HOURS = 6           # ВІДПРАЦЬОВАНО, Г
-        COL_FUEL_MORNING = 7          # ЗАЛИШОК ПАЛИВА НА РАНОК
-        COL_FUEL_SPENT = 8            # ВИТРАТИ ПАЛИВА
-        COL_FUEL_LEFT = 9             # ЗАЛИШОК
-        COL_REFILL = 10               # ЗАПРВКА
-        COL_FUEL_EVENING = 11         # ЗАЛИШОК ПАЛИВА ВЕЧІР
-        COL_FUEL_RATE = 12            # fuel rate (л/год)
+        COL_S3_START, COL_S3_END = 6, 7
+        COL_S4_START, COL_S4_END = 8, 9
+        COL_TOTAL_HOURS = 10  # J
+        COL_FUEL_MORNING = 11  # K
+        COL_FUEL_SPENT = 12  # L
+        COL_FUEL_LEFT = 13  # M
+        COL_REFILL = 14  # N
+        COL_FUEL_EVENING = 15  # O
+        COL_RECEIPT = 16  # P
+        COL_CARRIER = 17  # Q
 
-        headers = [
-            "ДАТА",
-            "ПОЧАТОК, Г", "КІНЕЦЬ, Г",
-            "ПОЧАТОК, Г", "КІНЕЦЬ, Г",
-            "ВІДПРАЦЬОВАНО, Г",
-            "ЗАЛИШОК ПАЛИВА НА РАНОК",
-            "ВИТРАТИ ПАЛИВА",
-            "ЗАЛИШОК",
-            "ЗАПРВКА",
-            "ЗАЛИШОК ПАЛИВА ВЕЧІР",
-            fuel_rate,
-        ]
-        ws.append(headers)
+        first_data_row = 3
 
-        fill = PatternFill("solid", fgColor="1F4E79")
-        for cell in ws[1]:
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        # Generate full month grid
+        cur = start_d
+        row = first_data_row
+        while cur <= end_d:
+            key = _date_key(cur)
+            shifts = (days.get(key) or {}).get("shifts") or {c: {"start": None, "end": None} for c in _SHIFT_ORDER}
 
-        # Sort days by date
-        def _key(dstr: str):
-            try:
-                return datetime.strptime(dstr, "%d.%m.%Y")
-            except Exception:
-                return datetime.max
+            # Map shifts to 4 intervals by code order (m,d,e,x)
+            starts = [_dt_to_excel_time(shifts[c]["start"]) for c in _SHIFT_ORDER]
+            ends = [_dt_to_excel_time(shifts[c]["end"]) for c in _SHIFT_ORDER]
 
-        first_row = 2
-        row_idx = first_row
-
-        for day_key in sorted(days.keys(), key=_key):
-            shifts = days[day_key]["shifts"]
-            
-            # Collect all shift intervals and pick first 2 that exist
-            intervals_found = []
-            for c in _SHIFT_ORDER:
-                if shifts[c]["start"] or shifts[c]["end"]:
-                    intervals_found.append((shifts[c]["start"], shifts[c]["end"]))
-            
-            # Fill first 2 intervals (or blank if less)
-            i1_start = _fmt_hhmm(intervals_found[0][0]) if len(intervals_found) > 0 else ""
-            i1_end = _fmt_hhmm(intervals_found[0][1]) if len(intervals_found) > 0 else ""
-            i2_start = _fmt_hhmm(intervals_found[1][0]) if len(intervals_found) > 1 else ""
-            i2_end = _fmt_hhmm(intervals_found[1][1]) if len(intervals_found) > 1 else ""
-
-            day_iso = datetime.strptime(day_key, "%d.%m.%Y").strftime("%Y-%m-%d")
-            refills = refills_by_day.get(day_iso, [])
+            # Refills: sum liters, join receipt/carrier
+            refills = refills_by_day.get(_iso(cur), [])
             refill_liters = sum(r.get("liters", 0.0) for r in refills)
+            receipt = ", ".join([r.get("receipt", "") for r in refills if r.get("receipt")])
+            carrier = ", ".join([r.get("carrier", "") for r in refills if r.get("carrier")])
 
-            ws.append([
-                day_key,
-                i1_start, i1_end,
-                i2_start, i2_end,
-                None,  # total hours formula
-                None,  # morning fuel formula (except first row)
-                None,  # fuel spent formula
-                None,  # fuel left formula
-                round(refill_liters, 1) if refill_liters else "",
-                None,  # evening fuel formula
-                fuel_rate,
-            ])
+            ws.cell(row=row, column=COL_DATE).value = cur
+            ws.cell(row=row, column=COL_DATE).number_format = "DD.MM.YYYY"
 
-            # Formulas
-            r = row_idx
-            def c(col: int) -> str:
-                from openpyxl.utils import get_column_letter
-                return f"{get_column_letter(col)}{r}"
+            for i, (s, e) in enumerate(zip(starts, ends), start=0):
+                s_col = COL_S1_START + i * 2
+                e_col = COL_S1_END + i * 2
+                ws.cell(row=row, column=s_col).value = s
+                ws.cell(row=row, column=e_col).value = e
+                ws.cell(row=row, column=s_col).number_format = "HH:MM"
+                ws.cell(row=row, column=e_col).number_format = "HH:MM"
 
-            # Total hours = sum of 2 intervals
-            # Each interval: IF(OR(start="",end=""),0,end-start)
-            intervals = [(COL_S1_START, COL_S1_END), (COL_S2_START, COL_S2_END)]
+            ws.cell(row=row, column=COL_REFILL).value = round(refill_liters, 1) if refill_liters else ""
+            ws.cell(row=row, column=COL_RECEIPT).value = receipt
+            ws.cell(row=row, column=COL_CARRIER).value = carrier
+
+            # Helpers
+            def c(col: int, rr: int = row) -> str:
+                return f"{get_column_letter(col)}{rr}"
+
+            # Total hours: sum of 4 intervals
             parts = []
-            for s_col, e_col in intervals:
+            for (s_col, e_col) in [
+                (COL_S1_START, COL_S1_END),
+                (COL_S2_START, COL_S2_END),
+                (COL_S3_START, COL_S3_END),
+                (COL_S4_START, COL_S4_END),
+            ]:
                 parts.append(f"IF(OR({c(s_col)}=\"\",{c(e_col)}=\"\"),0,{c(e_col)}-{c(s_col)})")
-            ws.cell(row=r, column=COL_TOTAL_HOURS).value = "=" + "+".join(parts)
-            ws.cell(row=r, column=COL_TOTAL_HOURS).number_format = "[h]:mm:ss"
+            ws.cell(row=row, column=COL_TOTAL_HOURS).value = "=" + "+".join(parts)
+            ws.cell(row=row, column=COL_TOTAL_HOURS).number_format = "[h]:mm:ss"
 
-            # Fuel spent = total_hours*24 * fuel_rate
-            ws.cell(row=r, column=COL_FUEL_SPENT).value = f"={c(COL_TOTAL_HOURS)}*24*{c(COL_FUEL_RATE)}"
+            # Fuel spent = total_hours*24 * fuel_rate (fuel rate in K1)
+            ws.cell(row=row, column=COL_FUEL_SPENT).value = f"={c(COL_TOTAL_HOURS)}*24*$K$1"
 
-            # Morning fuel: first row blank, others = prev evening
-            if r == first_row:
-                ws.cell(row=r, column=COL_FUEL_MORNING).value = ""
+            # Morning fuel:
+            # - First day of period: leave blank for manual input (as you requested)
+            # - Others: prev evening
+            if row == first_data_row:
+                ws.cell(row=row, column=COL_FUEL_MORNING).value = ""
             else:
-                ws.cell(row=r, column=COL_FUEL_MORNING).value = f"={c(COL_FUEL_EVENING).replace(str(r), str(r-1))}"
+                ws.cell(row=row, column=COL_FUEL_MORNING).value = f"={c(COL_FUEL_EVENING, row-1)}"
 
             # Fuel left = morning - spent
-            ws.cell(row=r, column=COL_FUEL_LEFT).value = f"=IF({c(COL_FUEL_MORNING)}=\"\",\"\",{c(COL_FUEL_MORNING)}-{c(COL_FUEL_SPENT)})"
+            ws.cell(row=row, column=COL_FUEL_LEFT).value = f"=IF({c(COL_FUEL_MORNING)}=\"\",\"\",{c(COL_FUEL_MORNING)}-{c(COL_FUEL_SPENT)})"
 
             # Evening = left + refill
-            ws.cell(row=r, column=COL_FUEL_EVENING).value = f"=IF({c(COL_FUEL_LEFT)}=\"\",\"\",{c(COL_FUEL_LEFT)}+{c(COL_REFILL)})"
+            ws.cell(row=row, column=COL_FUEL_EVENING).value = f"=IF({c(COL_FUEL_LEFT)}=\"\",\"\",{c(COL_FUEL_LEFT)}+{c(COL_REFILL)})"
 
-            row_idx += 1
+            row += 1
+            cur += timedelta(days=1)
 
-        # autosize
+        # Autosize (limit)
         for col in ws.columns:
             max_len = 0
             col_letter = col[0].column_letter
@@ -245,15 +265,14 @@ async def generate_report(period: str):
                 if cell.value is None:
                     continue
                 max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = min(max_len + 2, 38)
+            ws.column_dimensions[col_letter].width = min(max_len + 2, 32)
 
-        # Raw events sheet
+        # Events sheet
         ws2 = wb.create_sheet("ПОДІЇ")
         ws2.append(["ID", "Дата/час", "Тип події", "Користувач", "Літри", "Чек", "Водій", "Значення"])
         for (event_type, ts, user_name, value, driver_name, receipt_number) in logs:
             liters_col = value if event_type == "refill" else ""
             ws2.append(["", ts, event_type, user_name, liters_col, receipt_number, driver_name, value])
-
         for cell in ws2[1]:
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center")
@@ -265,7 +284,8 @@ async def generate_report(period: str):
         caption = (
             f"📊 <b>Звіт з БД</b>\n"
             f"🗓 Період: <b>{start_date}</b> — <b>{end_date}</b>\n"
-            f"📁 Файл: <code>{filename}</code>"
+            f"📁 Файл: <code>{filename}</code>\n"
+            f"ℹ️ На перший день періоду залишок палива на ранок заповнюється вручну."
         )
         return filename, caption
 
