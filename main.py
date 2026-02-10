@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import random
 import sys
 from datetime import datetime
@@ -14,14 +15,39 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
 
-# Імпорт конфігурації
+# Імпорт конфігурації (спочатку, щоб отримати параметри логування)
 import config
 
-# Налаштування логування
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+
+# --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
+def setup_logging():
+    """Налаштовує логування з ротацією файлів та виводом в консоль."""
+    handlers = []
+
+    # 1. Console Handler (щоб бачити логи в докері/консолі)
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    handlers.append(console_handler)
+
+    # 2. File Handler з ротацією (якщо задано ім'я файлу)
+    if config.LOG_FILE:
+        file_handler = RotatingFileHandler(
+            filename=config.LOG_FILE,
+            maxBytes=config.LOG_MAX_BYTES,
+            backupCount=config.LOG_BACKUP_COUNT,
+            encoding='utf-8'
+        )
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        handlers.append(file_handler)
+
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL, logging.INFO),
+        handlers=handlers
+    )
+
+
+# Викликаємо налаштування логування одразу
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Критичні змінні перевіряємо в точці входу
@@ -33,7 +59,6 @@ from middlewares.error_handler import ErrorHandlerMiddleware, global_error_handl
 
 # Імпорт хендлерів
 from handlers import common, user, admin
-# Імпорт винесеного роутера для парсингу ДТЕК
 from handlers.admin_parts import dtek_parser
 
 # Імпорт сервісів
@@ -109,7 +134,7 @@ async def _run_background_forever(name: str, coro_func, *args):
 
 def build_dispatcher() -> Dispatcher:
     """Побудова Dispatcher з усіма middlewares та routers."""
-    
+
     storage = MemoryStorage()
 
     if getattr(config, "REDIS_ENABLED", False):
@@ -153,9 +178,8 @@ async def run_polling_once(dp: Dispatcher):
     try:
         logger.info(f"🗄 DB backend: {getattr(config, 'DB_BACKEND', 'sqlite')} ({db_models.db_target_info()})")
         logger.info("🔧 Ініціалізація бази даних...")
-        
-        # Виклик ініціалізації БД.
-        # В майбутньому, коли перейдемо на async DB, тут буде await db_models.init_db()
+
+        # Виклик ініціалізації БД
         db_models.init_db()
 
         bot = Bot(

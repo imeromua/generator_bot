@@ -1,6 +1,6 @@
 import os
 import sys
-from zoneinfo import ZoneInfo  # Використовуємо стандартну бібліотеку
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -58,6 +58,22 @@ POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
 # --- REDIS ---
 REDIS_ENABLED = _env_bool("REDIS_ENABLED", False)
 REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
+
+# --- ЛОГУВАННЯ ---
+LOG_FILE = os.getenv("LOG_FILE", "bot.log")
+try:
+    # Дефолт 10 МБ (10 * 1024 * 1024)
+    LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", 10485760))
+except ValueError:
+    LOG_MAX_BYTES = 10485760
+
+try:
+    LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", 5))
+except ValueError:
+    LOG_BACKUP_COUNT = 5
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 
 # --- НАЛАШТУВАННЯ ТАБЛИЦІ ---
 MODE = os.getenv("MODE", "TEST")
@@ -134,6 +150,8 @@ if __name__ == "__main__":
     print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
     print("=" * 60)
     print(f"Режим: {'TEST' if IS_TEST_MODE else 'PROD'}")
+    print(f"Log Level: {LOG_LEVEL}")
+    print(f"Log File: {LOG_FILE} (Max: {LOG_MAX_BYTES/1024/1024:.1f} MB, Backups: {LOG_BACKUP_COUNT})")
     print(f"DB backend: {DB_BACKEND}")
     if DB_BACKEND == "sqlite":
         print(f"SQLite path: {SQLITE_PATH}")
