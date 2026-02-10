@@ -43,7 +43,6 @@ def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu")],
-        [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="🧮 Корекція", callback_data="corr_menu")],
         [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
@@ -131,15 +130,6 @@ def drivers_list(drivers):
     for d in drivers:
         kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])
     kb.append([InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")])
-    return InlineKeyboardMarkup(inline_keyboard=kb)
-
-
-def report_period():
-    kb = [
-        [InlineKeyboardButton(text="📅 Цей місяць", callback_data="rep_current")],
-        [InlineKeyboardButton(text="🗓 Минулий місяць", callback_data="rep_prev")],
-        [InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]
-    ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
