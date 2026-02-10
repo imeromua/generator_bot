@@ -44,7 +44,9 @@ async def maybe_auto_close_shift(
                     if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
                         start_dt = start_dt - timedelta(days=1)
 
-                start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
+                # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
+                start_dt = start_dt.replace(tzinfo=config.KYIV)
+                
                 dur = (now - start_dt).total_seconds() / 3600.0
             else:
                 dur = 0.0

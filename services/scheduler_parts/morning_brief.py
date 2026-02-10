@@ -33,7 +33,9 @@ async def maybe_send_morning_brief(
         )
         brief_time = dt_time(7, 30)
 
-    target_dt = config.KYIV.localize(datetime.combine(current_date, brief_time).replace(tzinfo=None))
+    # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
+    target_dt = datetime.combine(current_date, brief_time).replace(tzinfo=config.KYIV)
+    
     diff_s = (now - target_dt).total_seconds()
 
     # Якщо бот запустили/перезапустили вже після вікна — брифінг за цей день пропускаємо

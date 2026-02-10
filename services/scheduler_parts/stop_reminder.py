@@ -24,7 +24,9 @@ async def maybe_send_stop_reminder(
         reminder_min = 15
 
     try:
-        close_dt = config.KYIV.localize(datetime.combine(current_date, close_time).replace(tzinfo=None))
+        # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
+        close_dt = datetime.combine(current_date, close_time).replace(tzinfo=config.KYIV)
+        
         reminder_dt = close_dt - timedelta(minutes=reminder_min)
     except Exception:
         close_dt = None
