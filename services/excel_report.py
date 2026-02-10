@@ -252,11 +252,14 @@ async def generate_report(period: str):
             row += 1
             cur += timedelta(days=1)
 
-        # Autosize (limit)
-        for col in ws.columns:
+        # Autosize (robust with merged cells)
+        for col_idx, col_cells in enumerate(
+            ws.iter_cols(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column),
+            start=1,
+        ):
             max_len = 0
-            col_letter = col[0].column_letter
-            for cell in col:
+            col_letter = get_column_letter(col_idx)
+            for cell in col_cells:
                 if cell.value is None:
                     continue
                 max_len = max(max_len, len(str(cell.value)))
