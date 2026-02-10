@@ -18,6 +18,7 @@ cd "$PROJECT_DIR"
 
 # Файли
 PID_FILE="$PROJECT_DIR/bot.pid"
+# LOG_FILE використовується тільки для інформації користувачу, bash в нього писати не буде
 LOG_FILE="$PROJECT_DIR/bot.log"
 VENV_DIR="$PROJECT_DIR/venv"
 
@@ -84,7 +85,9 @@ fi
 
 # Запуск бота в фоновому режимі
 echo -e "${BLUE}🚀 Запуск бота...${NC}"
-nohup python main.py >> "$LOG_FILE" 2>&1 &
+
+# ВИПРАВЛЕНО: перенаправлення в /dev/null, бо Python сам пише в лог-файл
+nohup python main.py > /dev/null 2>&1 &
 BOT_PID=$!
 
 # Збереження PID
@@ -104,9 +107,10 @@ if ps -p "$BOT_PID" > /dev/null; then
     echo ""
     echo -e "${BLUE}📂 Файли:${NC}"
     echo -e "  PID файл: $PID_FILE"
-    echo -e "  Лог файл: $LOG_FILE"
+    echo -e "  Лог файл: $LOG_FILE (ротація активна)"
 else
     echo -e "${RED}❌ Помилка запуску бота!${NC}"
+    # Якщо бот впав одразу, дивимся в bot.log, бо Python встиг би щось туди написати
     echo -e "${YELLOW}Перевірте логи: tail -f $LOG_FILE${NC}"
     rm -f "$PID_FILE"
     exit 1

@@ -21,7 +21,16 @@ import config
 
 # --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
 def setup_logging():
-    """Налаштовує логування з ротацією файлів та виводом в консоль."""
+    """Налаштовує логування з ротацією файлів та виводом в консоль.
+    
+    Видаляє всі попередні хендлери, щоб уникнути дублювання (double logging).
+    """
+    root_logger = logging.getLogger()
+    
+    # 🧹 ОЧИЩЕННЯ: Видаляємо всі існуючі хендлери перед налаштуванням
+    if root_logger.handlers:
+        root_logger.handlers.clear()
+
     handlers = []
 
     # 1. Console Handler (щоб бачити логи в докері/консолі)
@@ -40,9 +49,11 @@ def setup_logging():
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         handlers.append(file_handler)
 
+    # Використовуємо force=True (Python 3.8+), щоб переконатися, що конфіг застосується
     logging.basicConfig(
         level=getattr(logging, config.LOG_LEVEL, logging.INFO),
-        handlers=handlers
+        handlers=handlers,
+        force=True
     )
 
 
