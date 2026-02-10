@@ -1,60 +1,63 @@
 import logging
-from datetime import datetime, timedelta
-
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
+from datetime import datetime
 
 import config
 import database.db_api as db
-from utils.time import format_hours_hhmm
-
-from services.scheduler_parts.utils import parse_state_dt
 
 logger = logging.getLogger(__name__)
 
 
-async def maybe_send_fuel_alert(bot, now: datetime, today_str: str, state: dict):
-    # === 4. АЛЕРТИ ПО ПАЛИВУ (АДМІНАМ) ===
+async def check_fuel_alert(bot, state: dict):
+    """
+    Перевіряє рівень палива і надсилає попередження, якщо він низький.
+    Викликається з планувальника раз на хвилину.
+    """
+    # Якщо функція вимкнена в конфігу (поріг 0 або менше)
+    if config.FUEL_ALERT_THRESHOLD_L <= 0:
+        return
+
     try:
-        fuel_level = float(state.get("current_fuel", 0.0) or 0.0)
+        current_fuel = float(state.get("current_fuel", 0.0) or 0.0)
     except Exception:
-        fuel_level = 0.0
+        return
 
-    threshold = float(getattr(config, "FUEL_ALERT_THRESHOLD_L", 40.0) or 40.0)
-    cooldown_min = int(getattr(config, "FUEL_ALERT_COOLDOWN_MIN", 60) or 60)
+    # Якщо палива достатньо — нічого не робимо
+    if current_fuel >= config.FUEL_ALERT_THRESHOLD_L:
+        return
 
-    ordered_date = (db.get_state_value("fuel_ordered_date", "") or "").strip()
+    # Перевірка кулдауну (щоб не спамити кожну хвилину)
+    last_sent_ts_str = state.get("fuel_alert_last_sent_ts", "")
+    
+    should_send = True
+    now = datetime.now()
 
-    # Якщо паливо відновилось — знімаємо прапорець "замовлено"
-    if fuel_level >= threshold and ordered_date:
-        db.set_state("fuel_ordered_date", "")
+    if last_sent_ts_str:
+        try:
+            last_sent = datetime.strptime(last_sent_ts_str, "%Y-%m-%d %H:%M:%S")
+            diff_min = (now - last_sent).total_seconds() / 60.0
+            if diff_min < config.FUEL_ALERT_COOLDOWN_MIN:
+                should_send = False
+        except Exception:
+            # Якщо дата побита — краще надіслати, щоб не пропустити
+            should_send = True
 
-    if fuel_level < threshold and ordered_date != today_str:
-        last_sent_raw = (db.get_state_value("fuel_alert_last_sent_ts", "") or "").strip()
-        last_sent_dt = parse_state_dt(last_sent_raw)
-        can_send = (last_sent_dt is None) or ((now - last_sent_dt) >= timedelta(minutes=cooldown_min))
+    if should_send:
+        logger.warning(f"⚠️ FUEL ALERT: {current_fuel} L < {config.FUEL_ALERT_THRESHOLD_L} L")
+        
+        txt = (
+            f"⛽ <b>УВАГА! Низький рівень палива</b>\n\n"
+            f"Залишок: <b>{current_fuel:.1f} л</b>\n"
+            f"Поріг: {config.FUEL_ALERT_THRESHOLD_L} л\n\n"
+            f"<i>Заплануйте дозаправку!</i>"
+        )
 
-        if can_send:
-            hours_left = fuel_level / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
-            hours_left_hhmm = format_hours_hhmm(hours_left)
+        # Надсилаємо всім адмінам
+        for admin_id in config.ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, txt)
+            except Exception as e:
+                logger.error(f"Failed to send fuel alert to {admin_id}: {e}")
 
-            txt = (
-                f"⛽ <b>Низький рівень палива</b>\n\n"
-                f"Поточний залишок: <b>{fuel_level:.1f} л</b> (поріг: {threshold:.0f} л)\n"
-                f"Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
-                f"Якщо паливо вже замовили — натисніть кнопку нижче, і нагадування вимкнеться до заправки."
-            )
-
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="✅ Паливо замовлено", callback_data="fuel_ordered")],
-                    [InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")],
-                ]
-            )
-
-            for admin_id in config.ADMIN_IDS:
-                try:
-                    await bot.send_message(admin_id, txt, reply_markup=kb)
-                except Exception as e:
-                    logger.warning(f"⚠️ Fuel alert: не вдалося надіслати адміну {admin_id}: {e}")
-
-            db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
+        # Оновлюємо час останньої відправки в БД
+        db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
