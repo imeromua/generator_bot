@@ -1,24 +1,16 @@
 """Модуль експорту з БД в Google Sheets.
 
-Формат експорту (A-Q):
-- A = дата (DD.MM.YYYY)
-- B-I = часи старт/стоп по змінах (HH:MM)
-- J = всього годин за день (HH:MM)
-- K = залишок палива на ранок
-- L = витрати палива за день
-- M = залишок після витрат
-- N = привезено палива
-- O = залишок палива ввечері
-- P = номер чека (receipt_number) (перший за день)
-- Q = хто привіз паливо (driver) (перший за день)
+Поточна бізнес-вимога для ОСНОВНОЇ вкладки:
+- Записуємо лише часи початку/кінця змін, привезене паливо (сума), чеки (через кому), хто привіз (через кому).
+- НЕ експортуємо відповідальних за старт/стоп.
 
-Експорт інкрементальний:
-- Знаходимо останню дату в Sheets
-- Експортуємо тільки дні >= цієї дати (оновлюємо поточний + дописуємо нові)
+Цільові колонки, які заповнюємо в рядку:
+- B,C,D,E,F,G,H,I = часи старт/стоп змін 1..4 (HH:MM)
+- N = привезено палива за день (сума refills)
+- P = номер(и) чека за день (через кому)
+- AA = хто привіз паливо за день (через кому)
 
-Важливо:
-- Витрата палива береться з ENV через config.FUEL_CONSUMPTION.
-- Назва вкладки логів береться з ENV через config.LOGS_SHEET_NAME.
+Технічно ми оновлюємо діапазон A:AA, але заповнюємо лише потрібні колонки, решта — порожні.
 """
 
 import logging
@@ -32,8 +24,11 @@ from services.google_sync_parts.client import make_client, open_spreadsheet, ope
 logger = logging.getLogger(__name__)
 
 
+_MAX_COL = 27  # A..AA
+
+
 def _fuel_rate() -> float:
-    """Єдине джерело правди для витрати палива (л/год)"""
+    """Єдине джерело правди для витрати палива (л/год)."""
     try:
         return float(getattr(config, "FUEL_CONSUMPTION", 0.0) or 0.0)
     except Exception:
@@ -46,7 +41,7 @@ def _logs_sheet_name() -> str:
 
 
 def _parse_ts(ts_str: str) -> datetime | None:
-    """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)"""
+    """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)."""
     if not ts_str:
         return None
     try:
@@ -56,22 +51,9 @@ def _parse_ts(ts_str: str) -> datetime | None:
 
 
 def _time_to_hhmm(dt: datetime | None) -> str:
-    """Конвертує datetime в HH:MM"""
     if not dt:
         return ""
     return dt.strftime("%H:%M")
-
-
-def _hours_to_hhmm(hours: float) -> str:
-    """Конвертує часи (десяткове число) в HH:MM"""
-    if hours <= 0:
-        return "00:00"
-    h = int(hours)
-    m = int(round((hours - h) * 60))
-    if m == 60:
-        h += 1
-        m = 0
-    return f"{h:02d}:{m:02d}"
 
 
 def _find_last_date_in_sheet(sheet) -> str | None:
@@ -113,10 +95,9 @@ def _find_last_date_in_sheet(sheet) -> str | None:
 
 
 def _get_fuel_before_date(from_date: str) -> float:
-    """Знаходить fuel_end з дня ПЕРЕД from_date.
+    """Знаходить fuel_end з дня ПЕРЕД from_date (для інкрементального перерахунку).
 
-    Це потрібно для правильного розрахунку fuel_start при інкрементальному експорті.
-    Враховує витрати палива!
+    Лишаємо цю логіку, бо вона не заважає, а може знадобитись для інших колонок у майбутньому.
     """
     conn = db.get_connection()
     cur = conn.cursor()
@@ -164,17 +145,6 @@ def _get_fuel_before_date(from_date: str) -> float:
 
 
 def _aggregate_logs_by_date(from_date: str | None = None):
-    """Зчитує всі логи з БД і групує по датах.
-
-    Якщо from_date вказано, бере тільки дні >= from_date.
-
-    Повертає dict[date_str] = {
-        'shifts': { 'm': {'start': dt, 'end': dt}, ... },
-        'refills': [(amount, driver, receipt), ...],
-        'fuel_start': float,
-        'fuel_end': float,
-    }
-    """
     conn = db.get_connection()
     cur = conn.cursor()
 
@@ -191,17 +161,16 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     days = defaultdict(
         lambda: {
             "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
-            "refills": [],
+            "refills": [],  # [(amount, driver, receipt), ...]
             "fuel_start": 0.0,
             "fuel_end": 0.0,
         }
     )
 
     rate = _fuel_rate()
-
     running_fuel = 0.0
 
-    for event, ts_str, user, value, driver, receipt in rows:
+    for event, ts_str, _user, value, driver, receipt in rows:
         dt = _parse_ts(ts_str)
         if not dt:
             continue
@@ -226,7 +195,7 @@ def _aggregate_logs_by_date(from_date: str | None = None):
         elif event == "refill":
             amount = float(value or 0)
             running_fuel += amount
-            day["refills"].append((amount, driver or "", receipt or ""))
+            day["refills"].append((amount, (driver or "").strip(), (receipt or "").strip()))
 
         elif event == "fuel_set":
             running_fuel = float(value or 0)
@@ -251,54 +220,54 @@ def _aggregate_logs_by_date(from_date: str | None = None):
 
 
 def _build_export_rows(days_data):
-    """Будує рядки для експорту (A-Q)."""
     rows = []
 
-    sorted_dates = sorted(days_data.keys())
-    rate = _fuel_rate()
-
-    for date_str in sorted_dates:
+    for date_str in sorted(days_data.keys()):
         day = days_data[date_str]
 
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         date_fmt = dt.strftime("%d.%m.%Y")
 
-        row = [date_fmt]
+        # Prepare empty row A..AA
+        row = [""] * _MAX_COL
 
-        for shift in ["m", "d", "e", "x"]:
+        # A
+        row[0] = date_fmt
+
+        # B-I (shift times)
+        # B,C = m start/end; D,E = d start/end; F,G = e start/end; H,I = x start/end
+        col_map = {
+            "m": (1, 2),
+            "d": (3, 4),
+            "e": (5, 6),
+            "x": (7, 8),
+        }
+        for shift, (c_start, c_end) in col_map.items():
             s = day["shifts"].get(shift, {})
-            row.append(_time_to_hhmm(s.get("start")))
-            row.append(_time_to_hhmm(s.get("end")))
+            row[c_start] = _time_to_hhmm(s.get("start"))
+            row[c_end] = _time_to_hhmm(s.get("end"))
 
-        total_day_hours = 0.0
-        for shift in ["m", "d", "e", "x"]:
-            s = day["shifts"].get(shift, {})
-            start = s.get("start")
-            end = s.get("end")
-            if start and end:
-                total_day_hours += (end - start).total_seconds() / 3600.0
-        row.append(_hours_to_hhmm(total_day_hours))
-
-        fuel_start = day["fuel_start"]
-        row.append(f"{fuel_start:.1f}" if fuel_start != 0 else "")
-
-        fuel_consumed = total_day_hours * rate
-        row.append(f"{fuel_consumed:.1f}" if fuel_consumed != 0 else "")
-
-        fuel_after = fuel_start - fuel_consumed
-        row.append(f"{fuel_after:.1f}" if fuel_after != 0 else "")
-
+        # N (index 13) total refill
         total_refill = sum(r[0] for r in day["refills"])
-        row.append(f"{total_refill:.1f}" if total_refill != 0 else "")
+        row[13] = f"{total_refill:.1f}" if total_refill else ""
 
-        fuel_end = day["fuel_end"]
-        row.append(f"{fuel_end:.1f}" if fuel_end != 0 else "")
+        # P (index 15) receipts (comma separated, unique, keep order)
+        receipts = []
+        seen_r = set()
+        for _amt, _drv, rec in day["refills"]:
+            if rec and rec not in seen_r:
+                receipts.append(rec)
+                seen_r.add(rec)
+        row[15] = ", ".join(receipts) if receipts else ""
 
-        receipt = day["refills"][0][2] if day["refills"] else ""
-        row.append(receipt or "")
-
-        driver = day["refills"][0][1] if day["refills"] else ""
-        row.append(driver or "")
+        # AA (index 26) drivers who brought fuel (comma separated, unique, keep order)
+        drivers = []
+        seen_d = set()
+        for _amt, drv, _rec in day["refills"]:
+            if drv and drv not in seen_d:
+                drivers.append(drv)
+                seen_d.add(drv)
+        row[26] = ", ".join(drivers) if drivers else ""
 
         rows.append(row)
 
@@ -306,14 +275,6 @@ def _build_export_rows(days_data):
 
 
 def full_export():
-    """Повний експорт з БД в Google Sheets (інкрементальний).
-
-    Логіка:
-    1. Знаходимо останню дату в Sheets
-    2. Експортуємо тільки дні >= цієї дати (оновлюємо поточний + дописуємо нові)
-    3. Записуємо в основну вкладку (A-Q)
-    4. ПОВНІСТЮ ПЕРЕЗАПИСУЄМО вкладку LOGS_SHEET_NAME (щоб уникнути дублювання)
-    """
     logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
 
     client = make_client()
@@ -329,7 +290,6 @@ def full_export():
         return
 
     main_rows = _build_export_rows(days_data)
-
     logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {last_date or 'початку'})")
 
     if main_rows:
@@ -350,7 +310,7 @@ def full_export():
             start_row = 3
 
         end_row = start_row + len(main_rows) - 1
-        main_sheet.update(f"A{start_row}:Q{end_row}", main_rows, value_input_option="USER_ENTERED")
+        main_sheet.update(f"A{start_row}:AA{end_row}", main_rows, value_input_option="USER_ENTERED")
         logger.info(f"✅ Основна вкладка оновлена (рядки {start_row}-{end_row})")
 
     logs_title = _logs_sheet_name()
