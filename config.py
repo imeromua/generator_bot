@@ -1,7 +1,7 @@
 import os
 import sys
+from zoneinfo import ZoneInfo  # Використовуємо стандартну бібліотеку
 
-import pytz
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -53,8 +53,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 DB_BACKEND = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
 SQLITE_PATH = (os.getenv("SQLITE_PATH", "generator.db") or "generator.db").strip()
 POSTGRES_DSN = (os.getenv("POSTGRES_DSN", "") or "").strip()
-# Admin DSN потрібен для автосоздання БД (CREATE DATABASE) якщо її ще немає.
-# Якщо не задано, бот спробує створити БД через звичайний DSN (може не мати прав).
 POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
 
 # --- REDIS ---
@@ -73,17 +71,20 @@ else:
 
 SHEET_NAME = os.getenv("SHEET_NAME", "ЛЮТИЙ")
 
-# Окрема вкладка для журналу подій (крок 4)
+# Окрема вкладка для журналу подій
 LOGS_SHEET_NAME = os.getenv("LOGS_SHEET_NAME", "ПОДІЇ")
 
 # --- ЧАС ТА МІСЦЕ ---
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Kyiv")
-KYIV = pytz.timezone(TIMEZONE)
+try:
+    KYIV = ZoneInfo(TIMEZONE)
+except Exception:
+    print(f"⚠️ Невідома таймзона {TIMEZONE}, використовується UTC")
+    KYIV = ZoneInfo("UTC")
 
 # --- ГРАФІК РОБОТИ ---
 WORK_START_TIME = os.getenv("WORK_START", "07:30")
 WORK_END_TIME = os.getenv("WORK_END", "20:30")
-# ВАЖЛИВО: дефолт брифінгу = 07:30 (якщо BRIEF_TIME не задано в .env)
 MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:30")
 
 # --- ТЕХНІКА ---
@@ -96,9 +97,6 @@ REGISTRATION_OPEN = (BOT_STATUS == "ON")
 WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
 
 # --- ПАЛИВО ---
-# Підтримуємо обидві назви для сумісності:
-# - FUEL_RATE (основна)
-# - FUEL_CONSUMPTION (аліас)
 FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")
 
 if FUEL_RATE_STR:
@@ -141,7 +139,6 @@ if __name__ == "__main__":
         print(f"SQLite path: {SQLITE_PATH}")
     if DB_BACKEND == "postgres":
         print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
-        print(f"Postgres admin DSN: {'(set)' if bool(POSTGRES_ADMIN_DSN) else '(missing)'}")
     print(f"Redis enabled: {REDIS_ENABLED}")
     print(f"Таблиця: {SHEET_NAME}")
     print(f"ID таблиці: {SHEET_ID}")
@@ -149,8 +146,5 @@ if __name__ == "__main__":
     print(f"Адміни: {ADMIN_IDS}")
     print(f"Витрата палива: {FUEL_CONSUMPTION} л/год")
     print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")
-    print(f"Поріг алерту палива: {FUEL_ALERT_THRESHOLD_L} л")
-    print(f"Cooldown алерту: {FUEL_ALERT_COOLDOWN_MIN} хв")
-    print(f"Нагадування СТОП: за {STOP_REMINDER_MIN_BEFORE_END} хв")
-    print(f"Реєстрація: {'Відкрита' if REGISTRATION_OPEN else 'Закрита'}")
+    print(f"Таймзона: {KYIV}")
     print("=" * 60 + "\n")
