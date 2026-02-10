@@ -59,10 +59,13 @@ POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
 REDIS_ENABLED = _env_bool("REDIS_ENABLED", False)
 REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
 
+# --- Google Sheets runtime integration ---
+# If False: bot works DB-only at runtime; import/export can be kept manual.
+SHEETS_RUNTIME_ENABLED = _env_bool("SHEETS_RUNTIME_ENABLED", True)
+
 # --- ЛОГУВАННЯ ---
 LOG_FILE = os.getenv("LOG_FILE", "bot.log")
 try:
-    # Дефолт 10 МБ (10 * 1024 * 1024)
     LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", 10485760))
 except ValueError:
     LOG_MAX_BYTES = 10485760
@@ -86,8 +89,6 @@ else:
     SHEET_ID = os.getenv("SHEET_ID_PROD")
 
 SHEET_NAME = os.getenv("SHEET_NAME", "ЛЮТИЙ")
-
-# Окрема вкладка для журналу подій
 LOGS_SHEET_NAME = os.getenv("LOGS_SHEET_NAME", "ПОДІЇ")
 
 # --- ЧАС ТА МІСЦЕ ---
@@ -127,7 +128,6 @@ else:
     print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
     FUEL_CONSUMPTION = 5.3
 
-# Пороги та анти-спам для алертів по паливу
 try:
     FUEL_ALERT_THRESHOLD_L = float(os.getenv("FUEL_ALERT_THRESHOLD", "40"))
 except Exception:
@@ -138,13 +138,11 @@ try:
 except Exception:
     FUEL_ALERT_COOLDOWN_MIN = 60
 
-# Нагадування "натисніть СТОП" за N хв до WORK_END_TIME
 try:
     STOP_REMINDER_MIN_BEFORE_END = int(os.getenv("STOP_REMINDER_MIN", "15"))
 except Exception:
     STOP_REMINDER_MIN_BEFORE_END = 15
 
-# --- ІНФОРМАЦІЯ ПРО КОНФІГУРАЦІЮ ---
 if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
@@ -158,6 +156,7 @@ if __name__ == "__main__":
     if DB_BACKEND == "postgres":
         print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
     print(f"Redis enabled: {REDIS_ENABLED}")
+    print(f"Sheets runtime enabled: {SHEETS_RUNTIME_ENABLED}")
     print(f"Таблиця: {SHEET_NAME}")
     print(f"ID таблиці: {SHEET_ID}")
     print(f"Вкладка логів: {LOGS_SHEET_NAME}")
