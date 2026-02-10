@@ -102,7 +102,7 @@ async def gen_start(cb: types.CallbackQuery):
                 show_alert=True,
             )
     except Exception:
-        # якщо конфіг часу некоректний — не блокуємо, але це має бути видно в логах (в іншому місці)
+        # якщо конфіг часу некоректний — не блокуємо
         pass
 
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
@@ -208,7 +208,9 @@ async def gen_stop(cb: types.CallbackQuery):
                 if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
                     start_dt = start_dt - timedelta(days=1)
 
-            start_dt = config.KYIV.localize(start_dt.replace(tzinfo=None))
+            # ВИПРАВЛЕНО: .localize() замінено на .replace(tzinfo=...)
+            start_dt = start_dt.replace(tzinfo=config.KYIV)
+            
             dur = (now - start_dt).total_seconds() / 3600.0
         else:
             dur = 0.0
@@ -235,17 +237,17 @@ async def gen_stop(cb: types.CallbackQuery):
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
-    # FIX #7: Витрати палива обчислюються з логів при експорті/імпорті
-    # В handler НІКОЛИ не треба міняти current_fuel вручну!
-    # Обчислюємо тільки для відображення
+    # ВИПРАВЛЕНО: надійне отримання витрати палива
     try:
-        fuel_consumption_rate = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
+        fuel_consumption_rate = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION))
+        if fuel_consumption_rate <= 0:
+            fuel_consumption_rate = config.FUEL_CONSUMPTION
     except Exception:
         fuel_consumption_rate = config.FUEL_CONSUMPTION
     
     fuel_consumed = dur * fuel_consumption_rate
 
-    # Оновлюємо мотогодини (це правильно, бо вони не обчислюються з логів)
+    # Оновлюємо мотогодини
     try:
         db.update_hours(float(dur or 0.0))
     except Exception:

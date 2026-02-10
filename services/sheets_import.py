@@ -69,13 +69,7 @@ def _clear_db():
 
 
 def _restore_generator_state():
-    """Відновлює generator_state з логів.
-
-    Обчислює:
-    - current_fuel (поточний залишок палива з врахуванням витрат)
-    - total_hours (загальні мотогодини)
-    - last_oil_change, last_spark_change (останнє ТО)
-    """
+    """Відновлює generator_state з логів."""
     logger.info("🔧 Відновлюємо стан генератора з логів...")
 
     conn = get_connection()
@@ -156,24 +150,10 @@ def _restore_generator_state():
     conn.close()
 
     logger.info(f"✅ Стан відновлено: паливо={running_fuel:.1f}л, мотогодини={running_hours:.1f}")
-    if last_oil:
-        logger.info(f"✅ Останнє ТО (олива): {last_oil}")
-    if last_spark:
-        logger.info(f"✅ Останнє ТО (свічки): {last_spark}")
 
 
-def _import_main_sheet(sheet):
-    """Імпорт з основної вкладки (A-AC)"""
-    logger.info("📥 Читаємо основну вкладку...")
-
-    all_values = sheet.get_all_values()
-
-    if len(all_values) < 3:
-        logger.warning("⚠️ Таблиця порожня або немає даних")
-        return
-
-    data_rows = all_values[2:]
-
+def _import_main_sheet_data(data_rows):
+    """Імпорт даних, які вже зчитані з таблиці (без мережевих запитів)."""
     conn = get_connection()
 
     all_drivers = set()
@@ -297,7 +277,7 @@ def _import_main_sheet(sheet):
 
 
 def _import_events_sheet(ss):
-    """Імпорт з вкладки LOGS_SHEET_NAME (опціонально)"""
+    """Імпорт з вкладки LOGS_SHEET_NAME (опціонально)."""
     title = _logs_sheet_name()
     try:
         events_sheet = ss.worksheet(title)
@@ -319,24 +299,41 @@ def _import_events_sheet(ss):
 def full_import():
     """Повний імпорт з Google Sheets в БД.
 
-    Читає:
-    - Основну вкладку (A-AC)
-    - Вкладку LOGS_SHEET_NAME (опціонально)
-
-    Відновлює logs, maintenance, drivers, personnel в БД.
-    Після імпорту відновлює generator_state (паливо з врахуванням витрат, мотогодини, ТО).
+    БЕЗПЕЧНИЙ РЕЖИМ:
+    1. Спочатку завантажуємо всі дані в пам'ять.
+    2. Якщо помилка мережі/API — перериваємо, БД не чіпаємо.
+    3. Якщо дані отримано — очищаємо БД і записуємо нові.
     """
-    logger.info("📥 Починаємо імпорт з Sheets в БД...")
+    logger.info("📥 Починаємо імпорт з Sheets в БД (безпечний режим)...")
 
-    _clear_db()
+    try:
+        # КРОК 1: Читання (може впасти)
+        client = make_client()
+        ss = open_spreadsheet(client)
+        main_sheet = open_main_worksheet(ss)
+        
+        logger.info("📥 Завантаження даних з таблиці в пам'ять...")
+        all_values = main_sheet.get_all_values()
+        
+        if len(all_values) < 3:
+            logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків). Імпорт скасовано для безпеки.")
+            return
 
-    client = make_client()
-    ss = open_spreadsheet(client)
-    main_sheet = open_main_worksheet(ss)
+        data_rows = all_values[2:]
+        
+    except Exception as e:
+        logger.error(f"❌ Помилка підключення до Sheets. Імпорт скасовано, БД не змінено. Помилка: {e}")
+        raise e
 
-    _import_main_sheet(main_sheet)
-    _import_events_sheet(ss)
-
-    _restore_generator_state()
-
-    logger.info("✅ Імпорт завершено!")
+    # КРОК 2: Запис (тільки якщо крок 1 успішний)
+    try:
+        _clear_db()
+        _import_main_sheet_data(data_rows)
+        # _import_events_sheet(ss) # Опціонально, зараз вимкнено
+        _restore_generator_state()
+        
+        logger.info("✅ Імпорт завершено успішно!")
+        
+    except Exception as e:
+        logger.error(f"❌ Критична помилка під час запису в БД: {e}")
+        raise e
