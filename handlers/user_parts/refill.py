@@ -143,9 +143,13 @@ async def refill_save(msg: types.Message, state: FSMContext):
             pass
         return
 
-    # FIX #8: Записуємо тільки в лог з receipt_number
-    # current_fuel обчислюється з логів при імпорті/експорті, НЕ вручну!
+    # Записуємо подію в лог, а також оновлюємо локальний стан в БД (state.current_fuel)
     db.add_log("refill", operator_personnel, str(liters), driver, receipt=receipt_num)
+    try:
+        db.update_fuel(liters)
+    except Exception:
+        # Якщо з якоїсь причини state недоступний — лог все одно залишився
+        pass
 
     await state.clear()
 

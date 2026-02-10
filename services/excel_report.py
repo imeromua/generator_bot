@@ -51,7 +51,6 @@ def _build_creds() -> Credentials:
 
 async def _export_spreadsheet_xlsx(file_id: str, out_path: str, creds: Credentials) -> None:
     """Експортує Google Spreadsheet як .xlsx (з усіма вкладками) з оригінальним форматуванням."""
-    # Оновлюємо токен
     creds.refresh(GoogleRequest())
 
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export"
@@ -74,12 +73,13 @@ async def _export_spreadsheet_xlsx(file_id: str, out_path: str, creds: Credentia
 
 
 async def generate_report(period: str):
-    """
-    Генерує Excel-звіт у вигляді "як в оригінальній таблиці".
+    """Генерує Excel-звіт.
 
-    Логіка:
-    - Таблиця є еталоном, тому звіт — це експорт Google Spreadsheet в .xlsx.
-    - Експорт зберігає форматування/шапки/заливки як у Google Sheets.
+    Поточна реалізація: якщо інтеграція з Google Sheets увімкнена, звіт — це експорт
+    Google Spreadsheet в .xlsx (зберігає форматування/шапки/заливки як у Google Sheets).
+
+    Примітка: Якщо бот має працювати виключно від БД — цю функцію потрібно замінити
+    на генератор, який будує .xlsx з даних БД (logs/state) без звернень до Google APIs.
 
     period: 'current' або 'prev'
     """
@@ -101,7 +101,7 @@ async def generate_report(period: str):
             ws_names = [w.title for w in ss.worksheets()]
             if sheet_name and sheet_name not in ws_names:
                 logger.warning(f"⚠️ Вкладка '{sheet_name}' не знайдена. Доступні: {ws_names}")
-                # fallback: якщо конфіг/мапінг не співпав — хоч віддамо файл, але підкажемо вкладку
+                # fallback
                 sheet_name = config.SHEET_NAME if config.SHEET_NAME in ws_names else (ws_names[0] if ws_names else sheet_name)
         except Exception as e:
             logger.warning(f"⚠️ Не вдалося перевірити вкладки: {e}")
