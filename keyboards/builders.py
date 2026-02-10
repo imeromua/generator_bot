@@ -42,7 +42,6 @@ def main_dashboard(role, active_shift, completed_shifts):
 def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
-        [InlineKeyboardButton(text="🔌 Режим Google Sheets", callback_data="sheet_mode_menu")],
         [InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu")],
         [InlineKeyboardButton(text="📥 Скачати Звіт (Excel)", callback_data="download_report")],
         [InlineKeyboardButton(text="🧮 Корекція", callback_data="corr_menu")],
@@ -79,26 +78,6 @@ def correction_menu():
 
 def back_to_corr():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
-
-
-def sheet_mode_kb(is_offline: bool, forced_offline: bool = False):
-    if not is_offline:
-        state_btn = "🔌 Примусово OFFLINE"
-        online_btn = "🌐 ONLINE"
-    else:
-        if forced_offline:
-            state_btn = "🔌 OFFLINE (примусово) ✅"
-            online_btn = "🌐 Зняти примусовий OFFLINE"
-        else:
-            state_btn = "🔌 OFFLINE активний ✅"
-            online_btn = "🌐 Примусово ONLINE (зняти OFFLINE)"
-
-    kb = [
-        [InlineKeyboardButton(text=state_btn, callback_data="sheet_force_offline")],
-        [InlineKeyboardButton(text=online_btn, callback_data="sheet_force_online")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def schedule_date_selector(today_str, tom_str):

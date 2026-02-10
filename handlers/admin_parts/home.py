@@ -17,26 +17,27 @@ logger = logging.getLogger(__name__)
 async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+    
     await state.clear()
     logger.info(f"👤 Адмін {cb.from_user.id} відкрив панель")
 
-    # короткий статус Sheets прямо в хедері адмінки
+    # Короткий статус Sheets прямо в хедері адмінки
     sheets_line = ""
     try:
         is_offline = db.sheet_is_offline()
-        forced_offline = bool(db.sheet_is_forced_offline())
+        
         if not is_offline:
             last_ok = fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
             sheets_line = f"Google Sheets: 🌐 <b>ONLINE</b> (останній OK: {last_ok})"
         else:
             offline_since = fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
-            mode = "примусово" if forced_offline else "авто"
-            sheets_line = f"Google Sheets: 🔌 <b>OFFLINE</b> ({mode}) з {offline_since}"
-    except Exception:
-        sheets_line = ""
+            sheets_line = f"Google Sheets: 🔴 <b>OFFLINE</b> (з {offline_since})"
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Помилка отримання статусу Sheets: {e}")
+        sheets_line = "Google Sheets: ❓ <b>Unknown</b>"
 
-    txt = "⚙️ <b>Адмін Панель</b>"
-    if sheets_line:
-        txt += f"\n\n{sheets_line}\n➖➖➖➖➖➖"
-
-    await cb.message.edit_text(txt, reply_markup=admin_panel())
+    txt = f"⚙️ <b>Адмін Панель</b>\n\n{sheets_line}"
+    
+    # Використовуємо клавіатуру з builders.py (кнопку треба прибрати там)
+    await cb.message.edit_text(text=txt, reply_markup=admin_panel())
