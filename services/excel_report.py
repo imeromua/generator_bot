@@ -133,7 +133,7 @@ async def generate_report(period: str):
         ws = wb.active
         ws.title = month_label
 
-        # Two-row header like template (simplified, with merges)
+        # Two-row header like template (with safe merges)
         ws["A1"].value = "ДАТА"
         ws.merge_cells("A1:A2")
 
@@ -145,16 +145,11 @@ async def generate_report(period: str):
             ws[f"{c1}2"].value = "ПОЧАТОК, Г"
             ws[f"{c2}2"].value = "КІНЕЦЬ, Г"
 
+        # IMPORTANT: do NOT merge J/K/L over row 2, because row 2 has its own labels
         ws["J1"].value = "РОЗХІД"
-        ws.merge_cells("J1:J2")
-
         ws["K1"].value = fuel_rate
-        ws.merge_cells("K1:K2")
-
         ws["L1"].value = "ВИТРАТИ ПАЛИВА"
-        ws.merge_cells("L1:L2")
 
-        # Second row (actual column headers for the rest)
         ws["J2"].value = "ВСЬОГО ГОДИН"
         ws["K2"].value = "ЗАЛИШОК ПАЛИВА НА РАНОК"
         ws["L2"].value = "ВИТРАТИ ПАЛИВА"
@@ -241,7 +236,7 @@ async def generate_report(period: str):
             ws.cell(row=row, column=COL_FUEL_SPENT).value = f"={c(COL_TOTAL_HOURS)}*24*$K$1"
 
             # Morning fuel:
-            # - First day of period: leave blank for manual input (as you requested)
+            # - First day of period: leave blank for manual input
             # - Others: prev evening
             if row == first_data_row:
                 ws.cell(row=row, column=COL_FUEL_MORNING).value = ""
@@ -265,7 +260,7 @@ async def generate_report(period: str):
                 if cell.value is None:
                     continue
                 max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = min(max_len + 2, 32)
+            ws.column_dimensions(col_letter).width = min(max_len + 2, 32)
 
         # Events sheet
         ws2 = wb.create_sheet("ПОДІЇ")
