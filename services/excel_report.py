@@ -24,6 +24,7 @@ _UA_MONTHS = {
 }
 
 
+# For collecting all shifts, but report only shows first 2 intervals
 _SHIFT_ORDER = ["m", "d", "e", "x"]
 
 
@@ -72,9 +73,12 @@ async def generate_report(period: str):
     """Generate Excel report from DB (month layout + 'ПОДІЇ') with formulas.
 
     The sample sheet uses formulas for:
-    - total hours
+    - total hours (shown as ВІДПРАЦЬОВАНО, Г)
     - fuel spent
     - balances (morning/after/evening)
+
+    Shows only 2 shift intervals per day (matching template).
+    Removed: НОМЕР ЧЕКА, ВОДІЙ, ВІДПОВІДАЛЬНИЙ columns.
 
     period: 'current' or 'prev'
     """
@@ -89,7 +93,7 @@ async def generate_report(period: str):
         except Exception:
             fuel_rate = 5.3
 
-        # Build per-day structure
+        # Build per-day structure (collect all shifts, but display only first 2 intervals)
         days: dict[str, dict] = {}
         refills_by_day: dict[str, list] = {}
 
@@ -101,19 +105,16 @@ async def generate_report(period: str):
             day_iso = dt.strftime("%Y-%m-%d")
 
             if day_key not in days:
-                days[day_key] = {"shifts": {c: {"start": None, "end": None, "personnel": ""} for c in _SHIFT_ORDER}}
+                days[day_key] = {"shifts": {c: {"start": None, "end": None} for c in _SHIFT_ORDER}}
 
             if event_type in ("m_start", "d_start", "e_start", "x_start"):
                 c = event_type.split("_", 1)[0]
                 days[day_key]["shifts"][c]["start"] = dt
-                days[day_key]["shifts"][c]["personnel"] = user_name or ""
                 continue
 
             if event_type in ("m_end", "d_end", "e_end", "x_end"):
                 c = event_type.split("_", 1)[0]
                 days[day_key]["shifts"][c]["end"] = dt
-                if user_name and not days[day_key]["shifts"][c].get("personnel"):
-                    days[day_key]["shifts"][c]["personnel"] = user_name
                 continue
 
             if event_type == "refill":
@@ -121,15 +122,7 @@ async def generate_report(period: str):
                     liters = float(str(value or "0").replace(",", "."))
                 except Exception:
                     liters = 0.0
-                refills_by_day.setdefault(day_iso, []).append(
-                    {
-                        "ts": dt,
-                        "liters": liters,
-                        "receipt": receipt_number or "",
-                        "driver": driver_name or "",
-                        "personnel": user_name or "",
-                    }
-                )
+                refills_by_day.setdefault(day_iso, []).append({"liters": liters})
 
         from openpyxl import Workbook
         from openpyxl.styles import Font, Alignment, PatternFill
@@ -138,39 +131,29 @@ async def generate_report(period: str):
         ws = wb.active
         ws.title = month_label
 
-        # Column map (1-based)
+        # Column map (1-based) - matching template with 2 shifts only
         COL_DATE = 1
         COL_S1_START, COL_S1_END = 2, 3
         COL_S2_START, COL_S2_END = 4, 5
-        COL_S3_START, COL_S3_END = 6, 7
-        COL_S4_START, COL_S4_END = 8, 9
-        COL_TOTAL_HOURS = 10
-        COL_FUEL_MORNING = 11
-        COL_FUEL_SPENT = 12
-        COL_FUEL_LEFT = 13
-        COL_REFILL = 14
-        COL_FUEL_EVENING = 15
-        COL_RECEIPT = 16
-        COL_DRIVER = 17
-        COL_PERSONNEL = 18
-        COL_FUEL_RATE = 19
+        COL_TOTAL_HOURS = 6           # ВІДПРАЦЬОВАНО, Г
+        COL_FUEL_MORNING = 7          # ЗАЛИШОК ПАЛИВА НА РАНОК
+        COL_FUEL_SPENT = 8            # ВИТРАТИ ПАЛИВА
+        COL_FUEL_LEFT = 9             # ЗАЛИШОК
+        COL_REFILL = 10               # ЗАПРВКА
+        COL_FUEL_EVENING = 11         # ЗАЛИШОК ПАЛИВА ВЕЧІР
+        COL_FUEL_RATE = 12            # fuel rate (л/год)
 
         headers = [
             "ДАТА",
-            "ПОЧАТОК, Г (1)", "КІНЕЦЬ, Г (1)",
-            "ПОЧАТОК, Г (2)", "КІНЕЦЬ, Г (2)",
-            "ПОЧАТОК, Г (3)", "КІНЕЦЬ, Г (3)",
-            "ПОЧАТОК, Г (4)", "КІНЕЦЬ, Г (4)",
-            "ВСЬОГО ГОДИН",
+            "ПОЧАТОК, Г", "КІНЕЦЬ, Г",
+            "ПОЧАТОК, Г", "КІНЕЦЬ, Г",
+            "ВІДПРАЦЬОВАНО, Г",
             "ЗАЛИШОК ПАЛИВА НА РАНОК",
             "ВИТРАТИ ПАЛИВА",
             "ЗАЛИШОК",
-            "ПРИВЕЗЕНО ПАЛИВА",
+            "ЗАПРВКА",
             "ЗАЛИШОК ПАЛИВА ВЕЧІР",
-            "НОМЕР ЧЕКА",
-            "ВОДІЙ",
-            "ВІДПОВІДАЛЬНИЙ",
-            "РОЗХІД (л/год)",
+            fuel_rate,
         ]
         ws.append(headers)
 
@@ -192,45 +175,45 @@ async def generate_report(period: str):
 
         for day_key in sorted(days.keys(), key=_key):
             shifts = days[day_key]["shifts"]
-            starts = [_fmt_hhmm(shifts[c]["start"]) for c in _SHIFT_ORDER]
-            ends = [_fmt_hhmm(shifts[c]["end"]) for c in _SHIFT_ORDER]
+            
+            # Collect all shift intervals and pick first 2 that exist
+            intervals_found = []
+            for c in _SHIFT_ORDER:
+                if shifts[c]["start"] or shifts[c]["end"]:
+                    intervals_found.append((shifts[c]["start"], shifts[c]["end"]))
+            
+            # Fill first 2 intervals (or blank if less)
+            i1_start = _fmt_hhmm(intervals_found[0][0]) if len(intervals_found) > 0 else ""
+            i1_end = _fmt_hhmm(intervals_found[0][1]) if len(intervals_found) > 0 else ""
+            i2_start = _fmt_hhmm(intervals_found[1][0]) if len(intervals_found) > 1 else ""
+            i2_end = _fmt_hhmm(intervals_found[1][1]) if len(intervals_found) > 1 else ""
 
             day_iso = datetime.strptime(day_key, "%d.%m.%Y").strftime("%Y-%m-%d")
             refills = refills_by_day.get(day_iso, [])
             refill_liters = sum(r.get("liters", 0.0) for r in refills)
-            receipt = ", ".join([r.get("receipt", "") for r in refills if r.get("receipt")])
-            driver = ", ".join([r.get("driver", "") for r in refills if r.get("driver")])
-            personnel = ", ".join(sorted({r.get("personnel", "") for r in refills if r.get("personnel")}))
-            if not personnel:
-                personnel = ", ".join(sorted({shifts[c].get("personnel", "") for c in _SHIFT_ORDER if shifts[c].get("personnel")}))
 
             ws.append([
                 day_key,
-                starts[0], ends[0],
-                starts[1], ends[1],
-                starts[2], ends[2],
-                starts[3], ends[3],
+                i1_start, i1_end,
+                i2_start, i2_end,
                 None,  # total hours formula
                 None,  # morning fuel formula (except first row)
                 None,  # fuel spent formula
                 None,  # fuel left formula
                 round(refill_liters, 1) if refill_liters else "",
                 None,  # evening fuel formula
-                receipt,
-                driver,
-                personnel,
                 fuel_rate,
             ])
 
             # Formulas
-            # Total hours as sum of (end-start) for each interval, blank-safe.
             r = row_idx
             def c(col: int) -> str:
                 from openpyxl.utils import get_column_letter
                 return f"{get_column_letter(col)}{r}"
 
+            # Total hours = sum of 2 intervals
             # Each interval: IF(OR(start="",end=""),0,end-start)
-            intervals = [(COL_S1_START, COL_S1_END), (COL_S2_START, COL_S2_END), (COL_S3_START, COL_S3_END), (COL_S4_START, COL_S4_END)]
+            intervals = [(COL_S1_START, COL_S1_END), (COL_S2_START, COL_S2_END)]
             parts = []
             for s_col, e_col in intervals:
                 parts.append(f"IF(OR({c(s_col)}=\"\",{c(e_col)}=\"\"),0,{c(e_col)}-{c(s_col)})")
