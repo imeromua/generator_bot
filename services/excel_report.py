@@ -260,7 +260,7 @@ async def generate_report(period: str):
                 if cell.value is None:
                     continue
                 max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions(col_letter).width = min(max_len + 2, 32)
+            ws.column_dimensions[col_letter].width = min(max_len + 2, 32)
 
         # Events sheet
         ws2 = wb.create_sheet("ПОДІЇ")
