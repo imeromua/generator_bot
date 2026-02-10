@@ -10,7 +10,14 @@ from handlers.user_parts.utils import ensure_user
 router = Router()
 
 
-def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | None, driver: str | None) -> str:
+def _fmt_log_line(
+    event_type: str,
+    ts: str,
+    user_name: str | None,
+    value: str | None,
+    driver: str | None,
+    receipt: str | None,
+) -> str:
     # ts: 'YYYY-mm-dd HH:MM:SS'
     try:
         dt = datetime.strptime((ts or "").strip(), "%Y-%m-%d %H:%M:%S")
@@ -26,14 +33,7 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
         return f"• {ts_pretty} — ⏹ Стоп: <b>{shift_pretty(event_type)}</b> ({who})"
 
     if event_type == "refill":
-        liters = ""
-        receipt = ""
-        try:
-            parts = (value or "").split("|", 1)
-            liters = parts[0].strip() if len(parts) > 0 else ""
-            receipt = parts[1].strip() if len(parts) > 1 else ""
-        except Exception:
-            pass
+        liters = (str(value or "").strip().replace(",", "."))
         extra = []
         if liters:
             extra.append(f"{liters} л")
@@ -41,8 +41,10 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
             extra.append(f"чек {receipt}")
         if driver:
             extra.append(f"водій {driver}")
-        extra_s = ", ".join(extra) if extra else (value or "").strip()
-        return f"• {ts_pretty} — ⛽ Прийом палива: <b>{extra_s}</b> ({who})"
+        extra_s = ", ".join(extra) if extra else ""
+        tail = f" — <b>{extra_s}</b>" if extra_s else ""
+        who_tail = f" ({who})" if who else ""
+        return f"• {ts_pretty} — ⛽ Прийом палива{tail}{who_tail}"
 
     if event_type == "auto_close":
         return f"• {ts_pretty} — 🤖 Авто-закриття зміни (System)"
@@ -58,7 +60,8 @@ def _fmt_log_line(event_type: str, ts: str, user_name: str | None, value: str | 
 
     val = (value or "").strip()
     tail = f" — {val}" if val else ""
-    return f"• {ts_pretty} — <b>{event_type}</b>{tail} ({who})"
+    who_tail = f" ({who})" if who else ""
+    return f"• {ts_pretty} — <b>{event_type}</b>{tail}{who_tail}"
 
 
 @router.callback_query(F.data == "events_last")
@@ -75,8 +78,8 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
         txt = "🕘 <b>Останні події</b>\n\nПоки немає записів."
     else:
         lines = []
-        for event_type, ts, u_name, value, driver_name in rows:
-            lines.append(_fmt_log_line(event_type, ts, u_name, value, driver_name))
+        for event_type, ts, u_name, value, driver_name, receipt_number in rows:
+            lines.append(_fmt_log_line(event_type, ts, u_name, value, driver_name, receipt_number))
 
         txt = "🕘 <b>Останні події</b> (15)\n\n" + "\n".join(lines)
 
