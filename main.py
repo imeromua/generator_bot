@@ -1,9 +1,11 @@
 import asyncio
+import errno
 import logging
 from logging.handlers import RotatingFileHandler
 import random
 import sys
 from datetime import datetime
+import inspect
 from urllib.parse import urlparse
 
 import aiohttp
@@ -22,11 +24,11 @@ import config
 # --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
 def setup_logging():
     """Налаштовує логування з ротацією файлів та виводом в консоль.
-    
+
     Видаляє всі попередні хендлери, щоб уникнути дублювання (double logging).
     """
     root_logger = logging.getLogger()
-    
+
     # 🧹 ОЧИЩЕННЯ: Видаляємо всі існуючі хендлери перед налаштуванням
     if root_logger.handlers:
         root_logger.handlers.clear()
@@ -40,14 +42,21 @@ def setup_logging():
 
     # 2. File Handler з ротацією (якщо задано ім'я файлу)
     if config.LOG_FILE:
-        file_handler = RotatingFileHandler(
-            filename=config.LOG_FILE,
-            maxBytes=config.LOG_MAX_BYTES,
-            backupCount=config.LOG_BACKUP_COUNT,
-            encoding='utf-8'
-        )
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        handlers.append(file_handler)
+        try:
+            file_handler = RotatingFileHandler(
+                filename=config.LOG_FILE,
+                maxBytes=config.LOG_MAX_BYTES,
+                backupCount=config.LOG_BACKUP_COUNT,
+                encoding='utf-8'
+            )
+            file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            handlers.append(file_handler)
+        except Exception as e:
+            # Не валимо старт бота через проблеми з файловою системою/правами.
+            try:
+                sys.stderr.write(f"[logging] Cannot init file logger '{config.LOG_FILE}': {e}\n")
+            except Exception:
+                pass
 
     # Використовуємо force=True (Python 3.8+), щоб переконатися, що конфіг застосується
     logging.basicConfig(
@@ -57,12 +66,7 @@ def setup_logging():
     )
 
 
-# Викликаємо налаштування логування одразу
-setup_logging()
 logger = logging.getLogger(__name__)
-
-# Критичні змінні перевіряємо в точці входу
-config.validate_env()
 
 import database.models as db_models
 from middlewares.auth import WhitelistMiddleware
@@ -74,6 +78,28 @@ from handlers.admin_parts import dtek_parser
 
 # Імпорт сервісів
 from services.scheduler import scheduler_loop
+
+
+async def _run_blocking(func, *args, **kwargs):
+    """Run sync/blocking function in a thread executor to avoid blocking event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+
+
+async def _close_redis(redis: Redis):
+    """Best-effort close of redis client + pool (supports sync/async methods)."""
+    try:
+        res = redis.close()
+        if inspect.isawaitable(res):
+            await res
+    except Exception:
+        pass
+    try:
+        res = redis.connection_pool.disconnect()
+        if inspect.isawaitable(res):
+            await res
+    except Exception:
+        pass
 
 
 def _safe_redis_target(url: str) -> str:
@@ -100,8 +126,24 @@ def _is_transient_network_error(exc: Exception) -> bool:
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return True
 
+    # Не вважати будь-який OSError "тимчасовим" (disk full / permissions тощо).
     if isinstance(exc, OSError):
-        return True
+        transient_errno = {
+            errno.ECONNRESET,
+            errno.ECONNREFUSED,
+            errno.ETIMEDOUT,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.ENOTCONN,
+            errno.EPIPE,
+        }
+        e_no = getattr(exc, "errno", None)
+        if e_no in transient_errno:
+            return True
+        # Windows winerror codes
+        winerr = getattr(exc, "winerror", None)
+        if winerr in {10054, 10060, 10061, 10065}:
+            return True
 
     msg = str(exc).lower()
     if "cannot connect to host" in msg:
@@ -143,21 +185,23 @@ async def _run_background_forever(name: str, coro_func, *args):
             await _sleep_with_jitter(delay, jitter_seconds=5)
 
 
-def build_dispatcher() -> Dispatcher:
+def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     """Побудова Dispatcher з усіма middlewares та routers."""
 
     storage = MemoryStorage()
+    redis_client: Redis | None = None
 
     if getattr(config, "REDIS_ENABLED", False):
         target = _safe_redis_target(getattr(config, "REDIS_URL", ""))
         try:
-            redis = Redis.from_url(getattr(config, "REDIS_URL", "redis://localhost:6379/0"))
-            storage = RedisStorage(redis=redis)
+            redis_client = Redis.from_url(getattr(config, "REDIS_URL", "redis://localhost:6379/0"))
+            storage = RedisStorage(redis=redis_client)
             logger.info(f"🧠 FSM storage: Redis ({target})")
         except Exception as e:
             logger.error(f"❌ Не вдалося підключити Redis FSM storage ({target}): {e}. Використовую MemoryStorage")
             storage = MemoryStorage()
             logger.info("🧠 FSM storage: Memory")
+            redis_client = None
     else:
         logger.info("🧠 FSM storage: Memory (REDIS_ENABLED=0)")
 
@@ -178,7 +222,7 @@ def build_dispatcher() -> Dispatcher:
     # Підключаємо винесений роутер
     dp.include_router(dtek_parser.router)
 
-    return dp
+    return dp, redis_client
 
 
 async def run_polling_once(dp: Dispatcher):
@@ -191,7 +235,7 @@ async def run_polling_once(dp: Dispatcher):
         logger.info("🔧 Ініціалізація бази даних...")
 
         # Виклик ініціалізації БД
-        db_models.init_db()
+        await _run_blocking(db_models.init_db)
 
         bot = Bot(
             token=config.BOT_TOKEN,
@@ -245,7 +289,11 @@ async def run_polling_once(dp: Dispatcher):
 
 async def main():
     """Auto-restart цикл."""
-    dp = build_dispatcher()
+    setup_logging()
+    logger.info("🔎 Перевірка .env ...")
+    config.validate_env()
+
+    dp, redis_client = build_dispatcher()
 
     restart_attempt = 0
     rapid_crash_count = 0
@@ -254,45 +302,53 @@ async def main():
     min_delay = 5
     max_delay = 60
 
-    while True:
-        start_ts = datetime.now()
+    try:
+        while True:
+            start_ts = datetime.now()
 
-        try:
-            await run_polling_once(dp)
-            logger.info("ℹ️ Polling завершився без помилок. Вихід з програми.")
-            return
+            try:
+                await run_polling_once(dp)
+                logger.info("ℹ️ Polling завершився без помилок. Вихід з програми.")
+                return
 
-        except KeyboardInterrupt:
-            logger.info("🛑 Отримано сигнал зупинки (KeyboardInterrupt). Вихід.")
-            return
+            except KeyboardInterrupt:
+                logger.info("🛑 Отримано сигнал зупинки (KeyboardInterrupt). Вихід.")
+                return
 
-        except Exception as e:
-            uptime = (datetime.now() - start_ts).total_seconds()
+            except Exception as e:
+                uptime = (datetime.now() - start_ts).total_seconds()
 
-            if uptime < rapid_crash_threshold_seconds:
-                rapid_crash_count += 1
-            else:
-                rapid_crash_count = 0
-
-            if _is_transient_network_error(e):
-                restart_attempt += 1
-                delay = min(max_delay, min_delay * (2 ** max(0, restart_attempt - 1)))
-                logger.error(
-                    f"❌ Мережева помилка (uptime={uptime:.1f}s). "
-                    f"Restart #{restart_attempt}, delay={delay}s. Error: {e}"
-                )
-
-                if rapid_crash_count >= max_rapid_crashes:
-                    hard_delay = max(120, delay)
-                    logger.error(f"⛔ Забагато швидких падінь. Пауза {hard_delay}s.")
-                    await _sleep_with_jitter(hard_delay, jitter_seconds=10)
+                if uptime < rapid_crash_threshold_seconds:
+                    rapid_crash_count += 1
                 else:
-                    await _sleep_with_jitter(delay, jitter_seconds=5)
+                    rapid_crash_count = 0
 
-                continue
+                if _is_transient_network_error(e):
+                    restart_attempt += 1
+                    delay = min(max_delay, min_delay * (2 ** max(0, restart_attempt - 1)))
+                    logger.error(
+                        f"❌ Мережева помилка (uptime={uptime:.1f}s). "
+                        f"Restart #{restart_attempt}, delay={delay}s. Error: {e}"
+                    )
 
-            logger.error(f"💥 Фатальна помилка: {e}", exc_info=True)
-            raise
+                    if rapid_crash_count >= max_rapid_crashes:
+                        hard_delay = max(120, delay)
+                        logger.error(f"⛔ Забагато швидких падінь. Пауза {hard_delay}s.")
+                        await _sleep_with_jitter(hard_delay, jitter_seconds=10)
+                    else:
+                        await _sleep_with_jitter(delay, jitter_seconds=5)
+
+                    continue
+
+                logger.error(f"💥 Фатальна помилка: {e}", exc_info=True)
+                raise
+    finally:
+        if redis_client is not None:
+            try:
+                logger.info("🧹 Closing Redis client...")
+                await _close_redis(redis_client)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
