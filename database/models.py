@@ -231,6 +231,11 @@ def init_db():
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
         logging.info("✅ Колонка receipt_number вже існує")
     except Exception:
+        # ВИПРАВЛЕННЯ: якщо в Postgres запит падає, транзакція стає ABORTED.
+        # Треба відкотити її перед виконанням ALTER TABLE.
+        if _is_postgres():
+            conn.rollback()
+
         logging.info("🔧 Додаємо колонку receipt_number...")
         try:
             if _is_postgres():
@@ -276,6 +281,9 @@ def init_db():
             )
         except Exception:
             try:
+                # Fallback для старого SQLite або проблемних випадків
+                if _is_postgres():
+                    conn.rollback()
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
             except Exception:
                 pass
