@@ -45,11 +45,18 @@ async def maybe_send_morning_brief(
     if (0 <= diff_s < brief_window_seconds) and (not brief_sent_today):
         logger.info(f"📢 Час ранкового брифінгу: {brief_time.strftime('%H:%M')}")
 
+        # FIX #30: Validate schedule before processing
         schedule = db.get_schedule(today_str)
+        if not schedule or not isinstance(schedule, dict):
+            logger.warning("⚠️ Графік недоступний або порожній, використовуємо порожній графік")
+            schedule = {}
+        
         ranges = schedule_to_ranges(schedule)
         total_off = sum((e - s) for s, e in ranges)
 
         st = db.get_state()
+        
+        # FIX #27: Safe dict access with .get() and defaults
         try:
             current_fuel = float(st.get("current_fuel", 0.0) or 0.0)
         except Exception:
@@ -58,7 +65,15 @@ async def maybe_send_morning_brief(
         hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
         hours_left_hhmm = format_hours_hhmm(hours_left)
 
-        to_service = config.MAINTENANCE_LIMIT - (st["total_hours"] - st["last_oil"])
+        # FIX #27: Safe calculation with .get() to prevent KeyError
+        try:
+            total_hours = float(st.get("total_hours", 0.0) or 0.0)
+            last_oil = float(st.get("last_oil_change", 0.0) or 0.0)
+            to_service = config.MAINTENANCE_LIMIT - (total_hours - last_oil)
+        except Exception as e:
+            logger.warning(f"⚠️ Помилка розрахунку ТО: {e}")
+            to_service = config.MAINTENANCE_LIMIT
+        
         to_service_hhmm = format_hours_hhmm(to_service)
 
         now_h = now.hour
