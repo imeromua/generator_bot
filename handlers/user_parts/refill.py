@@ -11,6 +11,7 @@ import database.db_api as db
 from handlers.common import show_dash
 from handlers.user_parts.utils import ensure_user, get_operator_personnel_name
 from keyboards.builders import main_dashboard, drivers_list
+from utils.time import now_kiev
 
 router = Router()
 
@@ -21,9 +22,45 @@ class RefillForm(StatesGroup):
     receipt = State()
 
 
+def _within_work_window(now_t, start_t, end_t) -> bool:
+    """True if now_t is inside [start_t, end_t) window.
+
+    Works for windows that do NOT cross midnight (start<=end) and windows that DO cross midnight.
+    """
+    if start_t <= end_t:
+        return start_t <= now_t < end_t
+    # crosses midnight, e.g. 22:00-06:00
+    return now_t >= start_t or now_t < end_t
+
+
+def _refill_allowed_now() -> tuple[bool, str]:
+    """Checks if refill actions are allowed now based on WORK_START_TIME/WORK_END_TIME.
+
+    Returns (ok, human_message).
+    """
+    try:
+        now = now_kiev()
+        start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
+        end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
+        if not _within_work_window(now.time(), start_t, end_t):
+            return False, (
+                f"⛔ Прийом палива заборонено поза робочим часом "
+                f"({config.WORK_START_TIME}-{config.WORK_END_TIME}).\n"
+                f"Зараз: {now.strftime('%H:%M')}"
+            )
+        return True, ""
+    except Exception:
+        # якщо конфіг часу некоректний — не блокуємо
+        return True, ""
+
+
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
+    ok, err = _refill_allowed_now()
+    if not ok:
+        return await cb.answer(err, show_alert=True)
+
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
@@ -42,6 +79,11 @@ async def refill_start(cb: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(RefillForm.driver, F.data.startswith("drv_"))
 async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
+    ok, err = _refill_allowed_now()
+    if not ok:
+        await state.clear()
+        return await cb.answer(err, show_alert=True)
+
     driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(
@@ -96,6 +138,19 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
 
 @router.message(RefillForm.receipt)
 async def refill_save(msg: types.Message, state: FSMContext):
+    ok, err = _refill_allowed_now()
+    if not ok:
+        await state.clear()
+        user = ensure_user(msg.from_user.id, msg.from_user.first_name)
+        if user:
+            await show_dash(msg, user[0], user[1], banner=err)
+        else:
+            try:
+                await msg.answer(err)
+            except Exception:
+                pass
+        return
+
     receipt_num = (msg.text or "").strip()
 
     data = await state.get_data()
