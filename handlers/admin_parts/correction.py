@@ -6,6 +6,8 @@ from aiogram.fsm.state import State, StatesGroup
 
 import config
 import database.db_api as db
+from database.models import get_connection, begin_transaction
+from database.api.state import _conn_get_state_value
 from handlers.admin_parts.utils import actor_name
 from keyboards.builders import correction_menu, back_to_corr
 
@@ -21,37 +23,15 @@ class CorrectionForm(StatesGroup):
     fuel_consumption = State()
 
 
-def _block_if_running() -> str | None:
-    """Перевіряє чи генератор активний. Якщо так — повертає текст помилки."""
-    try:
-        st = db.get_state()
-        if st.get("status") == "ON":
-            return "⛔ Корекції заборонені під час активної зміни. Спочатку натисніть СТОП."
-    except Exception:
-        return None
-    return None
-
-
-@router.callback_query(F.data == "corr_menu")
-async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    await state.clear()
-
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
+def _build_correction_text() -> str:
+    """Створює текст зі станом корекцій."""
     st = db.get_state()
-    
-    # Отримуємо витрату палива з state або config
     try:
         fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
     except Exception:
         fuel_consumption = config.FUEL_CONSUMPTION
     
-    txt = (
+    return (
         "🧮 <b>Корекція</b>\n\n"
         f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
         f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
@@ -60,344 +40,172 @@ async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
         f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
     )
 
-    await cb.message.edit_text(txt, reply_markup=correction_menu())
-    await cb.answer()
 
-
-@router.callback_query(F.data == "corr_fuel_set")
-async def corr_fuel_set(cb: types.CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "corr_menu")
+async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
-    st = db.get_state()
-    cur = float(st.get("current_fuel", 0.0) or 0.0)
-    await cb.message.edit_text(
-        f"⛽️ Поточний: <b>{cur:.1f} л</b>\nВведіть нове значення (літри):",
-        reply_markup=back_to_corr(),
-    )
-    await state.set_state(CorrectionForm.fuel)
+    await state.clear()
+    await cb.message.edit_text(_build_correction_text(), reply_markup=correction_menu())
     await cb.answer()
 
 
-@router.message(CorrectionForm.fuel)
-async def corr_fuel_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
+# FIX #13: Generic handler for all numeric corrections to reduce code duplication
+CORRECTION_CONFIGS = {
+    "fuel": {
+        "state_key": "current_fuel",
+        "state_obj": CorrectionForm.fuel,
+        "prompt_emoji": "⛽️",
+        "prompt_text": "Поточний",
+        "units": "л",
+        "log_event": "corr_fuel_set",
+        "log_emoji": "⛽️",
+        "min_val": 0.0,
+        "max_val": 100000.0,
+        "db_setter": lambda v: db.set_state("current_fuel", str(v)),
+    },
+    "fuel_consumption": {
+        "state_key": "fuel_consumption",
+        "state_obj": CorrectionForm.fuel_consumption,
+        "prompt_emoji": "📊",
+        "prompt_text": "Поточна витрата",
+        "units": "л/год",
+        "log_event": "corr_fuel_consumption_set",
+        "log_emoji": "📊",
+        "min_val": 0.01,
+        "max_val": 100.0,
+        "db_setter": lambda v: db.set_state("fuel_consumption", str(v)),
+        "get_current": lambda st: float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION),
+    },
+    "total_hours": {
+        "state_key": "total_hours",
+        "state_obj": CorrectionForm.total_hours,
+        "prompt_emoji": "⏱",
+        "prompt_text": "Поточний total",
+        "units": "год",
+        "log_event": "corr_total_hours_set",
+        "log_emoji": "⏱",
+        "min_val": 0.0,
+        "max_val": 100000.0,
+        "db_setter": db.set_total_hours,
+    },
+    "last_oil": {
+        "state_key": "last_oil_change",
+        "state_obj": CorrectionForm.last_oil,
+        "prompt_emoji": "🛢",
+        "prompt_text": "Поточний last_oil_change",
+        "units": "год",
+        "log_event": "corr_last_oil_set",
+        "log_emoji": "🛢",
+        "min_val": 0.0,
+        "max_val": 100000.0,
+        "db_setter": lambda v: db.set_state("last_oil_change", str(v)),
+    },
+    "last_spark": {
+        "state_key": "last_spark_change",
+        "state_obj": CorrectionForm.last_spark,
+        "prompt_emoji": "🕯",
+        "prompt_text": "Поточний last_spark_change",
+        "units": "год",
+        "log_event": "corr_last_spark_set",
+        "log_emoji": "🕯",
+        "min_val": 0.0,
+        "max_val": 100000.0,
+        "db_setter": lambda v: db.set_state("last_spark_change", str(v)),
+    },
+}
 
-    block = _block_if_running()
-    if block:
-        await state.clear()
-        return await msg.answer(block)
 
-    try:
-        val_text = (msg.text or "").replace(",", ".").strip()
-        val = float(val_text)
-
-        if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_corr())
-        if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_corr())
-
-        db.set_state("current_fuel", str(val))
-        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        db.add_log("corr_fuel_set", actor, val=str(val))
-        logger.info(f"⛽️ {actor} встановив паливо: {val}")
-
-        await state.clear()
-        st = db.get_state()
-        
-        try:
-            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-        except Exception:
-            fuel_consumption = config.FUEL_CONSUMPTION
-        
-        txt = (
-            "✅ Збережено.\n\n"
-            "🧮 <b>Корекція</b>\n\n"
-            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
-            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
-        )
-        await msg.answer(txt, reply_markup=correction_menu())
-
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 171.0)", reply_markup=back_to_corr())
-
-
-@router.callback_query(F.data == "corr_fuel_consumption_set")
-async def corr_fuel_consumption_set(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
-    st = db.get_state()
-    try:
-        cur = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-    except Exception:
-        cur = config.FUEL_CONSUMPTION
+def _create_correction_handler(corr_type: str, config_dict: dict):
+    """FIX #13: Factory function to create correction handlers dynamically."""
     
-    await cb.message.edit_text(
-        f"📊 Поточна витрата: <b>{cur:.2f} л/год</b>\nВведіть нове значення (літрів на годину):",
-        reply_markup=back_to_corr(),
-    )
-    await state.set_state(CorrectionForm.fuel_consumption)
-    await cb.answer()
+    async def set_handler(cb: types.CallbackQuery, state: FSMContext):
+        if cb.from_user.id not in config.ADMIN_IDS:
+            return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-
-@router.message(CorrectionForm.fuel_consumption)
-async def corr_fuel_consumption_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    block = _block_if_running()
-    if block:
-        await state.clear()
-        return await msg.answer(block)
-
-    try:
-        val_text = (msg.text or "").replace(",", ".").strip()
-        val = float(val_text)
-
-        if val <= 0:
-            return await msg.answer("❌ Значення має бути більше 0", reply_markup=back_to_corr())
-        if val > 100:
-            return await msg.answer("❌ Значення занадто велике (максимум 100)", reply_markup=back_to_corr())
-
-        db.set_state("fuel_consumption", str(val))
-        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        db.add_log("corr_fuel_consumption_set", actor, val=str(val))
-        logger.info(f"📊 {actor} встановив витрату палива: {val} л/год")
-
-        await state.clear()
+        # FIX #12: Check status inside a read transaction (not perfect but better)
+        # For true transactional check, we'd need to defer to save_handler
         st = db.get_state()
+        if st.get("status") == "ON":
+            return await cb.answer("⛔ Корекції заборонені під час активної зміни. Спочатку натисніть СТОП.", show_alert=True)
+
+        get_current = config_dict.get("get_current", lambda st: float(st.get(config_dict["state_key"], 0.0) or 0.0))
+        cur = get_current(st)
         
-        try:
-            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-        except Exception:
-            fuel_consumption = config.FUEL_CONSUMPTION
-        
-        txt = (
-            "✅ Збережено.\n\n"
-            "🧮 <b>Корекція</b>\n\n"
-            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
-            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
+        await cb.message.edit_text(
+            f"{config_dict['prompt_emoji']} {config_dict['prompt_text']}: <b>{cur:.1f} {config_dict['units']}</b>\nВведіть нове значення ({config_dict['units']}):",
+            reply_markup=back_to_corr(),
         )
-        await msg.answer(txt, reply_markup=correction_menu())
+        await state.set_state(config_dict["state_obj"])
+        await cb.answer()
+    
+    async def save_handler(msg: types.Message, state: FSMContext):
+        if msg.from_user.id not in config.ADMIN_IDS:
+            await state.clear()
+            return await msg.answer("⛔ Тільки для адмінів")
 
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 0.8)", reply_markup=back_to_corr())
-
-
-@router.callback_query(F.data == "corr_total_hours_set")
-async def corr_total_hours_set(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
-    st = db.get_state()
-    cur = float(st.get("total_hours", 0.0) or 0.0)
-    await cb.message.edit_text(
-        f"⏱ Поточний total: <b>{cur:.1f} год</b>\nВведіть нове значення (години):",
-        reply_markup=back_to_corr(),
-    )
-    await state.set_state(CorrectionForm.total_hours)
-    await cb.answer()
-
-
-@router.message(CorrectionForm.total_hours)
-async def corr_total_hours_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    block = _block_if_running()
-    if block:
-        await state.clear()
-        return await msg.answer(block)
-
-    try:
-        val_text = (msg.text or "").replace(",", ".").strip()
-        val = float(val_text)
-
-        if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_corr())
-        if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_corr())
-
-        db.set_total_hours(val)
-        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        db.add_log("corr_total_hours_set", actor, val=str(val))
-        logger.info(f"⏱ {actor} встановив мотогодини: {val}")
-
-        await state.clear()
-        st = db.get_state()
-        
+        # FIX #12: Transactional status check at write time
+        conn = get_connection()
         try:
-            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-        except Exception:
-            fuel_consumption = config.FUEL_CONSUMPTION
+            begin_transaction(conn)
+            
+            # Check status atomically within transaction
+            current_status = _conn_get_state_value(conn, "status", "OFF")
+            if current_status == "ON":
+                conn.rollback()
+                await state.clear()
+                return await msg.answer("⛔ Корекції заборонені під час активної зміни")
+            
+            # Validate and parse input
+            try:
+                val_text = (msg.text or "").replace(",", ".").strip()
+                val = float(val_text)
+
+                if val < config_dict["min_val"]:
+                    conn.rollback()
+                    return await msg.answer(f"❌ Значення не може бути менше {config_dict['min_val']}", reply_markup=back_to_corr())
+                if val > config_dict["max_val"]:
+                    conn.rollback()
+                    return await msg.answer(f"❌ Значення занадто велике (максимум {config_dict['max_val']})", reply_markup=back_to_corr())
+
+                # Apply the change
+                config_dict["db_setter"](val)
+                
+                # Log the correction
+                actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
+                db.add_log(config_dict["log_event"], actor, val=str(val), conn=conn)
+                logger.info(f"{config_dict['log_emoji']} {actor} встановив {config_dict['state_key']}: {val}")
+                
+                conn.commit()
+
+                await state.clear()
+                txt = "✅ Збережено.\n\n" + _build_correction_text()
+                await msg.answer(txt, reply_markup=correction_menu())
+
+            except ValueError:
+                conn.rollback()
+                await msg.answer("❌ Введіть число (наприклад 171.0)", reply_markup=back_to_corr())
         
-        txt = (
-            "✅ Збережено.\n\n"
-            "🧮 <b>Корекція</b>\n\n"
-            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
-            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
-        )
-        await msg.answer(txt, reply_markup=correction_menu())
-
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 123.5)", reply_markup=back_to_corr())
-
-
-@router.callback_query(F.data == "corr_last_oil_set")
-async def corr_last_oil_set(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
-    st = db.get_state()
-    cur = float(st.get("last_oil", 0.0) or 0.0)
-    await cb.message.edit_text(
-        f"🛢 Поточний last_oil_change: <b>{cur:.1f} год</b>\nВведіть нове значення (мотогодини):",
-        reply_markup=back_to_corr(),
-    )
-    await state.set_state(CorrectionForm.last_oil)
-    await cb.answer()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"Помилка корекції {corr_type}: {e}", exc_info=True)
+            await state.clear()
+            await msg.answer(f"❌ Помилка: {e}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    
+    return set_handler, save_handler
 
 
-@router.message(CorrectionForm.last_oil)
-async def corr_last_oil_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    block = _block_if_running()
-    if block:
-        await state.clear()
-        return await msg.answer(block)
-
-    try:
-        val_text = (msg.text or "").replace(",", ".").strip()
-        val = float(val_text)
-
-        if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_corr())
-        if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_corr())
-
-        db.set_state("last_oil_change", str(val))
-        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        db.add_log("corr_last_oil_set", actor, val=str(val))
-        logger.info(f"🛢 {actor} встановив last_oil_change: {val}")
-
-        await state.clear()
-        st = db.get_state()
-        
-        try:
-            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-        except Exception:
-            fuel_consumption = config.FUEL_CONSUMPTION
-        
-        txt = (
-            "✅ Збережено.\n\n"
-            "🧮 <b>Корекція</b>\n\n"
-            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
-            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
-        )
-        await msg.answer(txt, reply_markup=correction_menu())
-
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 100.0)", reply_markup=back_to_corr())
-
-
-@router.callback_query(F.data == "corr_last_spark_set")
-async def corr_last_spark_set(cb: types.CallbackQuery, state: FSMContext):
-    if cb.from_user.id not in config.ADMIN_IDS:
-        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-
-    block = _block_if_running()
-    if block:
-        return await cb.answer(block, show_alert=True)
-
-    st = db.get_state()
-    cur = float(st.get("last_spark", 0.0) or 0.0)
-    await cb.message.edit_text(
-        f"🕯 Поточний last_spark_change: <b>{cur:.1f} год</b>\nВведіть нове значення (мотогодини):",
-        reply_markup=back_to_corr(),
-    )
-    await state.set_state(CorrectionForm.last_spark)
-    await cb.answer()
-
-
-@router.message(CorrectionForm.last_spark)
-async def corr_last_spark_save(msg: types.Message, state: FSMContext):
-    if msg.from_user.id not in config.ADMIN_IDS:
-        await state.clear()
-        return await msg.answer("⛔ Тільки для адмінів")
-
-    block = _block_if_running()
-    if block:
-        await state.clear()
-        return await msg.answer(block)
-
-    try:
-        val_text = (msg.text or "").replace(",", ".").strip()
-        val = float(val_text)
-
-        if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_corr())
-        if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_corr())
-
-        db.set_state("last_spark_change", str(val))
-        actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
-        db.add_log("corr_last_spark_set", actor, val=str(val))
-        logger.info(f"🕯 {actor} встановив last_spark_change: {val}")
-
-        await state.clear()
-        st = db.get_state()
-        
-        try:
-            fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
-        except Exception:
-            fuel_consumption = config.FUEL_CONSUMPTION
-        
-        txt = (
-            "✅ Збережено.\n\n"
-            "🧮 <b>Корекція</b>\n\n"
-            f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-            f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-            f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-            f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
-            f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
-        )
-        await msg.answer(txt, reply_markup=correction_menu())
-
-    except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 100.0)", reply_markup=back_to_corr())
+# Register all handlers dynamically
+for corr_type, cfg in CORRECTION_CONFIGS.items():
+    set_h, save_h = _create_correction_handler(corr_type, cfg)
+    router.callback_query.register(set_h, F.data == f"corr_{corr_type}_set")
+    router.message.register(save_h, cfg["state_obj"])
