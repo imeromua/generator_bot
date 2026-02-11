@@ -56,7 +56,7 @@ async def personnel_choose_user(cb: types.CallbackQuery):
             f"🆔 <code>{uid}</code>\n\n"
             f"Поточна прив'язка: <b>{current or '—'}</b>\n\n"
             f"⚠️ Список персоналу ще не завантажений.\n"
-            f"Перевірте, що в таблиці заповнена колонка AC (ПЕРСОНАЛ) і синхронізація працює."
+            f"Перевірте, що в таблиці заповнена колонка 'ПЕРСОНАЛ' і синхронізація/імпорт працює."
         )
         kb = [[types.InlineKeyboardButton(text="🔙 Назад", callback_data="personnel_menu")]]
         return await cb.message.edit_text(txt, reply_markup=types.InlineKeyboardMarkup(inline_keyboard=kb))
