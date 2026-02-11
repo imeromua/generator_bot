@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from aiogram import types
 from aiogram.exceptions import TelegramBadRequest
@@ -21,6 +21,34 @@ def _fmt_state_ts(ts_raw: str | None) -> str:
         return ""
 
 
+def _calc_run_hours(st: dict, now: datetime) -> float:
+    """Best-effort runtime hours from state start_date/start_time.
+
+    Returns duration in hours clamped to [0, 24].
+    """
+    try:
+        start_date_str = (st.get("start_date", "") or "").strip()
+        start_time_str = (st.get("start_time", "") or "").strip()
+        if not start_time_str:
+            return 0.0
+
+        if start_date_str:
+            start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+        else:
+            # fallback: assume today's date, but adjust if time is "in the future" (cross-midnight)
+            start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
+            if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
+                start_dt = start_dt - timedelta(days=1)
+
+        start_dt = start_dt.replace(tzinfo=config.KYIV)
+        dur = (now - start_dt).total_seconds() / 3600.0
+        if dur < 0 or dur > 24:
+            return 0.0
+        return float(dur)
+    except Exception:
+        return 0.0
+
+
 def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) -> tuple[str, types.InlineKeyboardMarkup]:
     st = db.get_state()
     role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
@@ -32,7 +60,29 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
     to_service_hhmm = format_hours_hhmm(to_service)
 
-    current_fuel = st['current_fuel']
+    # --- Паливо: відображення ---
+    # DB зберігає "канонічне" current_fuel (події/корекції), а під час роботи показуємо оцінку "на льоту"
+    # без мутації БД: current_fuel_est = current_fuel - elapsed_hours * FUEL_RATE.
+    try:
+        current_fuel_raw = float(st.get('current_fuel', 0.0) or 0.0)
+    except Exception:
+        current_fuel_raw = 0.0
+
+    now = datetime.now(config.KYIV)
+    current_fuel = current_fuel_raw
+    fuel_mark = ""
+
+    try:
+        if st.get('status') == 'ON' and float(config.FUEL_CONSUMPTION or 0.0) > 0:
+            dur_h = _calc_run_hours(st, now)
+            if dur_h > 0:
+                current_fuel = max(0.0, current_fuel_raw - (dur_h * float(config.FUEL_CONSUMPTION)))
+                fuel_mark = " (оцінка)"
+    except Exception:
+        # якщо щось не так — показуємо канонічне
+        current_fuel = current_fuel_raw
+        fuel_mark = ""
+
     hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
     hours_left_hhmm = format_hours_hhmm(hours_left)
 
@@ -82,7 +132,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     txt = (
         f"{mode_mark}{offline_mark}"
         f"🔋 <b>Генератор:</b> {status_icon}\n"
-        f"⛽ Залишок палива: <b>{current_fuel:.1f} л</b>\n"
+        f"⛽ Залишок палива{fuel_mark}: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
         f"👤 <b>Ви:</b> {user_name}\n"
         f"🛢 До ТО: <b>{to_service_hhmm}</b>"
@@ -100,10 +150,10 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
 
 
 async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: str | None = None):
-    # Тягнемо еталонний залишок палива з таблиці, щоб дашборд показував актуальне
+    # Раніше тут була runtime-синхронізація з Sheets; зараз модуль services.google_sync — no-op.
     try:
         from services.google_sync import sync_canonical_state_once
-        await asyncio.to_thread(sync_canonical_state_once)
+        await sync_canonical_state_once()
     except Exception:
         pass
 
