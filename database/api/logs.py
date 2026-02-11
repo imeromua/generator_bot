@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import config
 from database.models import get_connection, begin_transaction
@@ -130,8 +130,9 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
 def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
     """Атомарне закриття зміни: тільки для активної зміни.
     
-    FIX #6: Fuel consumption should be handled here atomically.
-    This prevents TOCTOU race conditions between stop and scheduler.
+    FIX #6: Fuel consumption handled here atomically.
+    FIX #19: Hours update also done atomically within same transaction.
+    This prevents race conditions and ensures data consistency.
     """
     ts = dt.strftime("%Y-%m-%d %H:%M:%S")
     expected_start = end_event_type.replace("_end", "_start")
@@ -160,34 +161,78 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
                     pass
                 return {"ok": False, "reason": "wrong_shift", "active_shift": active}
 
-            # FIX #6: Calculate and apply fuel consumption atomically within this transaction
-            # This prevents race conditions with scheduler or other concurrent operations
+            # FIX #19: Calculate duration, fuel, and hours atomically
+            duration_hours = 0.0
+            fuel_consumed = 0.0
+            
             try:
                 start_time_str = _conn_get_state_value(conn, "last_start_time", "")
+                start_date_str = _conn_get_state_value(conn, "last_start_date", "")
+                
                 if start_time_str:
-                    from datetime import datetime as dt_lib
-                    start_dt = dt_lib.strptime(start_time_str, "%H:%M")
-                    duration_hours = (dt.hour * 60 + dt.minute - start_dt.hour * 60 - start_dt.minute) / 60.0
+                    # Build full start datetime
+                    if start_date_str:
+                        start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+                    else:
+                        # Fallback: assume today
+                        start_dt = datetime.strptime(f"{dt.date()} {start_time_str}", "%Y-%m-%d %H:%M")
+                        # If current time is earlier than start time, shift was yesterday
+                        if dt.time() < datetime.strptime(start_time_str, "%H:%M").time():
+                            start_dt = start_dt - timedelta(days=1)
+                    
+                    # FIX #18: Use localize() for proper timezone handling (DST aware)
+                    try:
+                        start_dt = config.KYIV.localize(start_dt)
+                    except AttributeError:
+                        # Fallback if KYIV doesn't have localize (not pytz)
+                        start_dt = start_dt.replace(tzinfo=config.KYIV)
+                    
+                    # Calculate duration
+                    duration_hours = (dt - start_dt).total_seconds() / 3600.0
+                    
+                    if duration_hours < 0 or duration_hours > 24:
+                        logging.warning(f"⚠️ Invalid duration: {duration_hours:.2f}h, resetting to 0")
+                        duration_hours = 0.0
                     
                     if duration_hours > 0:
                         # Get fuel consumption rate from state or config
                         fuel_rate_str = _conn_get_state_value(conn, "fuel_consumption", str(config.FUEL_CONSUMPTION))
                         try:
                             fuel_rate = float(fuel_rate_str or config.FUEL_CONSUMPTION)
+                            if fuel_rate <= 0:
+                                fuel_rate = config.FUEL_CONSUMPTION
                         except Exception:
                             fuel_rate = config.FUEL_CONSUMPTION
                         
                         fuel_consumed = duration_hours * fuel_rate
+                        
+                        # FIX #19: Update hours atomically (was done outside transaction before)
+                        total_hours = _conn_get_state_float(conn, "total_hours", 0.0)
+                        new_total = total_hours + duration_hours
+                        _conn_set_state_value(conn, "total_hours", str(new_total))
+                        
+                        # Update maintenance counters
+                        last_oil = _conn_get_state_float(conn, "last_oil_change", 0.0)
+                        last_spark = _conn_get_state_float(conn, "last_spark_change", 0.0)
+                        _conn_set_state_value(conn, "last_oil_change", str(last_oil + duration_hours))
+                        _conn_set_state_value(conn, "last_spark_change", str(last_spark + duration_hours))
                         
                         # Apply atomic fuel update
                         current_fuel = _conn_get_state_float(conn, "current_fuel", 0.0)
                         new_fuel = max(0.0, current_fuel - fuel_consumed)
                         _conn_set_state_value(conn, "current_fuel", str(new_fuel))
                         
-                        logging.info(f"⛽ Fuel consumed during shift: {fuel_consumed:.2f}L (duration: {duration_hours:.2f}h, rate: {fuel_rate:.2f}L/h)")
+                        logging.info(
+                            f"⛽ Shift closed: duration={duration_hours:.2f}h, "
+                            f"fuel_consumed={fuel_consumed:.2f}L, rate={fuel_rate:.2f}L/h, "
+                            f"total_hours={new_total:.2f}h"
+                        )
+                        
             except Exception as e:
-                logging.warning(f"⚠️ Failed to calculate fuel consumption in try_stop_shift: {e}")
-                # Don't fail the entire shift stop if fuel calculation fails
+                logging.error(f"⚠️ Failed to calculate metrics in try_stop_shift: {e}", exc_info=True)
+                # Don't fail the entire shift stop if calculation fails
+                duration_hours = 0.0
+                fuel_consumed = 0.0
 
             _conn_set_state_value(conn, "status", "OFF")
             _conn_set_state_value(conn, "active_shift", "none")
@@ -199,7 +244,12 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
             )
 
             conn.commit()
-            return {"ok": True, "ts": ts}
+            return {
+                "ok": True, 
+                "ts": ts,
+                "duration_hours": duration_hours,
+                "fuel_consumed": fuel_consumed,
+            }
 
         except Exception as e:
             try:
