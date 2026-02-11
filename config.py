@@ -27,6 +27,17 @@ def validate_env():
     db_backend = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
     if db_backend == "postgres":
         required.append("POSTGRES_DSN")
+        # Додаткова перевірка наявності psycopg при використанні Postgres
+        try:
+            import psycopg  # type: ignore
+        except Exception:
+            print("=" * 60)
+            print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
+            print("")
+            print("DB_BACKEND=postgres, але модуль 'psycopg' не встановлено.")
+            print("Встановіть psycopg (наприклад, 'pip install psycopg[binary]') або змініть DB_BACKEND.")
+            print("=" * 60)
+            sys.exit(1)
 
     if _env_bool("REDIS_ENABLED", False):
         required.append("REDIS_URL")

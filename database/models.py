@@ -188,7 +188,12 @@ def get_connection():
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
-        return sqlite3.connect(db_path, check_same_thread=False, timeout=10)
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            pass
+        return conn
 
     ensure_postgres_database_exists()
     conn = psycopg.connect(getattr(config, "POSTGRES_DSN"))
@@ -222,9 +227,9 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id INTEGER PRIMARY KEY, date TEXT, type TEXT, hours REAL, admin TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
 
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
@@ -233,27 +238,41 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id BIGSERIAL PRIMARY KEY, date TEXT, type TEXT, hours DOUBLE PRECISION, admin TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY, personnel_name TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY, chat_id BIGINT, message_id BIGINT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)''')
 
-    # FIX #4: Міграція receipt_number для SQLite і Postgres
+    # Індекси для оптимізації пошуку в таблиці logs
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
+    ]
+    for stmt in index_statements:
+        try:
+            c.execute(stmt)
+        except Exception as e:
+            logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
+
+    # Міграція receipt_number для SQLite і Postgres (з транзакцією)
     try:
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
         logging.info("✅ Колонка receipt_number вже існує")
     except Exception:
-        if _is_postgres():
-            conn.rollback()
-
         logging.info("🔧 Додаємо колонку receipt_number...")
         try:
-            if _is_postgres():
-                c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
-                logging.info("✅ Postgres: колонка receipt_number додана")
-            else:
-                c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
-                logging.info("✅ SQLite: колонка receipt_number додана")
+            begin_transaction(conn)
+            c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            logging.info("✅ Колонка receipt_number додана")
         except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                 logging.info("✅ Колонка receipt_number вже існує")
             else:
