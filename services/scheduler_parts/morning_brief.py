@@ -12,6 +12,7 @@ from services.scheduler_parts.utils import (
     fmt_range,
     yesterday_shifts_summary,
 )
+from services.scheduler_parts.notify import send_single_window
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,10 @@ async def maybe_send_morning_brief(
         )
         brief_time = dt_time(7, 30)
 
-    # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
     target_dt = datetime.combine(current_date, brief_time).replace(tzinfo=config.KYIV)
 
     diff_s = (now - target_dt).total_seconds()
 
-    # Якщо бот запустили/перезапустили вже після вікна — брифінг за цей день пропускаємо
     if (diff_s >= brief_window_seconds) and (not brief_sent_today):
         brief_sent_today = True
 
@@ -115,12 +114,11 @@ async def maybe_send_morning_brief(
             kb_home = back_to_main()
 
             for user_id, user_name in users:
-                # Брифінг тільки юзерам (не адмінам)
                 if user_id in config.ADMIN_IDS:
                     continue
 
                 try:
-                    await bot.send_message(user_id, txt, reply_markup=kb_home)
+                    await send_single_window(bot, int(user_id), txt, reply_markup=kb_home)
                     success_count += 1
                     await asyncio.sleep(0.05)
                 except Exception as e:

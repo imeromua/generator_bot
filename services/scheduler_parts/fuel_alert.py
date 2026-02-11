@@ -1,10 +1,10 @@
 import logging
-import asyncio
 from datetime import datetime
 
 import config
 import database.db_api as db
 from keyboards.builders import back_to_main
+from services.scheduler_parts.notify import send_single_window
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,9 @@ async def check_fuel_alert(bot, state: dict):
 
     Викликається з планувальника раз на хвилину.
     Кулдаун береться з config.FUEL_ALERT_COOLDOWN_MIN.
+
+    IMPORTANT: Uses "single-window" delivery (edit/replace last UI message) to avoid chat spam.
     """
-    # Якщо функція вимкнена в конфігу (поріг 0 або менше)
     if config.FUEL_ALERT_THRESHOLD_L <= 0:
         return
 
@@ -24,12 +25,9 @@ async def check_fuel_alert(bot, state: dict):
     except Exception:
         return
 
-    # Якщо палива достатньо — нічого не робимо
     if current_fuel >= config.FUEL_ALERT_THRESHOLD_L:
         return
 
-    # Перевірка кулдауну (щоб не спамити кожну хвилину)
-    # ВАЖЛИВО: читаємо з БД напряму, а не з `state`, щоб не залежати від складу state у scheduler_loop.
     last_sent_ts_str = db.get_state_value("fuel_alert_last_sent_ts", "") or ""
 
     should_send = True
@@ -42,7 +40,6 @@ async def check_fuel_alert(bot, state: dict):
             if diff_min < config.FUEL_ALERT_COOLDOWN_MIN:
                 should_send = False
         except Exception:
-            # Якщо дата побита — краще надіслати, щоб не пропустити
             should_send = True
 
     if not should_send:
@@ -59,13 +56,7 @@ async def check_fuel_alert(bot, state: dict):
 
     kb_home = back_to_main()
 
-    # Надсилаємо всім адмінам
     for admin_id in config.ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, txt, reply_markup=kb_home)
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logger.error(f"Failed to send fuel alert to {admin_id}: {e}")
+        await send_single_window(bot, int(admin_id), txt, reply_markup=kb_home)
 
-    # Оновлюємо час останньої відправки в БД
     db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))

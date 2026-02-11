@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, date as dt_date, time as dt_time
 import config
 import database.db_api as db
 from keyboards.builders import back_to_main
+from services.scheduler_parts.notify import send_single_window
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,6 @@ async def maybe_send_stop_reminder(
     today_str: str,
     state: dict,
 ):
-    # === 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" ===
     reminder_min = _get_stop_reminder_minutes()
 
     try:
@@ -100,9 +100,6 @@ async def maybe_send_stop_reminder(
                 logger.warning("⚠️ STOP reminder: recipients list is empty")
 
             for user_id in recipients:
-                try:
-                    await bot.send_message(user_id, txt, reply_markup=kb_home)
-                except Exception as e:
-                    logger.warning(f"⚠️ STOP reminder: не вдалося надіслати користувачу {user_id}: {e}")
+                await send_single_window(bot, user_id, txt, reply_markup=kb_home)
 
             db.set_state("stop_reminder_sent_date", today_str)

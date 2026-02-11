@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, time as dt_time
 import config
 import database.db_api as db
 from utils.time import format_hours_hhmm
+from services.scheduler_parts.notify import send_single_window
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,6 @@ async def maybe_auto_close_shift(
 
     state = db.get_state()
 
-    # Перевіряємо чи зміна активна
     if state.get("status") == "ON":
         logger.info(f"🌙 Час авто-закриття: {config.WORK_END_TIME}")
 
@@ -44,9 +44,7 @@ async def maybe_auto_close_shift(
                     if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
                         start_dt = start_dt - timedelta(days=1)
 
-                # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
                 start_dt = start_dt.replace(tzinfo=config.KYIV)
-                
                 dur = (now - start_dt).total_seconds() / 3600.0
             else:
                 dur = 0.0
@@ -77,14 +75,10 @@ async def maybe_auto_close_shift(
             close_reason = "no_end_event"
 
         if not close_ok:
-            # якщо вже закрито кимось іншим — не дублюємо логи/облік
             if close_reason == "already_off":
                 logger.info("🤖 Auto-close: зміна вже закрита, пропускаємо")
                 return True, True
 
-            # wrong_shift означає: status=ON, але active_shift не відповідає expected_start.
-            # Тут НЕ можна робити forced OFF, бо це зламає інваріант: "ON без end-log".
-            # Краще просто сповістити адмінів і залишити стан як є (вони закриють вручну).
             if close_reason == "wrong_shift":
                 logger.warning(
                     f"⚠️ Auto-close: wrong_shift (active_shift={active_shift}). "
@@ -99,14 +93,10 @@ async def maybe_auto_close_shift(
                 )
 
                 for admin_id in config.ADMIN_IDS:
-                    try:
-                        await bot.send_message(admin_id, admin_txt)
-                    except Exception:
-                        pass
+                    await send_single_window(bot, int(admin_id), admin_txt)
 
                 return True, True
 
-            # fallback: щоб не лишати генератор у ON при поламаному state
             forced_close = True
             db.set_state("status", "OFF")
             db.set_state("active_shift", "none")
@@ -114,7 +104,6 @@ async def maybe_auto_close_shift(
                 f"⚠️ Auto-close fallback: forced OFF (reason={close_reason}, active_shift={active_shift})"
             )
 
-        # OFFLINE: локально обліковуємо паливо/години тільки якщо ми реально закрили
         remaining_fuel = None
         try:
             if db.sheet_is_offline() and (close_ok or forced_close):
@@ -123,7 +112,6 @@ async def maybe_auto_close_shift(
         except Exception:
             pass
 
-        # Технічний лог auto_close
         ts = now.strftime("%Y-%m-%d %H:%M:%S")
         try:
             if close_ok or forced_close:
@@ -136,7 +124,7 @@ async def maybe_auto_close_shift(
             f"ok={close_ok}, forced={forced_close}, dur={dur:.2f}h, fuel={fuel_consumed:.1f}l"
         )
 
-        # Сповіщення адмінів
+        # Сповіщення адмінів (single-window)
         dur_hhmm = format_hours_hhmm(dur)
         rem_line = f"\n⛽ Залишок: <b>{remaining_fuel:.1f} л</b>" if (remaining_fuel is not None) else ""
         warn_line = "\n⚠️ <b>Fallback</b>: закрито примусово" if forced_close else ""
@@ -152,10 +140,7 @@ async def maybe_auto_close_shift(
         )
 
         for admin_id in config.ADMIN_IDS:
-            try:
-                await bot.send_message(admin_id, admin_txt)
-            except Exception as e:
-                logger.warning(f"⚠️ Не вдалося надіслати адміну {admin_id}: {e}")
+            await send_single_window(bot, int(admin_id), admin_txt)
 
     else:
         logger.info(f"ℹ️ Час {config.WORK_END_TIME}: зміна вже закрита")
