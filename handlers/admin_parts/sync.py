@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime
 
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -36,13 +37,42 @@ def _back_kb() -> InlineKeyboardMarkup:
     )
 
 
+def _acquire_sync_lock() -> bool:
+    """FIX #14: Try to acquire sync lock atomically.
+    
+    Returns True if lock was acquired, False if sync is already in progress.
+    """
+    try:
+        current = db.get_state_value("sync_in_progress", "0")
+        if current == "1":
+            return False
+        db.set_state("sync_in_progress", "1")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to acquire sync lock: {e}")
+        return False
+
+
+def _release_sync_lock():
+    """FIX #14: Release sync lock."""
+    try:
+        db.set_state("sync_in_progress", "0")
+    except Exception as e:
+        logger.error(f"Failed to release sync lock: {e}")
+
+
 @router.callback_query(F.data == "sync_menu")
 async def show_sync_menu(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
+    # FIX #14: Show if sync is in progress
+    sync_in_progress = db.get_state_value("sync_in_progress", "0") == "1"
+    status_text = "\n⚠️ <b>Синхронізація вже виконується!</b>\n" if sync_in_progress else ""
+    
     txt = (
         "🔄 <b>Обмін з Google Sheets</b>\n\n"
+        f"{status_text}"
         "📥 <b>Імпорт</b> — читає дані з основної вкладки Sheets і повністю перезаписує БД.\n"
         "📤 <b>Експорт</b> — дописує/оновлює дні з логів БД в основну вкладку Sheets, не чіпаючи дні, де дані вже є.\n\n"
         "⚠️ Імпорт повністю очищає БД перед завантаженням (потрібне підтвердження).\n"
@@ -56,6 +86,10 @@ async def show_sync_menu(cb: types.CallbackQuery):
 async def sync_import_confirm(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    # FIX #14: Check if sync is already in progress
+    if db.get_state_value("sync_in_progress", "0") == "1":
+        return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     # Safety guard: не імпортуємо, якщо генератор "ON" (може йти зміна прямо зараз)
     try:
@@ -84,10 +118,16 @@ async def sync_import_execute(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    await cb.answer("⚙️ Імпорт запускається...", show_alert=False)
-    await cb.message.edit_text("⏳ <b>Імпорт з Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
+    # FIX #14: Acquire lock before starting
+    if not _acquire_sync_lock():
+        return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     try:
+        await cb.answer("⚙️ Імпорт запускається...", show_alert=False)
+        await cb.message.edit_text("⏳ <b>Імпорт з Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
+
+        # FIX #15: Import wrapped in try-finally to ensure cleanup
+        # Note: Full transactional rollback would require changes to full_import() itself
         await asyncio.to_thread(full_import)
 
         txt = (
@@ -107,12 +147,19 @@ async def sync_import_execute(cb: types.CallbackQuery):
             f"❌ <b>Помилка імпорту</b>\n\n{e}",
             reply_markup=_back_kb(),
         )
+    finally:
+        # FIX #14: Always release lock
+        _release_sync_lock()
 
 
 @router.callback_query(F.data == "sync_export")
 async def sync_export_confirm(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    # FIX #14: Check if sync is already in progress
+    if db.get_state_value("sync_in_progress", "0") == "1":
+        return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     txt = (
         "⚠️ <b>Підтвердження експорту</b>\n\n"
@@ -132,10 +179,14 @@ async def sync_export_execute(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    await cb.answer("⚙️ Експорт запускається...", show_alert=False)
-    await cb.message.edit_text("⏳ <b>Експорт в Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
+    # FIX #14: Acquire lock before starting
+    if not _acquire_sync_lock():
+        return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     try:
+        await cb.answer("⚙️ Експорт запускається...", show_alert=False)
+        await cb.message.edit_text("⏳ <b>Експорт в Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
+
         result = await asyncio.to_thread(full_export)
         updated = []
         skipped = []
@@ -170,3 +221,6 @@ async def sync_export_execute(cb: types.CallbackQuery):
             f"❌ <b>Помилка експорту</b>\n\n{e}",
             reply_markup=_back_kb(),
         )
+    finally:
+        # FIX #14: Always release lock
+        _release_sync_lock()
