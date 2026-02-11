@@ -74,6 +74,9 @@ REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
 # If False: bot works DB-only at runtime; import/export can be kept manual.
 SHEETS_RUNTIME_ENABLED = _env_bool("SHEETS_RUNTIME_ENABLED", True)
 
+# FIX #26: Configurable service account path for Google Sheets authentication
+SERVICE_ACCOUNT_PATH = (os.getenv("SERVICE_ACCOUNT_PATH", "service_account.json") or "service_account.json").strip()
+
 # --- ЛОГУВАННЯ ---
 LOG_FILE = os.getenv("LOG_FILE", "bot.log")
 try:
@@ -168,6 +171,7 @@ if __name__ == "__main__":
         print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
     print(f"Redis enabled: {REDIS_ENABLED}")
     print(f"Sheets runtime enabled: {SHEETS_RUNTIME_ENABLED}")
+    print(f"Service account path: {SERVICE_ACCOUNT_PATH}")
     print(f"Таблиця: {SHEET_NAME}")
     print(f"ID таблиці: {SHEET_ID}")
     print(f"Вкладка логів: {LOGS_SHEET_NAME}")
