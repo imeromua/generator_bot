@@ -8,6 +8,7 @@ from google.oauth2.service_account import Credentials
 
 import config
 import database.db_api as db
+from database.models import get_connection, begin_transaction
 from utils.time import now_kiev
 from utils.sheets_dates import find_row_by_date_in_column_a
 from utils.sheets_guard import sheets_forced_offline
@@ -49,14 +50,17 @@ def open_ws_sync():
 
     if not config.SHEET_ID:
         return None
-    if not os.path.exists("service_account.json"):
+    
+    # FIX #26: Use configurable service account path
+    service_account_path = getattr(config, 'SERVICE_ACCOUNT_PATH', 'service_account.json')
+    if not os.path.exists(service_account_path):
         return None
 
     scopes = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive.readonly",
     ]
-    creds = Credentials.from_service_account_file("service_account.json", scopes=scopes)
+    creds = Credentials.from_service_account_file(service_account_path, scopes=scopes)
     client = gspread.authorize(creds)
     ss = client.open_by_key(config.SHEET_ID)
     return ss.worksheet(config.SHEET_NAME)
@@ -105,15 +109,25 @@ def get_sheet_shift_info_sync():
 
 
 def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
-    """Якщо таблиця показує відкриту зміну — синхронізуємо мінімальний стан в БД для блокування."""
+    """Якщо таблиця показує відкриту зміну — синхронізуємо мінімальний стан в БД для блокування.
+    
+    FIX #25: Now uses transaction to ensure atomicity of all state updates.
+    """
+    conn = None
     try:
-        db.set_state("status", "ON")
-        db.set_state("active_shift", f"{open_shift_code}_start")
+        conn = get_connection()
+        begin_transaction(conn)
+        
+        # Update all state values atomically
+        from database.api.state import _conn_set_state_value
+        
+        _conn_set_state_value(conn, "status", "ON")
+        _conn_set_state_value(conn, "active_shift", f"{open_shift_code}_start")
 
         st_time = (start_times.get(open_shift_code, "") or "").strip()
         if st_time:
             hhmm = st_time[:5]
-            db.set_state("last_start_time", hhmm)
+            _conn_set_state_value(conn, "last_start_time", hhmm)
 
             # Якщо зараз після півночі, а старт був "вчора ввечері" — ставимо дату вчора.
             try:
@@ -122,9 +136,24 @@ def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
                 start_date = now.date()
                 if now.time() < start_t:
                     start_date = start_date - timedelta(days=1)
-                db.set_state("last_start_date", start_date.strftime("%Y-%m-%d"))
+                _conn_set_state_value(conn, "last_start_date", start_date.strftime("%Y-%m-%d"))
             except Exception:
-                db.set_state("last_start_date", now_kiev().strftime("%Y-%m-%d"))
+                _conn_set_state_value(conn, "last_start_date", now_kiev().strftime("%Y-%m-%d"))
+        
+        conn.commit()
 
-    except Exception:
-        pass
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        import logging
+        logging.error(f"❌ Failed to sync DB from Sheet: {e}", exc_info=True)
+        
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
