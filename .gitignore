@@ -68,3 +68,4 @@ htmlcov/
 .dmypy.json
 dmypy.json
 bot.pid
+admin_bot.env
