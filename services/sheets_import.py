@@ -1,19 +1,16 @@
 """Модуль імпорту з Google Sheets в БД.
 
-Фінальний спрощений шаблон (дворядковий заголовок):
-- Перші 2 рядки в основній вкладці — заголовки.
-- Далі йдуть дані.
+Актуальний шаблон (спрощений):
+- Заголовок 1 рядок.
+- Далі дані.
+- Колонки "ПОЧАТОК, Г" / "КІНЕЦЬ, Г" повторюються 4 рази (для m/d/e/x) — їх треба брати по порядку.
 
 Імпорт:
 - Читаємо ТІЛЬКИ основну вкладку.
 - НЕ читаємо/не відновлюємо з вкладки "ПОДІЇ".
 - Відновлюємо logs тільки з рядків основної вкладки (часи змін + refills).
 - Довідники водіїв/персоналу імпортуємо з колонок по НАЗВАХ.
-
-Службові колонки:
-- Якщо у таблиці є службові колонки T, U — ми їх ігноруємо (по суті, нічого не змінюємо,
-  бо імпорт працює по назвах колонок; але ми додаємо захист, щоб випадково не сприйняти
-  їх як "ВОДІЇЇ"/"ПЕРСОНАЛ" тощо).
+- Службові колонки T/U (якщо є) ігноруємо.
 """
 
 import logging
@@ -74,7 +71,6 @@ def _norm(s: str) -> str:
 
 
 def _is_service_col_header(label_norm: str) -> bool:
-    """Ignore service headers like 't', 'u', 'службова', etc."""
     if not label_norm:
         return True
     if label_norm in {"t", "u"}:
@@ -84,25 +80,16 @@ def _is_service_col_header(label_norm: str) -> bool:
     return False
 
 
-def _build_header_map(header_top: list[str], header_bottom: list[str]) -> dict[str, int]:
-    m: dict[str, int] = {}
-    max_len = max(len(header_top), len(header_bottom))
-
-    for i in range(max_len):
-        top = header_top[i] if i < len(header_top) else ""
-        bot = header_bottom[i] if i < len(header_bottom) else ""
-
-        top_n = _norm(top)
-        bot_n = _norm(bot)
-
-        # do not store service-only headers
-        if bot_n and not _is_service_col_header(bot_n):
-            m.setdefault(bot_n, i)
-        if top_n and not _is_service_col_header(top_n):
-            m.setdefault(top_n, i)
-        if top_n and bot_n and (not _is_service_col_header(top_n)) and (not _is_service_col_header(bot_n)):
-            m.setdefault(f"{top_n}:{bot_n}", i)
-
+def _build_header_map_1row(header: list[str]) -> dict[str, list[int]]:
+    """Map normalized header label -> list of column indices (to support duplicates)."""
+    m: dict[str, list[int]] = {}
+    for i, col in enumerate(header):
+        n = _norm(col)
+        if _is_service_col_header(n):
+            continue
+        if not n:
+            continue
+        m.setdefault(n, []).append(i)
     return m
 
 
@@ -204,38 +191,41 @@ def _restore_generator_state():
 
 
 def _import_main_sheet_data(all_values: list[list[str]]):
-    if len(all_values) < 3:
-        logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків).")
+    if len(all_values) < 2:
+        logger.warning("⚠️ Таблиця виглядає порожньою (менше 2 рядків).")
         return
 
-    header_top = all_values[0]
-    header_bottom = all_values[1]
-    data_rows = all_values[2:]
+    header = all_values[0]
+    data_rows = all_values[1:]
 
-    hmap = _build_header_map(header_top, header_bottom)
+    hmap = _build_header_map_1row(header)
 
-    idx_date = hmap.get(_norm("дата"))
+    def idx_first(name: str) -> int | None:
+        arr = hmap.get(_norm(name))
+        return arr[0] if arr else None
 
-    # shifts: in simplified template there are 4 pairs of times without group labels, so rely on positions by title only
-    # However for compatibility with old grouped header we also try '1:..' etc.
-    idx_m_start = hmap.get(_norm("1:початок, г")) or hmap.get(_norm("початок, г"))
-    idx_m_end = hmap.get(_norm("1:кінець, г")) or hmap.get(_norm("кінець, г"))
+    def idx_n(name: str, n: int) -> int | None:
+        arr = hmap.get(_norm(name))
+        return arr[n] if arr and len(arr) > n else None
 
-    idx_d_start = hmap.get(_norm("2:початок, г"))
-    idx_d_end = hmap.get(_norm("2:кінець, г"))
+    idx_date = idx_first("дата")
 
-    idx_e_start = hmap.get(_norm("3:початок, г"))
-    idx_e_end = hmap.get(_norm("3:кінець, г"))
+    # 4 shifts from duplicates by order
+    idx_m_start = idx_n("початок, г", 0)
+    idx_m_end = idx_n("кінець, г", 0)
+    idx_d_start = idx_n("початок, г", 1)
+    idx_d_end = idx_n("кінець, г", 1)
+    idx_e_start = idx_n("початок, г", 2)
+    idx_e_end = idx_n("кінець, г", 2)
+    idx_x_start = idx_n("початок, г", 3)
+    idx_x_end = idx_n("кінець, г", 3)
 
-    idx_x_start = hmap.get(_norm("4:початок, г"))
-    idx_x_end = hmap.get(_norm("4:кінець, г"))
+    idx_refill = idx_first("привезено палива")
+    idx_receipt = idx_first("номер чека")
+    idx_driver_day = idx_first("паливо превіз")
 
-    idx_refill = hmap.get(_norm("привезено палива"))
-    idx_receipt = hmap.get(_norm("номер чека"))
-    idx_driver_day = hmap.get(_norm("паливо превіз"))
-
-    idx_drivers_dict = hmap.get(_norm("водіїї"))
-    idx_personnel_dict = hmap.get(_norm("персонал"))
+    idx_drivers_dict = idx_first("водіїї")
+    idx_personnel_dict = idx_first("персонал")
 
     logger.info(
         "📌 Header map найдено: "
@@ -245,8 +235,11 @@ def _import_main_sheet_data(all_values: list[list[str]]):
         f"drivers_dict={idx_drivers_dict}, personnel_dict={idx_personnel_dict}"
     )
 
-    conn = get_connection()
+    if idx_date is None:
+        logger.warning("⚠️ Не знайдено колонку 'ДАТА' у заголовку. Імпорт скасовано.")
+        return
 
+    conn = get_connection()
     all_drivers = set()
     all_personnel = set()
 
@@ -361,8 +354,8 @@ def full_import():
         logger.info("📥 Завантаження даних з таблиці в пам'ять...")
         all_values = main_sheet.get_all_values()
 
-        if len(all_values) < 3:
-            logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків). Імпорт скасовано для безпеки.")
+        if len(all_values) < 2:
+            logger.warning("⚠️ Таблиця виглядає порожньою (менше 2 рядків). Імпорт скасовано для безпеки.")
             return
 
     except Exception as e:
