@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime
 
 import config
 import database.db_api as db
 from keyboards.builders import back_to_main
 from services.scheduler_parts.notify import send_single_window
+from utils.time import now_kiev
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +31,31 @@ async def check_fuel_alert(bot, state: dict):
     last_sent_ts_str = db.get_state_value("fuel_alert_last_sent_ts", "") or ""
 
     should_send = True
-    now = datetime.now()
+    
+    # FIX #28: Use now_kiev() for timezone consistency with rest of the system
+    now = now_kiev()
 
     if last_sent_ts_str:
         try:
+            # Parse with timezone-aware datetime
+            from datetime import datetime
             last_sent = datetime.strptime(last_sent_ts_str, "%Y-%m-%d %H:%M:%S")
+            # Make it timezone-aware if needed
+            if last_sent.tzinfo is None:
+                last_sent = last_sent.replace(tzinfo=config.KYIV)
+            
             diff_min = (now - last_sent).total_seconds() / 60.0
             if diff_min < config.FUEL_ALERT_COOLDOWN_MIN:
                 should_send = False
-        except Exception:
+        except Exception as e:
+            logger.warning(f"⚠️ Помилка парсингу останнього алерту: {e}")
             should_send = True
 
     if not should_send:
         return
 
-    logger.warning(f"⚠️ FUEL ALERT: {current_fuel} L < {config.FUEL_ALERT_THRESHOLD_L} L")
+    # FIX #31: Consistent Ukrainian messages for user-facing alerts
+    logger.warning(f"⚠️ АЛЕРТ ПАЛИВА: {current_fuel:.1f} л < {config.FUEL_ALERT_THRESHOLD_L} л")
 
     txt = (
         f"⛽ <b>УВАГА! Низький рівень палива</b>\n\n"
