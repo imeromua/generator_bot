@@ -6,9 +6,8 @@
 - Технічні колонки (розхід, коефіцієнти тощо) не чіпаємо.
 
 Семантика експорту:
-- Не чіпаємо попередні дні.
-- Оновлюємо лише поточний день (сьогодні за київським часом) та всі наступні дні,
-  якщо для них уже є логи в БД.
+- Не перезаписуємо дні, в яких у робочих колонках (B..I,N,P,Q) уже є дані в Sheets.
+- Для інших днів, які є в логах БД, дописуємо/оновлюємо рядки.
 
 Колонки, які заповнюємо (інші лишаємо порожніми/як є):
 - A = дата (ДД.ММ.РРРР)
@@ -48,45 +47,6 @@ def _time_to_hhmm(dt: datetime | None) -> str:
     if not dt:
         return ""
     return dt.strftime("%H:%M")
-
-
-def _find_last_date_in_sheet(sheet) -> str | None:
-    """Знаходить останню дату в колонці A (формат DD.MM.YYYY).
-
-    Повертає дату у форматі YYYY-MM-DD або None якщо таблиця порожня.
-    Використовується лише для діагностики, а не для обмеження експорту.
-    """
-    try:
-        col_a = sheet.col_values(1)
-
-        if len(col_a) < 3:
-            logger.info("📋 Sheets порожня, експортуємо всі дані")
-            return None
-
-        data_rows = col_a[2:]
-
-        last_date_str = None
-        for cell in reversed(data_rows):
-            if cell and cell.strip():
-                last_date_str = cell.strip()
-                break
-
-        if not last_date_str:
-            logger.info("📋 Немає дат у колонці A, експортуємо всі дані")
-            return None
-
-        try:
-            dt = datetime.strptime(last_date_str, "%d.%m.%Y")
-            result = dt.strftime("%Y-%m-%d")
-            logger.info(f"📅 Остання дата в Sheets (колонка A): {last_date_str} ({result})")
-            return result
-        except Exception as e:
-            logger.warning(f"⚠️ Не вдалося розпарсити останню дату '{last_date_str}': {e}")
-            return None
-
-    except Exception as e:
-        logger.error(f"❌ Помилка пошуку останньої дати: {e}")
-        return None
 
 
 def _aggregate_logs_by_date(from_date: str | None = None):
@@ -203,74 +163,98 @@ def _build_export_rows(days_data):
 
 
 def full_export():
-    """Інкрементальний експорт з БД в Google Sheets.
+    """Експорт з БД в Google Sheets по днях.
 
-    Не чіпає попередні дні, оновлює тільки поточний день та всі наступні дні,
-    для яких у БД є логи.
+    Для кожної дати з логів:
+    - якщо в Sheets по цій даті вже є дані в B..I,N,P,Q — день пропускається;
+    - інакше дані за день записуються (або дописуються) в основну вкладку.
+
+    Повертає словник з переліком оновлених і пропущених дат.
     """
-    logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
+    logger.info("📤 Починаємо експорт з БД в Sheets (only fill missing days)...")
 
     client = make_client()
     ss = open_spreadsheet(client)
     main_sheet = open_main_worksheet(ss)
 
-    _ = _find_last_date_in_sheet(main_sheet)  # тільки для логів, логіку експорту не впливає
+    # Читаємо всі поточні значення основної вкладки
+    all_values = main_sheet.get_all_values()
 
-    today_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
-    logger.info(f"📆 Експортуємо дані, починаючи з {today_str} (включно)")
+    # Будуємо мапу існуючих дат: YYYY-MM-DD -> (row_index, has_payload_in_BI_N_P_Q)
+    sheet_dates: dict[str, tuple[int, bool]] = {}
 
-    days_data = _aggregate_logs_by_date(from_date=today_str)
+    for idx, row in enumerate(all_values[2:], start=3):  # починаючи з рядка 3
+        if not row or not (row[0] or "").strip():
+            continue
+        date_cell = (row[0] or "").strip()
+        try:
+            dt = datetime.strptime(date_cell, "%d.%m.%Y")
+            date_iso = dt.strftime("%Y-%m-%d")
+        except Exception:
+            continue
+
+        # Перевіряємо, чи вже є наші робочі дані в B..I,N,P,Q
+        has_payload = False
+        important_cols = [1, 2, 3, 4, 5, 6, 7, 8, 13, 15, 16]
+        for col_idx in important_cols:
+            if col_idx < len(row) and (row[col_idx] or "").strip():
+                has_payload = True
+                break
+
+        sheet_dates[date_iso] = (idx, has_payload)
+
+    # Агрегуємо всі логи по датах (без обмеження по today)
+    days_data = _aggregate_logs_by_date(from_date=None)
 
     if not days_data:
-        logger.info("ℹ️ Немає нових даних для експорту (логів за сьогодні і пізніше немає)")
-        return
+        logger.info("ℹ️ Немає даних у логах для експорту")
+        return {"updated": [], "skipped": []}
 
-    main_rows = _build_export_rows(days_data)
-    logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {today_str})")
+    updated_dates: list[str] = []
+    skipped_dates: list[str] = []
 
-    if main_rows:
-        all_values = main_sheet.get_all_values()
+    # Для зручності при додаванні нових рядків тримаємо довжину поточної таблиці
+    current_rows_count = len(all_values)
 
-        start_row = 3
-        dates_in_sheet = [row[0].strip() if row else "" for row in all_values[2:]]
-        if dates_in_sheet:
-            # Знаходимо перший рядок з датою >= сьогоднішньої або перший порожній
-            today_fmt = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d.%m.%Y")
-            for i, date_cell in enumerate(dates_in_sheet, start=3):
-                if not date_cell:
-                    start_row = i
-                    break
-                try:
-                    # якщо дата у форматі DD.MM.YYYY і >= сьогодні — оновлюємо з цього рядка
-                    dt = datetime.strptime(date_cell, "%d.%m.%Y")
-                    if dt >= datetime.strptime(today_fmt, "%d.%m.%Y"):
-                        start_row = i
-                        break
-                except Exception:
-                    continue
+    for date_str in sorted(days_data.keys()):
+        day = days_data[date_str]
+
+        # Готуємо дані рядка для цієї дати
+        row_data = _build_export_rows({date_str: day})[0]
+
+        if date_str in sheet_dates:
+            row_idx, has_payload = sheet_dates[date_str]
+            if has_payload:
+                skipped_dates.append(date_str)
+                logger.info("⏭ Пропускаємо дату %s — дані вже є в Sheets (рядок %s)", date_str, row_idx)
+                continue
         else:
-            start_row = 3
+            # Дня з такою датою ще немає в таблиці — додаємо в кінець
+            current_rows_count += 1
+            row_idx = current_rows_count
+            sheet_dates[date_str] = (row_idx, False)
+            logger.info("➕ Додаємо новий рядок для дати %s (рядок %s)", date_str, row_idx)
 
-        end_row = start_row + len(main_rows) - 1
+        # Оновлюємо/записуємо лише дозволені колонки для цього рядка
+        dates = [[row_data[0]]]          # A
+        times = [row_data[1:9]]          # B..I
+        col_n = [[row_data[13]]]         # N
+        col_p = [[row_data[15]]]         # P
+        col_q = [[row_data[16]]]         # Q
 
-        # Формуємо окремі зрізи по колонках, які дозволено змінювати
-        dates = [[r[0]] for r in main_rows]      # A
-        times = [r[1:9] for r in main_rows]      # B..I
-        col_n = [[r[13]] for r in main_rows]     # N
-        col_p = [[r[15]] for r in main_rows]     # P
-        col_q = [[r[16]] for r in main_rows]     # Q
+        main_sheet.update(f"A{row_idx}:A{row_idx}", dates, value_input_option="USER_ENTERED")
+        main_sheet.update(f"B{row_idx}:I{row_idx}", times, value_input_option="USER_ENTERED")
+        main_sheet.update(f"N{row_idx}:N{row_idx}", col_n, value_input_option="USER_ENTERED")
+        main_sheet.update(f"P{row_idx}:P{row_idx}", col_p, value_input_option="USER_ENTERED")
+        main_sheet.update(f"Q{row_idx}:Q{row_idx}", col_q, value_input_option="USER_ENTERED")
 
-        # Оновлюємо лише потрібні діапазони
-        main_sheet.update(f"A{start_row}:A{end_row}", dates, value_input_option="USER_ENTERED")
-        main_sheet.update(f"B{start_row}:I{end_row}", times, value_input_option="USER_ENTERED")
-        main_sheet.update(f"N{start_row}:N{end_row}", col_n, value_input_option="USER_ENTERED")
-        main_sheet.update(f"P{start_row}:P{end_row}", col_p, value_input_option="USER_ENTERED")
-        main_sheet.update(f"Q{start_row}:Q{end_row}", col_q, value_input_option="USER_ENTERED")
+        updated_dates.append(date_str)
+        logger.info("✅ Оновлено/записано дані для дати %s (рядок %s)", date_str, row_idx)
 
-        logger.info(
-            "✅ Основна вкладка оновлена (рядки %s-%s; колонки A,B..I,N,P,Q)",
-            start_row,
-            end_row,
-        )
+    logger.info(
+        "✅ Експорт завершено! Оновлено днів: %s; пропущено днів (вже були в Sheets): %s",
+        len(updated_dates),
+        len(skipped_dates),
+    )
 
-    logger.info("✅ Експорт завершено!")
+    return {"updated": updated_dates, "skipped": skipped_dates}

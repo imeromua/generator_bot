@@ -44,7 +44,7 @@ async def show_sync_menu(cb: types.CallbackQuery):
     txt = (
         "🔄 <b>Обмін з Google Sheets</b>\n\n"
         "📥 <b>Імпорт</b> — читає дані з основної вкладки Sheets і повністю перезаписує БД.\n"
-        "📤 <b>Експорт</b> — записує дані з БД в основну вкладку Sheets.\n\n"
+        "📤 <b>Експорт</b> — дописує/оновлює дні з логів БД в основну вкладку Sheets, не чіпаючи дні, де дані вже є.\n\n"
         "⚠️ Імпорт повністю очищає БД перед завантаженням (потрібне підтвердження).\n"
         "⚠️ Ніяких фонових синхронізацій, тільки ручні операції.\n"
     )
@@ -117,8 +117,10 @@ async def sync_export_confirm(cb: types.CallbackQuery):
     txt = (
         "⚠️ <b>Підтвердження експорту</b>\n\n"
         "Експорт зробить наступне:\n"
-        "• Оновить основну вкладку Sheets (A,B..I,N,P,Q) за поточними даними з БД\n\n"
-        "Це безпечно для БД, але може затерти ручні правки в основній вкладці."
+        "• Для кожного дня з логів БД допише/оновить дані в основній вкладці Sheets,\n"
+        "  якщо для цієї дати (B..I,N,P,Q) ще порожні.\n"
+        "• Дні, де в Sheets уже є дані в B..I,N,P,Q, будуть пропущені без змін.\n\n"
+        "Це безпечно для БД, але може дописувати/оновлювати незаповнені дні в таблиці."
     )
 
     await cb.message.edit_text(txt, reply_markup=_export_confirm_kb())
@@ -134,11 +136,31 @@ async def sync_export_execute(cb: types.CallbackQuery):
     await cb.message.edit_text("⏳ <b>Експорт в Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
     try:
-        await asyncio.to_thread(full_export)
+        result = await asyncio.to_thread(full_export)
+        updated = []
+        skipped = []
+        if isinstance(result, dict):
+            updated = result.get("updated", []) or []
+            skipped = result.get("skipped", []) or []
+
+        def _fmt_dates(dates: list[str]) -> str:
+            out = []
+            for d in dates:
+                try:
+                    dt = datetime.strptime(d, "%Y-%m-%d")
+                    out.append(dt.strftime("%d.%m.%Y"))
+                except Exception:
+                    out.append(d)
+            return ", ".join(out) if out else "—"
+
+        updated_txt = _fmt_dates(updated)
+        skipped_txt = _fmt_dates(skipped)
 
         txt = (
             "✅ <b>Експорт завершено!</b>\n\n"
-            "📄 Дані з БД записані в основну вкладку Sheets (A,B..I,N,P,Q)."
+            "📄 Дані з БД записані в основну вкладку Sheets (A,B..I,N,P,Q).\n\n"
+            f"🟢 Оновлено днів: <b>{len(updated)}</b> ({updated_txt})\n"
+            f"🟡 Пропущено днів (дані вже є в Sheets): <b>{len(skipped)}</b> ({skipped_txt})"
         )
         await cb.message.edit_text(txt, reply_markup=_back_kb())
 
