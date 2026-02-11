@@ -15,26 +15,58 @@ def main_dashboard(role, active_shift, completed_shifts):
             "x": "⚡ Екстра",
         }.get(code, code.upper())
 
+    # Telegram Bot API 9.4: colored buttons via `style` field
+    # Styles: primary (blue), success (green), danger (red), default (gray)
     if active_shift != 'none':
         code = active_shift.split("_")[0]
-        kb.append([InlineKeyboardButton(text=f"🏁 {pretty(code)} СТОП", callback_data=f"{code}_end")])
+        kb.append([
+            InlineKeyboardButton(
+                text=f"🏁 {pretty(code)} СТОП",
+                callback_data=f"{code}_end",
+                style="danger",
+            )
+        ])
     else:
         if 'm' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text=f"{pretty('m')} СТАРТ", callback_data="m_start")])
+            kb.append([
+                InlineKeyboardButton(
+                    text=f"{pretty('m')} СТАРТ",
+                    callback_data="m_start",
+                    style="success",
+                )
+            ])
         elif 'd' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text=f"{pretty('d')} СТАРТ", callback_data="d_start")])
+            kb.append([
+                InlineKeyboardButton(
+                    text=f"{pretty('d')} СТАРТ",
+                    callback_data="d_start",
+                    style="success",
+                )
+            ])
         elif 'e' not in completed_shifts:
-            kb.append([InlineKeyboardButton(text=f"{pretty('e')} СТАРТ", callback_data="e_start")])
+            kb.append([
+                InlineKeyboardButton(
+                    text=f"{pretty('e')} СТАРТ",
+                    callback_data="e_start",
+                    style="success",
+                )
+            ])
 
         if {'m', 'd', 'e'}.issubset(completed_shifts) and ('x' not in completed_shifts):
-            kb.append([InlineKeyboardButton(text=f"{pretty('x')} СТАРТ", callback_data="x_start")])
+            kb.append([
+                InlineKeyboardButton(
+                    text=f"{pretty('x')} СТАРТ",
+                    callback_data="x_start",
+                    style="success",
+                )
+            ])
 
     kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
-    kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init")])
+    kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init", style="primary")])
     kb.append([InlineKeyboardButton(text="🕘 Останні події", callback_data="events_last")])
 
     if role == 'admin':
-        kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home")])
+        kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home", style="primary")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -54,6 +86,7 @@ def admin_panel():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+
 def sync_menu():
     kb = [
         [InlineKeyboardButton(text="📥 Імпорт з Google Sheets", callback_data="sync_import")],
@@ -61,6 +94,7 @@ def sync_menu():
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
 
 
 def correction_menu():
@@ -75,8 +109,10 @@ def correction_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+
 def back_to_corr():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
+
 
 
 def schedule_date_selector(today_str, tom_str):
@@ -89,6 +125,7 @@ def schedule_date_selector(today_str, tom_str):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
 
 
 def schedule_grid(date_str, is_today_and_working=False):
@@ -115,6 +152,7 @@ def schedule_grid(date_str, is_today_and_working=False):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+
 def maintenance_menu():
     kb = [
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
@@ -125,6 +163,7 @@ def maintenance_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+
 def drivers_list(drivers):
     kb = []
     for d in drivers:
@@ -133,16 +172,20 @@ def drivers_list(drivers):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+
 def back_to_admin():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]])
+
 
 
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="home")]])
 
 
+
 def back_to_mnt():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
+
 
 
 def after_add_menu():
