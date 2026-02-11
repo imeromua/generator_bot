@@ -93,44 +93,11 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     except Exception:
         pass
 
-    offline_mark = ""
-    try:
-        if db.sheet_is_offline():
-            try:
-                forced_offline = bool(db.sheet_is_forced_offline())
-            except Exception:
-                forced_offline = False
-
-            since_s = _fmt_state_ts(db.get_state_value("sheet_offline_since_ts", ""))
-            last_ok_s = _fmt_state_ts(db.get_state_value("sheet_last_ok_ts", ""))
-
-            if forced_offline:
-                offline_mark = "🔌 <b>OFFLINE (примусово)</b> — синхронізацію з Google Sheets вимкнено адміном.\n"
-                if last_ok_s:
-                    offline_mark += f"Останній успішний доступ: <b>{last_ok_s}</b>\n"
-                if since_s:
-                    offline_mark += f"OFFLINE з: <b>{since_s}</b>\n"
-                offline_mark += "Дані накопичуються локально; синхронізація відновиться після вимкнення OFFLINE в адмінці.\n"
-                offline_mark += "➖➖➖➖➖➖\n"
-            else:
-                if since_s:
-                    offline_mark = (
-                        f"🔌 <b>OFFLINE (авто)</b> — немає доступу до Google Sheets з {since_s}.\n"
-                        f"Дані накопичуються локально; синхронізація відбудеться після відновлення доступу.\n"
-                        f"➖➖➖➖➖➖\n"
-                    )
-                else:
-                    offline_mark = (
-                        "🔌 <b>OFFLINE (авто)</b> — немає доступу до Google Sheets.\n"
-                        "Дані накопичуються локально; синхронізація відбудеться після відновлення доступу.\n"
-                        "➖➖➖➖➖➖\n"
-                    )
-
-    except Exception:
-        pass
+    # REMOVED: OFFLINE mode message - not relevant for manual sync workflow (SHEETS_RUNTIME_ENABLED=0)
+    # Users now manually import/export data via admin commands
 
     txt = (
-        f"{mode_mark}{offline_mark}"
+        f"{mode_mark}"
         f"🔋 <b>Генератор:</b> {status_icon}\n"
         f"⛽ Залишок палива{fuel_mark}: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
