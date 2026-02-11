@@ -1,13 +1,18 @@
 """Модуль імпорту з Google Sheets в БД.
 
-Остаточний шаблон імпорту (без вкладки "ПОДІЇ"):
-- Читаємо ТІЛЬКИ основну вкладку.
-- НЕ відновлюємо logs з окремої вкладки подій.
-- Відновлюємо logs тільки з даних основної вкладки: часи старт/стоп змін + refills.
+Фінальний шаблон (з дворядковим заголовком, як у "ЛЮТИЙ"):
+- Перші 2 рядки в основній вкладці — заголовки.
+- Далі йдуть дані.
 
-Важливо:
-- Витрата палива береться з ENV через config.FUEL_CONSUMPTION.
-- Назва вкладки логів LOGS_SHEET_NAME більше не використовується для імпорту.
+Імпорт:
+- Читаємо ТІЛЬКИ основну вкладку.
+- НЕ читаємо/не відновлюємо з вкладки "ПОДІЇ".
+- Відновлюємо logs тільки з рядків основної вкладки (часи змін + refills).
+- Довідники водіїв/персоналу імпортуємо з колонок по НАЗВАХ (а не по індексах), бо колонки можуть зсуватись.
+
+Примітка:
+- У шаблоні злиті/дворядкові заголовки, тому для знаходження колонок ми будуємо "склеєні" назви:
+  верхній_рядок + ":" + нижній_рядок (або просто нижній, якщо верхній порожній).
 """
 
 import logging
@@ -21,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 def _fuel_rate() -> float:
-    """Єдине джерело правди для витрати палива (л/год)"""
     try:
         return float(getattr(config, "FUEL_CONSUMPTION", 0.0) or 0.0)
     except Exception:
@@ -29,11 +33,10 @@ def _fuel_rate() -> float:
 
 
 def _parse_date(date_str: str) -> str | None:
-    """Парсить дату, підтримує формати DD.MM.YYYY та YYYY-MM-DD."""
-    if not date_str or not date_str.strip():
+    if not date_str or not str(date_str).strip():
         return None
 
-    s = date_str.strip()
+    s = str(date_str).strip()
 
     try:
         dt = datetime.strptime(s, "%d.%m.%Y")
@@ -51,10 +54,6 @@ def _parse_date(date_str: str) -> str | None:
 
 
 def _parse_time(time_str: str) -> str | None:
-    """Парсить час з Sheets у HH:MM:SS.
-
-    Приймає HH:MM, HH:MM:SS, а також значення, що можуть прийти як 08:50:00.
-    """
     if not time_str or not str(time_str).strip():
         return None
     try:
@@ -69,8 +68,43 @@ def _parse_time(time_str: str) -> str | None:
         return None
 
 
+def _norm(s: str) -> str:
+    return (s or "").strip().lower().replace("\n", " ")
+
+
+def _build_header_map(header_top: list[str], header_bottom: list[str]) -> dict[str, int]:
+    """Build map from normalized header label to column index.
+
+    label = top + ':' + bottom (if top not empty) else bottom.
+    Also stores bottom-only and top-only variants for resilience.
+    """
+    m: dict[str, int] = {}
+    max_len = max(len(header_top), len(header_bottom))
+    for i in range(max_len):
+        top = header_top[i] if i < len(header_top) else ""
+        bot = header_bottom[i] if i < len(header_bottom) else ""
+        top_n = _norm(top)
+        bot_n = _norm(bot)
+
+        if bot_n:
+            m.setdefault(bot_n, i)
+        if top_n:
+            m.setdefault(top_n, i)
+        if top_n and bot_n:
+            m.setdefault(f"{top_n}:{bot_n}", i)
+
+    return m
+
+
+def _get(row: list[str], idx: int | None) -> str:
+    if idx is None:
+        return ""
+    if idx < 0:
+        return ""
+    return (row[idx] if idx < len(row) else "") or ""
+
+
 def _clear_db():
-    """Очищає БД перед імпортом."""
     logger.info("🧹 Очищаємо БД перед імпортом...")
     with get_connection() as conn:
         conn.execute("DELETE FROM logs")
@@ -84,7 +118,6 @@ def _clear_db():
 
 
 def _restore_generator_state():
-    """Відновлює generator_state з логів."""
     logger.info("🔧 Відновлюємо стан генератора з логів...")
 
     conn = get_connection()
@@ -162,44 +195,78 @@ def _restore_generator_state():
         conn.close()
 
 
-def _import_main_sheet_data(data_rows):
-    """Імпорт даних з основної вкладки (без вкладки подій)."""
+def _import_main_sheet_data(all_values: list[list[str]]):
+    """Імпорт даних з основної вкладки (2 рядки заголовків + дані)."""
+    if len(all_values) < 3:
+        logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків).")
+        return
+
+    header_top = all_values[0]
+    header_bottom = all_values[1]
+    data_rows = all_values[2:]
+
+    hmap = _build_header_map(header_top, header_bottom)
+
+    # Required columns (by label)
+    idx_date = hmap.get(_norm("дата"))
+
+    idx_m_start = hmap.get(_norm("1:початок, г")) or hmap.get(_norm("початок, г"))
+    idx_m_end = hmap.get(_norm("1:кінець, г")) or hmap.get(_norm("кінець, г"))
+
+    idx_d_start = hmap.get(_norm("2:початок, г"))
+    idx_d_end = hmap.get(_norm("2:кінець, г"))
+
+    idx_e_start = hmap.get(_norm("3:початок, г"))
+    idx_e_end = hmap.get(_norm("3:кінець, г"))
+
+    idx_x_start = hmap.get(_norm("4:початок, г"))
+    idx_x_end = hmap.get(_norm("4:кінець, г"))
+
+    idx_refill = hmap.get(_norm("привезено палива"))
+    idx_receipt = hmap.get(_norm("номер чека"))
+    idx_driver_day = hmap.get(_norm("паливо превіз"))
+
+    idx_drivers_dict = hmap.get(_norm("водіїї"))
+    idx_personnel_dict = hmap.get(_norm("персонал"))
+
+    logger.info(
+        "📌 Header map найдено: "
+        f"date={idx_date}, m=({idx_m_start},{idx_m_end}), d=({idx_d_start},{idx_d_end}), "
+        f"e=({idx_e_start},{idx_e_end}), x=({idx_x_start},{idx_x_end}), "
+        f"refill={idx_refill}, receipt={idx_receipt}, driver_day={idx_driver_day}, "
+        f"drivers_dict={idx_drivers_dict}, personnel_dict={idx_personnel_dict}"
+    )
+
     conn = get_connection()
 
     all_drivers = set()
     all_personnel = set()
 
     for row_idx, row in enumerate(data_rows, start=3):
-        # Нам потрібні AB (index 27) і AC (28) для довідників
-        if len(row) < 29:
-            row.extend([""] * (29 - len(row)))
-
-        date_str = _parse_date(row[0])
-
-        # Довідники: AB=водії, AC=персонал (беремо завжди, навіть якщо дати нема)
-        driver_ref = (row[27] or "").strip()
+        # dictionaries
+        driver_ref = _get(row, idx_drivers_dict).strip()
         if driver_ref:
             for d in driver_ref.split(","):
                 d_clean = d.strip()
                 if d_clean:
                     all_drivers.add(d_clean)
 
-        personnel_ref = (row[28] or "").strip()
+        personnel_ref = _get(row, idx_personnel_dict).strip()
         if personnel_ref:
             for p in personnel_ref.split(","):
                 p_clean = p.strip()
                 if p_clean:
                     all_personnel.add(p_clean)
 
+        date_str = _parse_date(_get(row, idx_date))
         if not date_str:
             continue
 
-        # Зміни: беремо тільки часи, відповідальних не імпортуємо
         shifts = [
-            ("m", row[1], row[2]),
-            ("d", row[3], row[4]),
-            ("e", row[5], row[6]),
-            ("x", row[7], row[8]),
+            ("m", _get(row, idx_m_start), _get(row, idx_m_end)),
+            ("d", _get(row, idx_d_start), _get(row, idx_d_end)),
+            ("e", _get(row, idx_e_start), _get(row, idx_e_end)),
+            ("x", _get(row, idx_x_start), _get(row, idx_x_end)),
         ]
 
         for shift_code, start_time, end_time in shifts:
@@ -220,8 +287,7 @@ def _import_main_sheet_data(data_rows):
                     (f"{shift_code}_end", ts, "", None, None, None),
                 )
 
-        # Заправки (один запис на день)
-        refill_str = (row[13] or "").strip()  # N
+        refill_str = _get(row, idx_refill).strip()
         if refill_str:
             try:
                 refill_amount = float(refill_str.replace(",", ".").replace(" ", ""))
@@ -229,8 +295,8 @@ def _import_main_sheet_data(data_rows):
                 refill_amount = 0.0
 
             if refill_amount > 0:
-                driver = (row[26] or "").strip()  # AA
-                receipt = (row[15] or "").strip()  # P
+                driver_day = _get(row, idx_driver_day).strip()
+                receipt = _get(row, idx_receipt).strip()
 
                 refill_time = "23:59:00"
                 for _shift_code, _st, _en in reversed(shifts):
@@ -242,36 +308,31 @@ def _import_main_sheet_data(data_rows):
                 ts = f"{date_str} {refill_time}"
                 conn.execute(
                     "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
-                    ("refill", ts, "", str(refill_amount), driver, receipt),
+                    ("refill", ts, "", str(refill_amount), driver_day, receipt),
                 )
 
-    # Запис довідників: тут була помилка — conn був закритий до вставок у попередніх версіях
-    # Тепер вставляємо ДО conn.close().
-    for driver in all_drivers:
+    # Write dictionaries
+    for d in all_drivers:
         try:
-            conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (driver,))
+            conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (d,))
         except Exception:
             try:
-                # Postgres / загальний варіант
-                conn.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (driver,))
+                conn.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (d,))
             except Exception:
                 try:
-                    conn.execute("INSERT INTO drivers (name) VALUES (?)", (driver,))
+                    conn.execute("INSERT INTO drivers (name) VALUES (?)", (d,))
                 except Exception:
                     pass
 
-    for person in all_personnel:
+    for p in all_personnel:
         try:
-            conn.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (person,))
+            conn.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (p,))
         except Exception:
             try:
-                conn.execute(
-                    "INSERT INTO personnel_names (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
-                    (person,),
-                )
+                conn.execute("INSERT INTO personnel_names (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (p,))
             except Exception:
                 try:
-                    conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (person,))
+                    conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (p,))
                 except Exception:
                     pass
 
@@ -284,7 +345,6 @@ def _import_main_sheet_data(data_rows):
 
 
 def full_import():
-    """Повний імпорт з Google Sheets в БД (тільки основна вкладка)."""
     logger.info("📥 Починаємо імпорт з Sheets в БД (безпечний режим)...")
 
     try:
@@ -299,15 +359,13 @@ def full_import():
             logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків). Імпорт скасовано для безпеки.")
             return
 
-        data_rows = all_values[2:]
-
     except Exception as e:
         logger.error(f"❌ Помилка підключення до Sheets. Імпорт скасовано, БД не змінено. Помилка: {e}")
         raise
 
     try:
         _clear_db()
-        _import_main_sheet_data(data_rows)
+        _import_main_sheet_data(all_values)
         _restore_generator_state()
         logger.info("✅ Імпорт завершено успішно!")
 
