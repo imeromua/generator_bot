@@ -1,18 +1,18 @@
 """Модуль експорту з БД в Google Sheets.
 
 Цільова логіка (за зразком таблиці):
-- Записуємо часи початку/кінця змін.
+- Записуємо часи початку/кінця до 4 змін.
 - Записуємо привезене паливо: літри (сума за день), чеки (через кому), хто привіз (через кому).
-- Записуємо відповідальних за старт/стоп по кожній зміні.
+- Технічні колонки (розхід, коефіцієнти тощо) не чіпаємо.
 
-Колонки, які заповнюємо (інші лишаємо порожніми):
+Колонки, які заповнюємо (інші лишаємо порожніми/як є):
+- A = дата (ДД.ММ.РРРР)
 - B,C,D,E,F,G,H,I = часи старт/стоп змін 1..4 (HH:MM)
 - N = привезено палива за день (сума refills)
 - P = номер(и) чека за день (через кому)
-- S,T,U,V,W,X,Y,Z = відповідальні за старт/стоп змін 1..4
-- AA = хто привіз паливо (через кому)
+- Q = хто привіз паливо (імена водіїв, через кому)
 
-Технічно оновлюємо діапазон A:AA, щоб не чіпати праві колонки, якщо вони існують.
+Інші колонки (зокрема K,L,M,O,T,U та правіше) не змінюються цим модулем.
 """
 
 import logging
@@ -26,7 +26,7 @@ from services.google_sync_parts.client import make_client, open_spreadsheet, ope
 logger = logging.getLogger(__name__)
 
 
-_MAX_COL = 27  # A..AA
+_MAX_COL = 27  # A..AA (використовуємо тільки частину колонок)
 
 
 def _logs_sheet_name() -> str:
@@ -166,10 +166,10 @@ def _build_export_rows(days_data):
         # Prepare empty row A..AA
         row = [""] * _MAX_COL
 
-        # A
+        # A: дата
         row[0] = date_fmt
 
-        # B-I shift times
+        # B-I: часи змін
         col_time = {
             "m": (1, 2),
             "d": (3, 4),
@@ -181,29 +181,17 @@ def _build_export_rows(days_data):
             row[c_start] = _time_to_hhmm(s.get("start"))
             row[c_end] = _time_to_hhmm(s.get("end"))
 
-        # N total refill liters (sum)
+        # N: total refill liters (sum)
         total_refill = sum(r[0] for r in day["refills"]) if day["refills"] else 0.0
         row[13] = f"{total_refill:.1f}" if total_refill else ""
 
-        # P receipts (comma separated)
+        # P: receipts (comma separated)
         receipts = [rec for _amt, _drv, rec in day["refills"]] if day["refills"] else []
         row[15] = _unique_join(receipts)
 
-        # S-Z responsible start/end per shift
-        col_resp = {
-            "m": (18, 19),
-            "d": (20, 21),
-            "e": (22, 23),
-            "x": (24, 25),
-        }
-        for shift, (c_s, c_e) in col_resp.items():
-            s = day["shifts"].get(shift, {})
-            row[c_s] = (s.get("start_user") or "").strip()
-            row[c_e] = (s.get("end_user") or "").strip()
-
-        # AA drivers who brought fuel (comma separated)
+        # Q: drivers who brought fuel (comma separated)
         drivers = [drv for _amt, drv, _rec in day["refills"]] if day["refills"] else []
-        row[26] = _unique_join(drivers)
+        row[16] = _unique_join(drivers)
 
         rows.append(row)
 
@@ -211,7 +199,10 @@ def _build_export_rows(days_data):
 
 
 def full_export():
-    """Інкрементальний експорт з БД в Google Sheets."""
+    """Інкрементальний експорт з БД в Google Sheets.
+
+    Оновлює тільки A,B..I,N,P,Q, не змінюючи технічні та розрахункові колонки.
+    """
     logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
 
     client = make_client()
@@ -247,8 +238,26 @@ def full_export():
             start_row = 3
 
         end_row = start_row + len(main_rows) - 1
-        main_sheet.update(f"A{start_row}:AA{end_row}", main_rows, value_input_option="USER_ENTERED")
-        logger.info(f"✅ Основна вкладка оновлена (рядки {start_row}-{end_row})")
+
+        # Формуємо окремі зрізи по колонках, які дозволено змінювати
+        dates = [[r[0]] for r in main_rows]      # A
+        times = [r[1:9] for r in main_rows]      # B..I
+        col_n = [[r[13]] for r in main_rows]     # N
+        col_p = [[r[15]] for r in main_rows]     # P
+        col_q = [[r[16]] for r in main_rows]     # Q
+
+        # Оновлюємо лише потрібні діапазони
+        main_sheet.update(f"A{start_row}:A{end_row}", dates, value_input_option="USER_ENTERED")
+        main_sheet.update(f"B{start_row}:I{end_row}", times, value_input_option="USER_ENTERED")
+        main_sheet.update(f"N{start_row}:N{end_row}", col_n, value_input_option="USER_ENTERED")
+        main_sheet.update(f"P{start_row}:P{end_row}", col_p, value_input_option="USER_ENTERED")
+        main_sheet.update(f"Q{start_row}:Q{end_row}", col_q, value_input_option="USER_ENTERED")
+
+        logger.info(
+            "✅ Основна вкладка оновлена (рядки %s-%s; колонки A,B..I,N,P,Q)",
+            start_row,
+            end_row,
+        )
 
     logs_title = _logs_sheet_name()
     logger.info(f"📄 Експортуємо вкладку {logs_title} (повна перезапис)...")
