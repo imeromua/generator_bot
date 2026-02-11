@@ -84,20 +84,25 @@ async def maybe_send_stop_reminder(
 
         # Вікно для відправки: один раз на день у проміжку [reminder_dt, close_dt)
         if (reminder_dt <= now < close_dt) and (sent_date != today_str):
-            st_time = state.get("start_time", "")
+            # FIX #29: Use correct state key 'last_start_time' instead of 'start_time'
+            st_time = state.get("last_start_time", "")
+            
             txt = (
                 f"⏰ <b>Нагадування</b>\n\n"
                 f"До кінця робочого дня лишилось <b>{reminder_min} хв</b>.\n"
                 f"Якщо генератор вже вимкнули — натисніть <b>СТОП</b> в боті, щоб закрити зміну.\n\n"
                 f"Активна зміна: <b>{active}</b>\n"
-                f"Старт був о: <b>{st_time}</b>"
             )
+            
+            # Only show start time if available
+            if st_time:
+                txt += f"Старт був о: <b>{st_time}</b>"
 
             kb_home = back_to_main()
 
             recipients = _collect_stop_reminder_recipients()
             if not recipients:
-                logger.warning("⚠️ STOP reminder: recipients list is empty")
+                logger.warning("⚠️ STOP reminder: список отримувачів порожній")
 
             for user_id in recipients:
                 await send_single_window(bot, user_id, txt, reply_markup=kb_home)
