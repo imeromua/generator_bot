@@ -64,7 +64,14 @@ class CursorProxy:
 
 
 class ConnectionProxy:
-    """Small adapter around psycopg connection to support sqlite-style SQL."""
+    """Small adapter around psycopg connection to support sqlite-style SQL.
+
+    IMPORTANT (Postgres): psycopg connections are transactional by default.
+    Many project modules use `with get_connection() as conn:` and do not call `commit()`.
+
+    To keep sqlite-like semantics and avoid silent rollbacks on context exit,
+    we enable autocommit for Postgres connections in `get_connection()`.
+    """
 
     def __init__(self, conn):
         self._conn = conn
@@ -177,7 +184,7 @@ def get_connection():
     """Returns a DB connection.
 
     - sqlite: sqlite3.Connection
-    - postgres: ConnectionProxy (psycopg connection wrapper)
+    - postgres: ConnectionProxy (psycopg connection wrapper, autocommit enabled)
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
@@ -185,6 +192,10 @@ def get_connection():
 
     ensure_postgres_database_exists()
     conn = psycopg.connect(getattr(config, "POSTGRES_DSN"))
+    try:
+        conn.autocommit = True
+    except Exception:
+        pass
     return ConnectionProxy(conn)
 
 
@@ -231,8 +242,6 @@ def init_db():
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
         logging.info("✅ Колонка receipt_number вже існує")
     except Exception:
-        # ВИПРАВЛЕННЯ: якщо в Postgres запит падає, транзакція стає ABORTED.
-        # Треба відкотити її перед виконанням ALTER TABLE.
         if _is_postgres():
             conn.rollback()
 
@@ -242,11 +251,9 @@ def init_db():
                 c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
                 logging.info("✅ Postgres: колонка receipt_number додана")
             else:
-                # SQLite: робимо ALTER TABLE
                 c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
                 logging.info("✅ SQLite: колонка receipt_number додана")
         except Exception as e:
-            # Якщо колонка вже існує, ігноруємо
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                 logging.info("✅ Колонка receipt_number вже існує")
             else:
@@ -281,7 +288,6 @@ def init_db():
             )
         except Exception:
             try:
-                # Fallback для старого SQLite або проблемних випадків
                 if _is_postgres():
                     conn.rollback()
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
