@@ -1,10 +1,9 @@
 import logging
 from datetime import datetime, timedelta, date as dt_date, time as dt_time
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 import config
 import database.db_api as db
+from keyboards.builders import back_to_main
 
 logger = logging.getLogger(__name__)
 
@@ -24,37 +23,34 @@ async def maybe_send_stop_reminder(
         reminder_min = 15
 
     try:
-        # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
         close_dt = datetime.combine(current_date, close_time).replace(tzinfo=config.KYIV)
-        
         reminder_dt = close_dt - timedelta(minutes=reminder_min)
     except Exception:
         close_dt = None
         reminder_dt = None
 
-    if reminder_dt and close_dt and state.get("status") == "ON":
+    # Важливо: нагадування потрібне навіть якщо генератор уже OFF, але зміна не закрита.
+    active = state.get("active_shift", "none")
+
+    if reminder_dt and close_dt and active != "none":
         sent_date = db.get_state_value("stop_reminder_sent_date", "") or ""
+
+        # Вікно для відправки: один раз на день у проміжку [reminder_dt, close_dt)
         if (reminder_dt <= now < close_dt) and (sent_date != today_str):
-            active = state.get("active_shift", "none")
             st_time = state.get("start_time", "")
             txt = (
                 f"⏰ <b>Нагадування</b>\n\n"
                 f"До кінця робочого дня лишилось <b>{reminder_min} хв</b>.\n"
                 f"Якщо генератор вже вимкнули — натисніть <b>СТОП</b> в боті, щоб закрити зміну.\n\n"
-                f"Поточний стан: <b>ON</b>\n"
                 f"Активна зміна: <b>{active}</b>\n"
                 f"Старт був о: <b>{st_time}</b>"
             )
 
+            kb_home = back_to_main()
+
             for admin_id in config.ADMIN_IDS:
                 try:
-                    await bot.send_message(
-                        admin_id,
-                        txt,
-                        reply_markup=InlineKeyboardMarkup(
-                            inline_keyboard=[[InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]]
-                        ),
-                    )
+                    await bot.send_message(admin_id, txt, reply_markup=kb_home)
                 except Exception as e:
                     logger.warning(f"⚠️ STOP reminder: не вдалося надіслати адміну {admin_id}: {e}")
 

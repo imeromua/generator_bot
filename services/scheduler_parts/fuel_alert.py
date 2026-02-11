@@ -4,14 +4,16 @@ from datetime import datetime
 
 import config
 import database.db_api as db
+from keyboards.builders import back_to_main
 
 logger = logging.getLogger(__name__)
 
 
 async def check_fuel_alert(bot, state: dict):
-    """
-    Перевіряє рівень палива і надсилає попередження, якщо він низький.
+    """Перевіряє рівень палива і надсилає попередження, якщо він низький.
+
     Викликається з планувальника раз на хвилину.
+    Кулдаун береться з config.FUEL_ALERT_COOLDOWN_MIN.
     """
     # Якщо функція вимкнена в конфігу (поріг 0 або менше)
     if config.FUEL_ALERT_THRESHOLD_L <= 0:
@@ -27,8 +29,9 @@ async def check_fuel_alert(bot, state: dict):
         return
 
     # Перевірка кулдауну (щоб не спамити кожну хвилину)
-    last_sent_ts_str = state.get("fuel_alert_last_sent_ts", "")
-    
+    # ВАЖЛИВО: читаємо з БД напряму, а не з `state`, щоб не залежати від складу state у scheduler_loop.
+    last_sent_ts_str = db.get_state_value("fuel_alert_last_sent_ts", "") or ""
+
     should_send = True
     now = datetime.now()
 
@@ -42,22 +45,27 @@ async def check_fuel_alert(bot, state: dict):
             # Якщо дата побита — краще надіслати, щоб не пропустити
             should_send = True
 
-    if should_send:
-        logger.warning(f"⚠️ FUEL ALERT: {current_fuel} L < {config.FUEL_ALERT_THRESHOLD_L} L")
-        
-        txt = (
-            f"⛽ <b>УВАГА! Низький рівень палива</b>\n\n"
-            f"Залишок: <b>{current_fuel:.1f} л</b>\n"
-            f"Поріг: {config.FUEL_ALERT_THRESHOLD_L} л\n\n"
-            f"<i>Заплануйте дозаправку!</i>"
-        )
+    if not should_send:
+        return
 
-        # Надсилаємо всім адмінам
-        for admin_id in config.ADMIN_IDS:
-            try:
-                await bot.send_message(admin_id, txt)
-            except Exception as e:
-                logger.error(f"Failed to send fuel alert to {admin_id}: {e}")
+    logger.warning(f"⚠️ FUEL ALERT: {current_fuel} L < {config.FUEL_ALERT_THRESHOLD_L} L")
 
-        # Оновлюємо час останньої відправки в БД
-        db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
+    txt = (
+        f"⛽ <b>УВАГА! Низький рівень палива</b>\n\n"
+        f"Залишок: <b>{current_fuel:.1f} л</b>\n"
+        f"Поріг: {config.FUEL_ALERT_THRESHOLD_L} л\n\n"
+        f"<i>Заплануйте дозаправку!</i>"
+    )
+
+    kb_home = back_to_main()
+
+    # Надсилаємо всім адмінам
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, txt, reply_markup=kb_home)
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.error(f"Failed to send fuel alert to {admin_id}: {e}")
+
+    # Оновлюємо час останньої відправки в БД
+    db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
