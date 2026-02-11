@@ -5,6 +5,7 @@ from datetime import datetime, time as dt_time
 import config
 import database.db_api as db
 from utils.time import format_hours_hhmm
+from keyboards.builders import back_to_main
 
 from services.scheduler_parts.utils import (
     schedule_to_ranges,
@@ -35,7 +36,7 @@ async def maybe_send_morning_brief(
 
     # ВИПРАВЛЕНО: .localize() -> .replace(tzinfo=...)
     target_dt = datetime.combine(current_date, brief_time).replace(tzinfo=config.KYIV)
-    
+
     diff_s = (now - target_dt).total_seconds()
 
     # Якщо бот запустили/перезапустили вже після вікна — брифінг за цей день пропускаємо
@@ -111,13 +112,15 @@ async def maybe_send_morning_brief(
             success_count = 0
             fail_count = 0
 
+            kb_home = back_to_main()
+
             for user_id, user_name in users:
                 # Брифінг тільки юзерам (не адмінам)
                 if user_id in config.ADMIN_IDS:
                     continue
 
                 try:
-                    await bot.send_message(user_id, txt)
+                    await bot.send_message(user_id, txt, reply_markup=kb_home)
                     success_count += 1
                     await asyncio.sleep(0.05)
                 except Exception as e:

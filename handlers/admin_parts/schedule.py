@@ -4,11 +4,10 @@ from datetime import datetime, timedelta
 
 from aiogram import Router, F, types
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import config
 import database.db_api as db
-from keyboards.builders import schedule_date_selector, schedule_grid
+from keyboards.builders import schedule_date_selector, schedule_grid, back_to_main
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -129,10 +128,7 @@ async def sched_notify(cb: types.CallbackQuery):
             txt += "\n"
     txt += "\n\n🔴 - Відключення\n🟢 - Світло є"
 
-    # Клавіатура для переходу в головне меню користувача
-    kb_home = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🏠 На головну", callback_data="home")]]
-    )
+    kb_home = back_to_main()
 
     users = db.get_all_users()
     count = 0
