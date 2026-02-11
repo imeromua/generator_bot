@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from aiogram import Router, F, types
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import config
 import database.db_api as db
@@ -128,13 +129,18 @@ async def sched_notify(cb: types.CallbackQuery):
             txt += "\n"
     txt += "\n\n🔴 - Відключення\n🟢 - Світло є"
 
+    # Клавіатура для переходу в головне меню користувача
+    kb_home = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🏠 На головну", callback_data="home")]]
+    )
+
     users = db.get_all_users()
     count = 0
     fail_count = 0
 
     for uid, uname in users:
         try:
-            await cb.bot.send_message(uid, txt)
+            await cb.bot.send_message(uid, txt, reply_markup=kb_home)
             count += 1
             await asyncio.sleep(0.05)
         except Exception as e:
