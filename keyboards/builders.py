@@ -16,7 +16,7 @@ def main_dashboard(role, active_shift, completed_shifts):
         }.get(code, code.upper())
 
     # Telegram Bot API 9.4: colored buttons via `style` field
-    # Styles: primary (blue), success (green), danger (red), default (gray)
+    # NOTE: use only known-safe styles (danger/primary); other values may be rejected by the API.
     if active_shift != 'none':
         code = active_shift.split("_")[0]
         kb.append([
@@ -32,7 +32,7 @@ def main_dashboard(role, active_shift, completed_shifts):
                 InlineKeyboardButton(
                     text=f"{pretty('m')} СТАРТ",
                     callback_data="m_start",
-                    style="success",
+                    style="primary",
                 )
             ])
         elif 'd' not in completed_shifts:
@@ -40,7 +40,7 @@ def main_dashboard(role, active_shift, completed_shifts):
                 InlineKeyboardButton(
                     text=f"{pretty('d')} СТАРТ",
                     callback_data="d_start",
-                    style="success",
+                    style="primary",
                 )
             ])
         elif 'e' not in completed_shifts:
@@ -48,7 +48,7 @@ def main_dashboard(role, active_shift, completed_shifts):
                 InlineKeyboardButton(
                     text=f"{pretty('e')} СТАРТ",
                     callback_data="e_start",
-                    style="success",
+                    style="primary",
                 )
             ])
 
@@ -57,7 +57,7 @@ def main_dashboard(role, active_shift, completed_shifts):
                 InlineKeyboardButton(
                     text=f"{pretty('x')} СТАРТ",
                     callback_data="x_start",
-                    style="success",
+                    style="primary",
                 )
             ])
 
@@ -86,7 +86,7 @@ def admin_panel():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
+# --- СИНХРОНІЗАЦІЯ ---
 def sync_menu():
     kb = [
         [InlineKeyboardButton(text="📥 Імпорт з Google Sheets", callback_data="sync_import")],
@@ -96,7 +96,7 @@ def sync_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
+# --- КОРЕКЦІЯ ---
 def correction_menu():
     kb = [
         [InlineKeyboardButton(text="⛽️ Корекція залишку палива", callback_data="corr_fuel_set")],
@@ -109,12 +109,11 @@ def correction_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
 def back_to_corr():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
 
 
-
+# --- ГРАФІК ---
 def schedule_date_selector(today_str, tom_str):
     d_today = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d-%m")
     d_tom = datetime.strptime(tom_str, "%Y-%m-%d").strftime("%d-%m")
@@ -125,7 +124,6 @@ def schedule_date_selector(today_str, tom_str):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
-
 
 
 def schedule_grid(date_str, is_today_and_working=False):
@@ -152,7 +150,7 @@ def schedule_grid(date_str, is_today_and_working=False):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
+# --- ТО ---
 def maintenance_menu():
     kb = [
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
@@ -163,7 +161,7 @@ def maintenance_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
+# --- ВОДІЇ ---
 def drivers_list(drivers):
     kb = []
     for d in drivers:
@@ -172,20 +170,16 @@ def drivers_list(drivers):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-
 def back_to_admin():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]])
-
 
 
 def back_to_main():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="home")]])
 
 
-
 def back_to_mnt():
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="mnt_menu")]])
-
 
 
 def after_add_menu():

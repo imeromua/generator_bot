@@ -1,5 +1,6 @@
-aiogram>=3.0,<4.0
-aiohttp>=3.8
+aiogram>=3.24.0,<4.0
+# aiohttp is a direct dependency of aiogram; keep within v3.x
+aiohttp>=3.8,<4.0
 gspread
 google-auth
 google-auth-oauthlib
