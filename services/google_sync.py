@@ -1,72 +1,30 @@
-import asyncio
+"""Legacy Google Sheets runtime sync module.
+
+Runtime synchronization with Google Sheets is fully disabled in this project.
+This module is kept only to preserve imports from older code paths.
+
+All functions here are now no-ops and only log that sync is disabled.
+Use services.sheets_import / services.sheets_export for manual operations.
+"""
+
 import logging
 
-import gspread
-
-import database.db_api as db
-import config
-
-from utils.sheets_guard import sheets_forced_offline
-
-from services.google_sync_parts.client import validate_sync_prereqs, make_client, open_spreadsheet, open_main_worksheet
-from services.google_sync_parts.offline import should_skip_offline_probe
-from services.google_sync_parts.canonical import sync_canonical_state_once
-from services.google_sync_parts.sync_cycle import run_sync_cycle
-
-logging.basicConfig(level=logging.INFO)
-
+logger = logging.getLogger(__name__)
 
 __all__ = ["sync_loop", "sync_canonical_state_once"]
 
 
-async def sync_loop():
-    """Фоновий процес синхронізації"""
-    if not config.SHEET_ID:
-        logging.error("❌ SHEET_ID не знайдено! Синхронізацію вимкнено.")
-        db.sheet_mark_fail()
-        db.sheet_check_offline()
-        return
+async def sync_loop() -> None:
+    """Disabled background sync loop (no-op)."""
+    logger.info(
+        "Google Sheets runtime sync is disabled. "
+        "Manual import/export should be used instead."
+    )
 
-    if not validate_sync_prereqs():
-        logging.error("❌ Файл service_account.json не знайдено! Синхронізацію вимкнено.")
-        db.sheet_mark_fail()
-        db.sheet_check_offline()
-        return
 
-    print(f"🚀 Google Sync запущено. Таблиця: {config.SHEET_NAME}")
-
-    while True:
-        try:
-            # Примусовий OFFLINE: взагалі не ходимо в Sheets.
-            try:
-                if sheets_forced_offline():
-                    await asyncio.sleep(60)
-                    continue
-            except Exception:
-                pass
-
-            # Авто OFFLINE: робимо пробу раз на N хвилин, щоб можна було відновитись.
-            if should_skip_offline_probe():
-                await asyncio.sleep(60)
-                continue
-
-            client = make_client()
-            ss = open_spreadsheet(client)
-            sheet = open_main_worksheet(ss)
-
-            run_sync_cycle(ss, sheet)
-
-        except gspread.exceptions.APIError as e:
-            db.sheet_mark_fail()
-            db.sheet_check_offline()
-            logging.error(f"❌ Google API Error: {e}")
-        except gspread.exceptions.SpreadsheetNotFound:
-            db.sheet_mark_fail()
-            db.sheet_check_offline()
-            logging.error(f"❌ Таблиця з ID {config.SHEET_ID} не знайдена!")
-        except Exception as e:
-            db.sheet_mark_fail()
-            db.sheet_check_offline()
-            logging.error(f"❌ Sync Error: {e}")
-
-        await asyncio.sleep(60)
+async def sync_canonical_state_once() -> None:
+    """Disabled one-shot sync (no-op)."""
+    logger.info(
+        "Google Sheets canonical state sync is disabled. "
+        "Manual import/export should be used instead."
+    )

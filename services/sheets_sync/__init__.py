@@ -1,16 +1,32 @@
-"""Helpers for Google Sheets sync.
+"""Compatibility layer for legacy Sheets sync helpers.
 
-This package is the canonical implementation used by services.google_sync.
-It also re-exports the historical API that previously lived in services/sheets_sync.py.
+Runtime synchronization has been removed. This package is kept only so that
+old imports like `from services.sheets_sync import ...` do not crash.
+
+All functions below are no-ops and should not be used in new code.
 """
 
-from .refill import parse_refill_value, update_refill_aggregates_for_date
-from .logs_tab import ensure_logs_worksheet, ensure_logs_header, upsert_log_row
+import logging
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
-    "parse_refill_value",
-    "update_refill_aggregates_for_date",
-    "ensure_logs_worksheet",
-    "ensure_logs_header",
-    "upsert_log_row",
+    "push_logs_to_sheet",
+    "pull_refill_from_sheet",
 ]
+
+
+def _log_disabled(name: str) -> None:
+    logger.info(
+        "Sheets runtime sync helper '%s' is disabled. "
+        "Use DB + manual import/export instead.",
+        name,
+    )
+
+
+def push_logs_to_sheet(*args, **kwargs) -> None:  # type: ignore[override]
+    _log_disabled("push_logs_to_sheet")
+
+
+def pull_refill_from_sheet(*args, **kwargs) -> None:  # type: ignore[override]
+    _log_disabled("pull_refill_from_sheet")
