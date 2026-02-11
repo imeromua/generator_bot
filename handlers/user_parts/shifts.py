@@ -33,11 +33,18 @@ def _within_work_window(now_t, start_t, end_t) -> bool:
 # --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
 async def gen_start(cb: types.CallbackQuery):
-    st = db.get_state()
-
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
+
+    # FIX #17: Check DB state FIRST before expensive Sheet call to reduce TOCTOU window
+    st = db.get_state()
+    if st['status'] == 'ON':
+        active = st.get('active_shift', 'none')
+        return await cb.answer(
+            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
+            show_alert=True
+        )
 
     offline = db.sheet_is_offline()
     sheet_ok, open_shift, completed_sheet, start_times = (False, None, set(), {})
@@ -54,6 +61,7 @@ async def gen_start(cb: types.CallbackQuery):
             db.sheet_mark_fail()
             db.sheet_check_offline()
 
+    # FIX #17: If Sheet says shift is open, sync and reject
     if sheet_ok and open_shift:
         sync_db_from_sheet_open_shift(open_shift, start_times)
         return await cb.answer(
@@ -65,13 +73,6 @@ async def gen_start(cb: types.CallbackQuery):
 
     if sheet_ok and shift_code in completed_sheet:
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
-
-    if st['status'] == 'ON':
-        active = st.get('active_shift', 'none')
-        return await cb.answer(
-            f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
-            show_alert=True
-        )
 
     completed_db = db.get_today_completed_shifts()
     completed_total = set(completed_db)
@@ -127,14 +128,15 @@ async def gen_start(cb: types.CallbackQuery):
 # --- СТОП ---
 @router.callback_query(F.data.in_({"m_end", "d_end", "e_end", "x_end"}))
 async def gen_stop(cb: types.CallbackQuery):
-    st = db.get_state()
-
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_", 1)[0]
+
+    # Read state before Sheet call
+    st = db.get_state()
 
     offline = db.sheet_is_offline()
     sheet_ok, open_shift, completed_sheet, start_times = (False, None, set(), {})
@@ -196,35 +198,11 @@ async def gen_stop(cb: types.CallbackQuery):
 
     now = now_kiev()
 
-    try:
-        start_date_str = st.get('start_date', '')
-        start_time_str = st.get('start_time', '')
-
-        if start_time_str:
-            if start_date_str:
-                start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
-            else:
-                start_dt = datetime.strptime(f"{now.date()} {start_time_str}", "%Y-%m-%d %H:%M")
-                if now.time() < datetime.strptime(start_time_str, "%H:%M").time():
-                    start_dt = start_dt - timedelta(days=1)
-
-            # ВИПРАВЛЕНО: .localize() замінено на .replace(tzinfo=...)
-            start_dt = start_dt.replace(tzinfo=config.KYIV)
-            
-            dur = (now - start_dt).total_seconds() / 3600.0
-        else:
-            dur = 0.0
-
-        if dur < 0 or dur > 24:
-            dur = 0.0
-
-    except Exception:
-        dur = 0.0
-
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
+    # FIX #16: Remove duplicate fuel calculation - now done inside try_stop_shift()
     res = db.try_stop_shift(cb.data, operator_personnel, now)
     if not res.get("ok"):
         if res.get("reason") == "already_off":
@@ -237,43 +215,24 @@ async def gen_stop(cb: types.CallbackQuery):
             )
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
-    # ВИПРАВЛЕНО: надійне отримання витрати палива
-    try:
-        fuel_consumption_rate = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION))
-        if fuel_consumption_rate <= 0:
-            fuel_consumption_rate = config.FUEL_CONSUMPTION
-    except Exception:
-        fuel_consumption_rate = config.FUEL_CONSUMPTION
-    
-    fuel_consumed = dur * fuel_consumption_rate
+    # FIX #16, #19: Get metrics from try_stop_shift result (calculated atomically)
+    duration_hours = res.get("duration_hours", 0.0)
+    fuel_consumed = res.get("fuel_consumed", 0.0)
+    dur_hhmm = format_hours_hhmm(duration_hours)
 
-    # Оновлюємо мотогодини
-    try:
-        db.update_hours(float(dur or 0.0))
-    except Exception:
-        pass
-
-    # Оновлюємо стан після закриття
+    # FIX #19: No need to call update_hours() - already done in try_stop_shift()
+    # Get fresh state after update
     try:
         st = db.get_state()
-    except Exception:
-        st = {}
-
-    try:
         canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
     except Exception:
         canonical_fuel = 0.0
 
-    # Відображаємо очікуваний залишок (тільки для UI)
-    remaining_est = canonical_fuel - fuel_consumed
-
-    dur_hhmm = format_hours_hhmm(dur)
-
     banner = (
         f"🏁 <b>{shift_pretty(expected_code)} закрито!</b>\n"
         f"⏱️ Працював: <b>{dur_hhmm}</b>\n"
-        f"📉 Використано (розрах.): <b>{fuel_consumed:.1f} л</b>\n"
-        f"⛽️ Залишок (за таблицею - розрах.): <b>{remaining_est:.1f} л</b>\n"
+        f"📉 Використано: <b>{fuel_consumed:.1f} л</b>\n"
+        f"⛽️ Залишок палива: <b>{canonical_fuel:.1f} л</b>\n"
         f"👤 {operator_personnel}"
     )
 
