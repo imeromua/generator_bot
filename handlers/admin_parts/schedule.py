@@ -8,9 +8,34 @@ from aiogram.exceptions import TelegramBadRequest
 import config
 import database.db_api as db
 from keyboards.builders import schedule_date_selector, schedule_grid, back_to_main
+from services.scheduler_parts.notify import send_single_window
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
+    """Returns True if callback came from an outdated message (not the tracked single-window UI)."""
+    try:
+        ui = db.get_ui_message(int(cb.from_user.id))
+    except Exception:
+        ui = None
+
+    if not ui:
+        return False
+
+    _chat_id, message_id = ui
+    try:
+        return int(cb.message.message_id) != int(message_id)
+    except Exception:
+        return False
+
+
+def _track_ui(cb: types.CallbackQuery) -> None:
+    try:
+        db.set_ui_message(int(cb.from_user.id), int(cb.message.chat.id), int(cb.message.message_id))
+    except Exception:
+        pass
 
 
 # --- 1. ГРАФІК: ВИБІР ДАТИ ---
@@ -18,6 +43,14 @@ logger = logging.getLogger(__name__)
 async def sched_select(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    # Якщо клікнули на старому повідомленні — прибираємо його
+    if _is_outdated_ui(cb):
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        return await cb.answer("✅ Оновлено (відкрийте графік з актуального меню)")
 
     now = datetime.now(config.KYIV)
 
@@ -37,6 +70,7 @@ async def sched_select(cb: types.CallbackQuery):
         f"📅 <b>Налаштування графіка</b>\n{hint}",
         reply_markup=schedule_date_selector(today_str, tom_str)
     )
+    _track_ui(cb)
 
 
 # --- 2. ГРАФІК: СІТКА ---
@@ -44,6 +78,13 @@ async def sched_select(cb: types.CallbackQuery):
 async def sched_edit(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    if _is_outdated_ui(cb):
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        return await cb.answer("✅ Оновлено (відкрийте графік з актуального меню)")
 
     try:
         date_str = cb.data.split("_")[2]
@@ -71,8 +112,8 @@ async def sched_edit(cb: types.CallbackQuery):
 
     try:
         await cb.message.edit_text(txt, reply_markup=schedule_grid(date_str, is_hot_edit))
+        _track_ui(cb)
     except TelegramBadRequest as e:
-        # нормальна ситуація при повторному натисканні тієї ж кнопки
         if "message is not modified" not in str(e).lower():
             logger.warning(f"TelegramBadRequest при редагуванні графіка: {e}")
 
@@ -85,6 +126,14 @@ async def tog_hour(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
+    # Toggle з старого повідомлення: видаляємо, щоб не залишалось сміття
+    if _is_outdated_ui(cb):
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        return await cb.answer("✅ Оновлено (відкрийте графік з актуального меню)")
+
     try:
         _, date_str, hour = cb.data.split("_")
         db.toggle_schedule(date_str, int(hour))
@@ -96,6 +145,7 @@ async def tog_hour(cb: types.CallbackQuery):
 
         try:
             await cb.message.edit_reply_markup(reply_markup=schedule_grid(date_str, is_hot_edit))
+            _track_ui(cb)
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e).lower():
                 raise
@@ -111,6 +161,13 @@ async def tog_hour(cb: types.CallbackQuery):
 async def sched_notify(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+
+    if _is_outdated_ui(cb):
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        return await cb.answer("✅ Оновлено (відкрийте графік з актуального меню)")
 
     try:
         date_str = cb.data.split("_")[2]
@@ -136,7 +193,7 @@ async def sched_notify(cb: types.CallbackQuery):
 
     for uid, uname in users:
         try:
-            await cb.bot.send_message(uid, txt, reply_markup=kb_home)
+            await send_single_window(cb.bot, int(uid), txt, reply_markup=kb_home)
             count += 1
             await asyncio.sleep(0.05)
         except Exception as e:

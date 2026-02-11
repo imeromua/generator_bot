@@ -16,23 +16,47 @@ def _get_status_emoji(is_offline: bool) -> str:
     return "🔴 Offline" if is_offline else "✅ Online"
 
 
+def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
+    """Returns True if callback came from an outdated message (not the tracked single-window UI)."""
+    try:
+        ui = db.get_ui_message(int(cb.from_user.id))
+    except Exception:
+        ui = None
+
+    if not ui:
+        return False
+
+    _chat_id, message_id = ui
+    try:
+        return int(cb.message.message_id) != int(message_id)
+    except Exception:
+        return False
+
+
 # --- ВХІД В АДМІНКУ ---
 @router.callback_query(F.data == "admin_home")
 async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
-    
+
+    # Якщо натиснули кнопку на старому повідомленні — прибираємо його
+    if _is_outdated_ui(cb):
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        return await cb.answer("✅ Оновлено (відкрийте адмінку з актуального меню)")
+
     await state.clear()
     logger.info(f"👤 Адмін {cb.from_user.id} відкрив панель")
 
     # 1. Отримуємо актуальний стан з БД
     st = db.get_state()
-    
+
     # --- СТАТУС ГЕНЕРАТОРА ---
     status = st.get("status", "OFF")
     if status == "ON":
         active_shift = st.get("active_shift", "невідомо")
-        # Прибираємо зайве з назви зміни (наприклад m_start -> m)
         shift_code = active_shift.split("_")[0].upper() if "_" in active_shift else active_shift.upper()
         status_line = f"🟢 <b>ПРАЦЮЄ</b> (Зміна: {shift_code})"
     else:
@@ -43,7 +67,7 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
         current_fuel = float(st.get("current_fuel", 0.0) or 0.0)
     except ValueError:
         current_fuel = 0.0
-    
+
     fuel_line = f"⛽ Паливо: <b>{current_fuel:.1f} л</b>"
 
     # --- СЕРВІС (ТО) ---
@@ -55,14 +79,13 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     except ValueError:
         left_hours = 0.0
 
-    # Іконка уваги, якщо до ТО мало часу
     if left_hours < 0:
         mnt_icon = "💀 <b>ПРОСТРОЧЕНО!</b>"
     elif left_hours < 20:
         mnt_icon = "⚠️"
     else:
         mnt_icon = "🔧"
-    
+
     mnt_line = f"{mnt_icon} До ТО: <b>{left_hours:.1f} год</b>"
 
     # --- СТАТУС ТАБЛИЦІ (Міні) ---
@@ -72,15 +95,20 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     except Exception:
         sheet_status = "❓ Unknown"
 
-    # Формуємо підсумковий текст
     txt = (
         f"⚙️ <b>Адмін Панель</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"{status_line}\n"
         f"{fuel_line}\n"
         f"{mnt_line}\n"
+        f"{sheet_status}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
     )
-    
-    # Використовуємо клавіатуру з builders.py
+
     await cb.message.edit_text(text=txt, reply_markup=admin_panel())
+
+    # Фіксуємо message_id як єдине вікно для адміна
+    try:
+        db.set_ui_message(int(cb.from_user.id), int(cb.message.chat.id), int(cb.message.message_id))
+    except Exception:
+        pass
