@@ -23,11 +23,11 @@ async def scheduler_loop(bot):
 
     # Стани для одноразового виконання задач на добу
     today_str = now_kiev().strftime("%Y-%m-%d")
-    
+
     # Прапорці виконання
     brief_sent_today = False
     auto_close_done_today = False
-    
+
     # Константи
     BRIEF_WINDOW = 60 * 60  # 1 година вікно для брифінгу
 
@@ -48,6 +48,10 @@ async def scheduler_loop(bot):
             try:
                 close_time = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
             except Exception:
+                logger.warning(
+                    f"⚠️ Некоректний WORK_END_TIME='{getattr(config, 'WORK_END_TIME', '')}'. "
+                    f"Використовую fallback 20:30"
+                )
                 close_time = datetime.strptime("20:30", "%H:%M").time()
 
             # 1. РАНКОВИЙ БРИФІНГ
@@ -55,7 +59,7 @@ async def scheduler_loop(bot):
                 bot, now, today_str, brief_sent_today, BRIEF_WINDOW
             )
 
-            # 2. АВТО-ЗАКРИТТЯ ЗМІНИ (о 20:30)
+            # 2. АВТО-ЗАКРИТТЯ ЗМІНИ (о WORK_END_TIME)
             auto_close_done_today, skip_rest = await maybe_auto_close_shift(
                 bot, now, close_time, auto_close_done_today
             )
@@ -72,7 +76,7 @@ async def scheduler_loop(bot):
             except Exception:
                 state = {}
 
-            # 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" (за 15 хв до кінця)
+            # 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" (за N хв до кінця)
             await maybe_send_stop_reminder(
                 bot, now, current_date, close_time, today_str, state
             )

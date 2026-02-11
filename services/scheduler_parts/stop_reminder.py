@@ -8,6 +8,56 @@ from keyboards.builders import back_to_main
 logger = logging.getLogger(__name__)
 
 
+def _get_stop_reminder_minutes() -> int:
+    """Returns reminder minutes before end of work day.
+
+    Supports the current env/config name STOP_REMINDER_MIN and keeps backward compatibility
+    with the legacy STOP_REMINDER_MIN_BEFORE_END.
+    """
+    raw = None
+    try:
+        raw = getattr(config, "STOP_REMINDER_MIN", None)
+    except Exception:
+        raw = None
+
+    if raw is None:
+        try:
+            raw = getattr(config, "STOP_REMINDER_MIN_BEFORE_END", None)
+        except Exception:
+            raw = None
+
+    try:
+        return max(1, int(raw if raw is not None else 15))
+    except Exception:
+        return 15
+
+
+def _collect_stop_reminder_recipients() -> list[int]:
+    """All users who can realistically press STOP + admins.
+
+    STOP requires personnel binding (operator name) in handlers, so we include users with
+    personnel mapping and also all admins.
+    """
+    recipients: set[int] = set()
+
+    # admins
+    try:
+        for a in (config.ADMIN_IDS or []):
+            recipients.add(int(a))
+    except Exception:
+        pass
+
+    # all users with personnel binding
+    try:
+        for user_id, _full_name, personnel_name in db.get_all_users_with_personnel():
+            if personnel_name and str(personnel_name).strip():
+                recipients.add(int(user_id))
+    except Exception:
+        pass
+
+    return sorted(recipients)
+
+
 async def maybe_send_stop_reminder(
     bot,
     now: datetime,
@@ -17,10 +67,7 @@ async def maybe_send_stop_reminder(
     state: dict,
 ):
     # === 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" ===
-    try:
-        reminder_min = max(1, int(getattr(config, "STOP_REMINDER_MIN_BEFORE_END", 15)))
-    except Exception:
-        reminder_min = 15
+    reminder_min = _get_stop_reminder_minutes()
 
     try:
         close_dt = datetime.combine(current_date, close_time).replace(tzinfo=config.KYIV)
@@ -48,10 +95,14 @@ async def maybe_send_stop_reminder(
 
             kb_home = back_to_main()
 
-            for admin_id in config.ADMIN_IDS:
+            recipients = _collect_stop_reminder_recipients()
+            if not recipients:
+                logger.warning("⚠️ STOP reminder: recipients list is empty")
+
+            for user_id in recipients:
                 try:
-                    await bot.send_message(admin_id, txt, reply_markup=kb_home)
+                    await bot.send_message(user_id, txt, reply_markup=kb_home)
                 except Exception as e:
-                    logger.warning(f"⚠️ STOP reminder: не вдалося надіслати адміну {admin_id}: {e}")
+                    logger.warning(f"⚠️ STOP reminder: не вдалося надіслати користувачу {user_id}: {e}")
 
             db.set_state("stop_reminder_sent_date", today_str)
