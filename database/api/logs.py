@@ -21,7 +21,11 @@ def get_today_completed_shifts():
 
 
 def get_last_logs(limit: int = 15):
-    """Повертає останні N подій (новіші -> старіші)."""
+    """Повертає останні N подій у хронології за часом (новіші → старіші).
+
+    Використовує ORDER BY timestamp DESC, id DESC, щоб коректно показувати
+    хронологію навіть після імпорту старих подій (коли id >, але дата <).
+    """
     try:
         lim = int(limit)
     except Exception:
@@ -34,7 +38,7 @@ def get_last_logs(limit: int = 15):
         query = """
             SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
             FROM logs
-            ORDER BY id DESC
+            ORDER BY timestamp DESC, id DESC
             LIMIT ?
         """
         return conn.execute(query, (lim,)).fetchall()
