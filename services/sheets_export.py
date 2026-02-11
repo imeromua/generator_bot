@@ -12,7 +12,7 @@
 Колонки, які заповнюємо (інші лишаємо порожніми/як є):
 - A = дата (ДД.ММ.РРРР)
 - B,C,D,E,F,G,H,I = часи старт/стоп змін 1..4 (HH:MM)
-- N = привезено палива за день (сума refills)
+- N = привезено палива за день (сума refills, як число без суфіксу .0)
 - P = номер(и) чека за день (через кому)
 - Q = хто привіз паливо (імена водіїв, через кому)
 
@@ -145,9 +145,15 @@ def _build_export_rows(days_data):
             row[c_start] = _time_to_hhmm(s.get("start"))
             row[c_end] = _time_to_hhmm(s.get("end"))
 
-        # N: total refill liters (sum)
+        # N: total refill liters (sum) — пишемо як число (int/float), без рядка "80.0"
         total_refill = sum(r[0] for r in day["refills"]) if day["refills"] else 0.0
-        row[13] = f"{total_refill:.1f}" if total_refill else ""
+        if total_refill:
+            if abs(total_refill - round(total_refill)) < 1e-6:
+                row[13] = int(round(total_refill))
+            else:
+                row[13] = round(total_refill, 1)
+        else:
+            row[13] = ""
 
         # P: receipts (comma separated)
         receipts = [rec for _amt, _drv, rec in day["refills"]] if day["refills"] else []
