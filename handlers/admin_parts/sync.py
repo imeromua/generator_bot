@@ -14,10 +14,6 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-def _logs_title() -> str:
-    return (getattr(config, "LOGS_SHEET_NAME", None) or "ПОДІЇ").strip() or "ПОДІЇ"
-
-
 def _import_confirm_kb() -> InlineKeyboardMarkup:
     kb = [
         [InlineKeyboardButton(text="✅ Підтверджую імпорт", callback_data="sync_import_execute")],
@@ -34,20 +30,23 @@ def _export_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
+def _back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="sync_menu")]]
+    )
+
+
 @router.callback_query(F.data == "sync_menu")
 async def show_sync_menu(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    logs_title = _logs_title()
-
     txt = (
-        "🔄 <b>Синхронізація з Google Sheets</b>\n\n"
-        "📥 <b>Імпорт</b> — читає дані з Sheets і перезаписує в БД\n"
-        "📤 <b>Експорт</b> — записує дані з БД у Sheets (A-AC + вкладка журналу)\n\n"
-        f"🗂 Вкладка журналу подій: <b>{logs_title}</b>\n\n"
+        "🔄 <b>Обмін з Google Sheets</b>\n\n"
+        "📥 <b>Імпорт</b> — читає дані з основної вкладки Sheets і повністю перезаписує БД.\n"
+        "📤 <b>Експорт</b> — записує дані з БД в основну вкладку Sheets.\n\n"
         "⚠️ Імпорт повністю очищає БД перед завантаженням (потрібне підтвердження).\n"
-        "⚠️ Експорт перезаписує вкладку журналу подій (потрібне підтвердження).\n"
+        "⚠️ Ніяких фонових синхронізацій, тільки ручні операції.\n"
     )
     await cb.message.edit_text(txt, reply_markup=sync_menu())
     await cb.answer()
@@ -70,7 +69,8 @@ async def sync_import_confirm(cb: types.CallbackQuery):
         "⚠️ <b>Підтвердження імпорту</b>\n\n"
         "Імпорт зробить наступне:\n"
         "• Повністю очистить БД\n"
-        "• Завантажить дані з Google Sheets\n\n"
+        "• Завантажить дані з основної вкладки Google Sheets\n"
+        "• Відновить журнал подій і стан генератора з цієї вкладки\n\n"
         "❌ <b>Цю операцію НЕМОЖЛИВО ВІДМІНИТИ!</b>\n\n"
         "Рекомендація: перед імпортом зробіть експорт як резервну копію."
     )
@@ -90,21 +90,22 @@ async def sync_import_execute(cb: types.CallbackQuery):
     try:
         await asyncio.to_thread(full_import)
 
-        logs_title = _logs_title()
         txt = (
             "✅ <b>Імпорт завершено!</b>\n\n"
-            "📄 Дані з Sheets завантажені в БД:\n"
-            "• Основна вкладка (A-AC)\n"
-            f"• Вкладка {logs_title} (опціонально)\n\n"
-            "⚠️ Старі дані БД було видалено."
+            "📄 Дані з Google Sheets завантажені в базу:\n"
+            "• розклад змін та часи роботи\n"
+            "• заправки палива\n"
+            "• журнал подій і стан генератора\n"
+            "• довідники водіїв та персоналу\n\n"
+            "⚠️ Попередні дані в БД було повністю видалено перед імпортом."
         )
-        await cb.message.edit_text(txt, reply_markup=back_to_admin())
+        await cb.message.edit_text(txt, reply_markup=_back_kb())
 
     except Exception as e:
         logger.error(f"❌ Помилка імпорту: {e}", exc_info=True)
         await cb.message.edit_text(
             f"❌ <b>Помилка імпорту</b>\n\n{e}",
-            reply_markup=back_to_admin(),
+            reply_markup=_back_kb(),
         )
 
 
@@ -113,14 +114,11 @@ async def sync_export_confirm(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
-    logs_title = _logs_title()
-
     txt = (
         "⚠️ <b>Підтвердження експорту</b>\n\n"
         "Експорт зробить наступне:\n"
-        "• Оновить основну вкладку (A-AC)\n"
-        f"• Перезапише вкладку журналу подій: <b>{logs_title}</b>\n\n"
-        "Це безпечно для БД, але може затерти ручні правки у вкладці журналу."
+        "• Оновить основну вкладку Sheets (A,B..I,N,P,Q) за поточними даними з БД\n\n"
+        "Це безпечно для БД, але може затерти ручні правки в основній вкладці."
     )
 
     await cb.message.edit_text(txt, reply_markup=_export_confirm_kb())
@@ -138,18 +136,15 @@ async def sync_export_execute(cb: types.CallbackQuery):
     try:
         await asyncio.to_thread(full_export)
 
-        logs_title = _logs_title()
         txt = (
             "✅ <b>Експорт завершено!</b>\n\n"
-            "📄 Дані з БД записані в Sheets:\n"
-            "• Основна вкладка (A-AC)\n"
-            f"• Вкладка {logs_title} (всі логи)\n"
+            "📄 Дані з БД записані в основну вкладку Sheets (A,B..I,N,P,Q)."
         )
-        await cb.message.edit_text(txt, reply_markup=back_to_admin())
+        await cb.message.edit_text(txt, reply_markup=_back_kb())
 
     except Exception as e:
         logger.error(f"❌ Помилка експорту: {e}", exc_info=True)
         await cb.message.edit_text(
             f"❌ <b>Помилка експорту</b>\n\n{e}",
-            reply_markup=back_to_admin(),
+            reply_markup=_back_kb(),
         )
