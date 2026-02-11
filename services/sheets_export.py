@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import config
-import database.db_api as db
+from database.models import get_connection
 from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def _find_last_date_in_sheet(sheet) -> str | None:
 
 def _aggregate_logs_by_date(from_date: str | None = None):
     """Групує логи по датах для експорту в основну вкладку."""
-    conn = db.get_connection()
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
