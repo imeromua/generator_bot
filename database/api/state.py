@@ -134,7 +134,41 @@ def sheet_force_online(ts: int | None = None):
 
 
 def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
-    """True якщо offline активний (авто або примусово) або якщо помилка доступу триває >= threshold_seconds."""
+    """FIX #8: Pure read operation without side effects.
+    
+    Returns True if offline is active (forced or auto) OR if access failure duration >= threshold.
+    Does NOT modify database state - use sheet_mark_offline_if_needed() for that.
+    
+    This prevents unexpected mutations during what appears to be a read-only check.
+    """
+    try:
+        if sheet_is_forced_offline():
+            return True
+
+        if str(get_state_value("sheet_offline", "0") or "0").strip() == "1":
+            return True
+
+        first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
+        if not first:
+            return False
+
+        first_ts = int(float(first))
+        if (time.time() - first_ts) >= int(threshold_seconds):
+            # FIX #8: Don't modify state here - just report the condition
+            return True
+
+        return False
+
+    except Exception:
+        return False
+
+
+def sheet_mark_offline_if_needed(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
+    """FIX #8: Separate write operation to mark offline if threshold exceeded.
+    
+    Call this explicitly when you want to transition to offline state based on failure duration.
+    Returns True if offline was marked, False otherwise.
+    """
     try:
         if sheet_is_forced_offline():
             return True
@@ -159,6 +193,7 @@ def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> 
 
 
 def sheet_is_offline() -> bool:
+    """Check if sheets is currently offline (read-only operation)."""
     return bool(sheet_check_offline())
 
 
