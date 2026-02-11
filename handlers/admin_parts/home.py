@@ -12,12 +12,8 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-def _get_status_emoji(is_offline: bool) -> str:
-    return "🔴 Offline" if is_offline else "✅ Online"
-
-
 def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
-    """Returns True if callback came from an outdated message (not the tracked single-window UI)."""
+    """Повертає True, якщо callback прийшов зі старого повідомлення (не з відстежуваного single-window UI)."""
     try:
         ui = db.get_ui_message(int(cb.from_user.id))
     except Exception:
@@ -88,12 +84,8 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
 
     mnt_line = f"{mnt_icon} До ТО: <b>{left_hours:.1f} год</b>"
 
-    # --- СТАТУС ТАБЛИЦІ (Міні) ---
-    try:
-        is_sheet_offline = db.sheet_is_offline()
-        sheet_status = _get_status_emoji(is_sheet_offline)
-    except Exception:
-        sheet_status = "❓ Unknown"
+    # REMOVED: Sheet offline status - not relevant for manual sync workflow (SHEETS_RUNTIME_ENABLED=0)
+    # Admin uses manual import/export commands instead
 
     txt = (
         f"⚙️ <b>Адмін Панель</b>\n"
@@ -101,7 +93,6 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
         f"{status_line}\n"
         f"{fuel_line}\n"
         f"{mnt_line}\n"
-        f"{sheet_status}\n"
         f"━━━━━━━━━━━━━━━━━━\n"
     )
 
