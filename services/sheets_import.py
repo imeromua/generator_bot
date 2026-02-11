@@ -137,7 +137,6 @@ def _restore_generator_state():
             except ValueError:
                 pass
 
-    # Upsert у generator_state (працює для SQLite; для Postgres потрібні $1.. але тут проект історично на SQLite)
     state_updates = [
         ("current_fuel", str(running_fuel)),
         ("total_hours", str(running_hours)),
@@ -171,21 +170,21 @@ def _import_main_sheet_data(data_rows):
     all_personnel = set()
 
     for row_idx, row in enumerate(data_rows, start=3):
-        # Підстрахуємось по довжині: нам потрібні до AA (index 26), AB (27), AC (28)
+        # Нам потрібні AB (index 27) і AC (28) для довідників
         if len(row) < 29:
             row.extend([""] * (29 - len(row)))
 
         date_str = _parse_date(row[0])
 
-        # Довідники (якщо вони є в шаблоні)
-        driver_ref = (row[27] or "").strip() if len(row) > 27 else ""
+        # Довідники: AB=водії, AC=персонал (беремо завжди, навіть якщо дати нема)
+        driver_ref = (row[27] or "").strip()
         if driver_ref:
             for d in driver_ref.split(","):
                 d_clean = d.strip()
                 if d_clean:
                     all_drivers.add(d_clean)
 
-        personnel_ref = (row[28] or "").strip() if len(row) > 28 else ""
+        personnel_ref = (row[28] or "").strip()
         if personnel_ref:
             for p in personnel_ref.split(","):
                 p_clean = p.strip()
@@ -221,7 +220,7 @@ def _import_main_sheet_data(data_rows):
                     (f"{shift_code}_end", ts, "", None, None, None),
                 )
 
-        # Заправки: літри сумою, але в logs це один запис на день (як і раніше в імпорті)
+        # Заправки (один запис на день)
         refill_str = (row[13] or "").strip()  # N
         if refill_str:
             try:
@@ -230,13 +229,10 @@ def _import_main_sheet_data(data_rows):
                 refill_amount = 0.0
 
             if refill_amount > 0:
-                # AA (index 26) - хто привіз паливо (може бути список через кому)
-                driver = (row[26] or "").strip()
-                # P (index 15) - чеки через кому
-                receipt = (row[15] or "").strip()
+                driver = (row[26] or "").strip()  # AA
+                receipt = (row[15] or "").strip()  # P
 
                 refill_time = "23:59:00"
-                # намагаємось прив'язати до останнього end_time, якщо є
                 for _shift_code, _st, _en in reversed(shifts):
                     en_p = _parse_time(_en)
                     if en_p:
@@ -249,33 +245,42 @@ def _import_main_sheet_data(data_rows):
                     ("refill", ts, "", str(refill_amount), driver, receipt),
                 )
 
-        # ТО/мотогодини з цього шаблону не імпортуємо, бо вони або відсутні, або розрахункові
-
-    conn.commit()
-
-    # Запис довідників
+    # Запис довідників: тут була помилка — conn був закритий до вставок у попередніх версіях
+    # Тепер вставляємо ДО conn.close().
     for driver in all_drivers:
         try:
             conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (driver,))
         except Exception:
             try:
-                conn.execute("INSERT INTO drivers (name) VALUES (?)", (driver,))
+                # Postgres / загальний варіант
+                conn.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (driver,))
             except Exception:
-                pass
+                try:
+                    conn.execute("INSERT INTO drivers (name) VALUES (?)", (driver,))
+                except Exception:
+                    pass
 
     for person in all_personnel:
         try:
             conn.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (person,))
         except Exception:
             try:
-                conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (person,))
+                conn.execute(
+                    "INSERT INTO personnel_names (name) VALUES (?) ON CONFLICT(name) DO NOTHING",
+                    (person,),
+                )
             except Exception:
-                pass
+                try:
+                    conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (person,))
+                except Exception:
+                    pass
 
     conn.commit()
     conn.close()
 
     logger.info(f"✅ Імпортовано рядків: {len(data_rows)}")
+    logger.info(f"🚙 Імпортовано водіїв (довідник): {len(all_drivers)}")
+    logger.info(f"👥 Імпортовано персонал (довідник): {len(all_personnel)}")
 
 
 def full_import():
