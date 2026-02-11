@@ -5,6 +5,11 @@
 - Записуємо привезене паливо: літри (сума за день), чеки (через кому), хто привіз (через кому).
 - Технічні колонки (розхід, коефіцієнти тощо) не чіпаємо.
 
+Семантика експорту:
+- Не чіпаємо попередні дні.
+- Оновлюємо лише поточний день (сьогодні за київським часом) та всі наступні дні,
+  якщо для них уже є логи в БД.
+
 Колонки, які заповнюємо (інші лишаємо порожніми/як є):
 - A = дата (ДД.ММ.РРРР)
 - B,C,D,E,F,G,H,I = часи старт/стоп змін 1..4 (HH:MM)
@@ -49,6 +54,7 @@ def _find_last_date_in_sheet(sheet) -> str | None:
     """Знаходить останню дату в колонці A (формат DD.MM.YYYY).
 
     Повертає дату у форматі YYYY-MM-DD або None якщо таблиця порожня.
+    Використовується лише для діагностики, а не для обмеження експорту.
     """
     try:
         col_a = sheet.col_values(1)
@@ -66,13 +72,13 @@ def _find_last_date_in_sheet(sheet) -> str | None:
                 break
 
         if not last_date_str:
-            logger.info("📋 Немає даних в Sheets, експортуємо всі дані")
+            logger.info("📋 Немає дат у колонці A, експортуємо всі дані")
             return None
 
         try:
             dt = datetime.strptime(last_date_str, "%d.%m.%Y")
             result = dt.strftime("%Y-%m-%d")
-            logger.info(f"📅 Остання дата в Sheets: {last_date_str} ({result})")
+            logger.info(f"📅 Остання дата в Sheets (колонка A): {last_date_str} ({result})")
             return result
         except Exception as e:
             logger.warning(f"⚠️ Не вдалося розпарсити останню дату '{last_date_str}': {e}")
@@ -84,7 +90,10 @@ def _find_last_date_in_sheet(sheet) -> str | None:
 
 
 def _aggregate_logs_by_date(from_date: str | None = None):
-    """Групує логи по датах для експорту в основну вкладку."""
+    """Групує логи по датах для експорту в основну вкладку.
+
+    Якщо from_date задано, залишаються тільки дні >= from_date.
+    """
     conn = get_connection()
     cur = conn.cursor()
 
@@ -196,7 +205,8 @@ def _build_export_rows(days_data):
 def full_export():
     """Інкрементальний експорт з БД в Google Sheets.
 
-    Оновлює тільки A,B..I,N,P,Q, не змінюючи технічні та розрахункові колонки.
+    Не чіпає попередні дні, оновлює тільки поточний день та всі наступні дні,
+    для яких у БД є логи.
     """
     logger.info("📤 Починаємо експорт з БД в Sheets (інкрементальний)...")
 
@@ -204,31 +214,40 @@ def full_export():
     ss = open_spreadsheet(client)
     main_sheet = open_main_worksheet(ss)
 
-    last_date = _find_last_date_in_sheet(main_sheet)
+    _ = _find_last_date_in_sheet(main_sheet)  # тільки для логів, логіку експорту не впливає
 
-    days_data = _aggregate_logs_by_date(from_date=last_date)
+    today_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
+    logger.info(f"📆 Експортуємо дані, починаючи з {today_str} (включно)")
+
+    days_data = _aggregate_logs_by_date(from_date=today_str)
 
     if not days_data:
-        logger.info("ℹ️ Немає нових даних для експорту")
+        logger.info("ℹ️ Немає нових даних для експорту (логів за сьогодні і пізніше немає)")
         return
 
     main_rows = _build_export_rows(days_data)
-    logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {last_date or 'початку'})")
+    logger.info(f"📄 Підготовлено {len(main_rows)} рядків для основної вкладки (від {today_str})")
 
     if main_rows:
-        if last_date:
-            all_values = main_sheet.get_all_values()
-            start_row = 3
+        all_values = main_sheet.get_all_values()
 
-            last_date_fmt = datetime.strptime(last_date, "%Y-%m-%d").strftime("%d.%m.%Y")
-            for i, row in enumerate(all_values[2:], start=3):
-                if row and row[0].strip() == last_date_fmt:
+        start_row = 3
+        dates_in_sheet = [row[0].strip() if row else "" for row in all_values[2:]]
+        if dates_in_sheet:
+            # Знаходимо перший рядок з датою >= сьогоднішньої або перший порожній
+            today_fmt = datetime.strptime(today_str, "%Y-%m-%d").strftime("%d.%m.%Y")
+            for i, date_cell in enumerate(dates_in_sheet, start=3):
+                if not date_cell:
                     start_row = i
-                    logger.info(f"📍 Знайдено останню дату в рядку {start_row}, перезаписуємо від нього")
                     break
-            else:
-                start_row = len(all_values) + 1
-                logger.info(f"📍 Останню дату не знайдено в таблиці, дописуємо в кінець (рядок {start_row})")
+                try:
+                    # якщо дата у форматі DD.MM.YYYY і >= сьогодні — оновлюємо з цього рядка
+                    dt = datetime.strptime(date_cell, "%d.%m.%Y")
+                    if dt >= datetime.strptime(today_fmt, "%d.%m.%Y"):
+                        start_row = i
+                        break
+                except Exception:
+                    continue
         else:
             start_row = 3
 
