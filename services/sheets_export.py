@@ -29,11 +29,6 @@ logger = logging.getLogger(__name__)
 _MAX_COL = 27  # A..AA (використовуємо тільки частину колонок)
 
 
-def _logs_sheet_name() -> str:
-    """Єдине джерело правди для назви вкладки подій."""
-    return (getattr(config, "LOGS_SHEET_NAME", None) or "ПОДІЇ").strip() or "ПОДІЇ"
-
-
 def _parse_ts(ts_str: str) -> datetime | None:
     """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)."""
     if not ts_str:
@@ -258,50 +253,5 @@ def full_export():
             start_row,
             end_row,
         )
-
-    logs_title = _logs_sheet_name()
-    logger.info(f"📄 Експортуємо вкладку {logs_title} (повна перезапис)...")
-
-    try:
-        events_sheet = ss.worksheet(logs_title)
-    except Exception:
-        events_sheet = ss.add_worksheet(logs_title, rows=10000, cols=7)
-
-    events_sheet.clear()
-    events_sheet.update("A1:G1", [["Дата", "Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]])
-
-    conn = db.get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-        FROM logs
-        ORDER BY timestamp ASC
-    """
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    events = []
-    for event, ts_str, user, value, driver, receipt in rows:
-        dt = _parse_ts(ts_str)
-        if not dt:
-            continue
-
-        events.append(
-            [
-                dt.strftime("%d.%m.%Y"),
-                dt.strftime("%H:%M:%S"),
-                event,
-                user or "",
-                value or "",
-                driver or "",
-                receipt or "",
-            ]
-        )
-
-    if events:
-        events_sheet.update(f"A2:G{len(events) + 1}", events, value_input_option="USER_ENTERED")
-        logger.info(f"✅ Вкладка {logs_title} оновлена ({len(events)} подій)")
 
     logger.info("✅ Експорт завершено!")
