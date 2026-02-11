@@ -1,6 +1,6 @@
 """Модуль імпорту з Google Sheets в БД.
 
-Фінальний шаблон (з дворядковим заголовком, як у "ЛЮТИЙ"):
+Фінальний спрощений шаблон (дворядковий заголовок):
 - Перші 2 рядки в основній вкладці — заголовки.
 - Далі йдуть дані.
 
@@ -8,11 +8,12 @@
 - Читаємо ТІЛЬКИ основну вкладку.
 - НЕ читаємо/не відновлюємо з вкладки "ПОДІЇ".
 - Відновлюємо logs тільки з рядків основної вкладки (часи змін + refills).
-- Довідники водіїв/персоналу імпортуємо з колонок по НАЗВАХ (а не по індексах), бо колонки можуть зсуватись.
+- Довідники водіїв/персоналу імпортуємо з колонок по НАЗВАХ.
 
-Примітка:
-- У шаблоні злиті/дворядкові заголовки, тому для знаходження колонок ми будуємо "склеєні" назви:
-  верхній_рядок + ":" + нижній_рядок (або просто нижній, якщо верхній порожній).
+Службові колонки:
+- Якщо у таблиці є службові колонки T, U — ми їх ігноруємо (по суті, нічого не змінюємо,
+  бо імпорт працює по назвах колонок; але ми додаємо захист, щоб випадково не сприйняти
+  їх як "ВОДІЇЇ"/"ПЕРСОНАЛ" тощо).
 """
 
 import logging
@@ -72,34 +73,41 @@ def _norm(s: str) -> str:
     return (s or "").strip().lower().replace("\n", " ")
 
 
-def _build_header_map(header_top: list[str], header_bottom: list[str]) -> dict[str, int]:
-    """Build map from normalized header label to column index.
+def _is_service_col_header(label_norm: str) -> bool:
+    """Ignore service headers like 't', 'u', 'службова', etc."""
+    if not label_norm:
+        return True
+    if label_norm in {"t", "u"}:
+        return True
+    if "служб" in label_norm:
+        return True
+    return False
 
-    label = top + ':' + bottom (if top not empty) else bottom.
-    Also stores bottom-only and top-only variants for resilience.
-    """
+
+def _build_header_map(header_top: list[str], header_bottom: list[str]) -> dict[str, int]:
     m: dict[str, int] = {}
     max_len = max(len(header_top), len(header_bottom))
+
     for i in range(max_len):
         top = header_top[i] if i < len(header_top) else ""
         bot = header_bottom[i] if i < len(header_bottom) else ""
+
         top_n = _norm(top)
         bot_n = _norm(bot)
 
-        if bot_n:
+        # do not store service-only headers
+        if bot_n and not _is_service_col_header(bot_n):
             m.setdefault(bot_n, i)
-        if top_n:
+        if top_n and not _is_service_col_header(top_n):
             m.setdefault(top_n, i)
-        if top_n and bot_n:
+        if top_n and bot_n and (not _is_service_col_header(top_n)) and (not _is_service_col_header(bot_n)):
             m.setdefault(f"{top_n}:{bot_n}", i)
 
     return m
 
 
 def _get(row: list[str], idx: int | None) -> str:
-    if idx is None:
-        return ""
-    if idx < 0:
+    if idx is None or idx < 0:
         return ""
     return (row[idx] if idx < len(row) else "") or ""
 
@@ -196,7 +204,6 @@ def _restore_generator_state():
 
 
 def _import_main_sheet_data(all_values: list[list[str]]):
-    """Імпорт даних з основної вкладки (2 рядки заголовків + дані)."""
     if len(all_values) < 3:
         logger.warning("⚠️ Таблиця виглядає порожньою (менше 3 рядків).")
         return
@@ -207,9 +214,10 @@ def _import_main_sheet_data(all_values: list[list[str]]):
 
     hmap = _build_header_map(header_top, header_bottom)
 
-    # Required columns (by label)
     idx_date = hmap.get(_norm("дата"))
 
+    # shifts: in simplified template there are 4 pairs of times without group labels, so rely on positions by title only
+    # However for compatibility with old grouped header we also try '1:..' etc.
     idx_m_start = hmap.get(_norm("1:початок, г")) or hmap.get(_norm("початок, г"))
     idx_m_end = hmap.get(_norm("1:кінець, г")) or hmap.get(_norm("кінець, г"))
 
@@ -242,8 +250,7 @@ def _import_main_sheet_data(all_values: list[list[str]]):
     all_drivers = set()
     all_personnel = set()
 
-    for row_idx, row in enumerate(data_rows, start=3):
-        # dictionaries
+    for row in data_rows:
         driver_ref = _get(row, idx_drivers_dict).strip()
         if driver_ref:
             for d in driver_ref.split(","):
@@ -311,7 +318,6 @@ def _import_main_sheet_data(all_values: list[list[str]]):
                     ("refill", ts, "", str(refill_amount), driver_day, receipt),
                 )
 
-    # Write dictionaries
     for d in all_drivers:
         try:
             conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (d,))
