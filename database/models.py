@@ -140,8 +140,9 @@ def ensure_postgres_database_exists():
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is not set")
 
+    # FIX #4: Add connection timeout
     try:
-        with psycopg.connect(dsn):
+        with psycopg.connect(dsn, connect_timeout=10):
             return
     except Exception as e:
         if not _postgres_db_missing(e):
@@ -154,7 +155,7 @@ def ensure_postgres_database_exists():
     admin_dsn = (getattr(config, "POSTGRES_ADMIN_DSN", "") or "").strip() or _build_admin_dsn_from_app_dsn(dsn)
 
     try:
-        conn = psycopg.connect(admin_dsn)
+        conn = psycopg.connect(admin_dsn, connect_timeout=10)
         conn.autocommit = True
         try:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
@@ -183,12 +184,14 @@ def ensure_postgres_database_exists():
 def get_connection():
     """Returns a DB connection.
 
-    - sqlite: sqlite3.Connection
+    - sqlite: sqlite3.Connection (with isolation_level=None for autocommit)
     - postgres: ConnectionProxy (psycopg connection wrapper, autocommit enabled)
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
-        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
+        # FIX #1: Use isolation_level=None (autocommit) for SQLite to avoid locking issues
+        # This provides similar semantics to Postgres autocommit mode
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10, isolation_level=None)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
         except Exception:
@@ -196,7 +199,8 @@ def get_connection():
         return conn
 
     ensure_postgres_database_exists()
-    conn = psycopg.connect(getattr(config, "POSTGRES_DSN"))
+    # FIX #4: Add connection timeout
+    conn = psycopg.connect(getattr(config, "POSTGRES_DSN"), connect_timeout=10)
     try:
         conn.autocommit = True
     except Exception:
@@ -205,14 +209,27 @@ def get_connection():
 
 
 def begin_transaction(conn):
-    """Start a transaction in a backend-appropriate way."""
+    """Start a transaction in a backend-appropriate way.
+    
+    FIX #2: Use SERIALIZABLE isolation level for Postgres to prevent phantom reads
+    and ensure proper CAS (Compare-And-Set) operations in concurrent scenarios.
+    """
     if _is_postgres():
         try:
-            conn.execute("BEGIN")
-        except Exception:
+            # Use SERIALIZABLE for strongest isolation guarantees
+            conn.execute("BEGIN ISOLATION LEVEL SERIALIZABLE")
+        except Exception as e:
+            # FIX #3: Log errors instead of silent failures
+            logging.warning(f"Failed to begin transaction: {e}")
             pass
     else:
-        conn.execute("BEGIN IMMEDIATE")
+        # SQLite: BEGIN IMMEDIATE prevents deadlocks in concurrent writes
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except Exception as e:
+            # FIX #3: Log errors instead of silent failures
+            logging.warning(f"Failed to begin transaction: {e}")
+            pass
 
 
 def init_db():
@@ -252,6 +269,7 @@ def init_db():
         try:
             c.execute(stmt)
         except Exception as e:
+            # FIX #3: Keep warning logging for diagnostics
             logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
 
     # Міграція receipt_number для SQLite і Postgres (з транзакцією)
@@ -265,17 +283,20 @@ def init_db():
             c.execute("ALTER TABLE logs ADD COLUMN receipt_number TEXT")
             try:
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                # FIX #3: Log commit errors
+                logging.warning(f"⚠️ Помилка commit після додавання receipt_number: {e}")
             logging.info("✅ Колонка receipt_number додана")
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as re:
+                # FIX #3: Log rollback errors
+                logging.warning(f"⚠️ Помилка rollback: {re}")
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                 logging.info("✅ Колонка receipt_number вже існує")
             else:
+                # FIX #3: Keep error logging
                 logging.warning(f"⚠️ Не вдалося додати receipt_number: {e}")
 
     defaults = [
@@ -294,6 +315,7 @@ def init_db():
         ('sheet_first_fail_ts', ''),
         ('sheet_offline', '0'),
         ('sheet_offline_since_ts', ''),
+        ('sync_in_progress', '0'),  # FIX #14: Add sync lock state
     ]
 
     for k, v in defaults:
@@ -305,21 +327,24 @@ def init_db():
                 """,
                 (k, v),
             )
-        except Exception:
+        except Exception as e:
+            # FIX #3: Log upsert failures
             try:
                 if _is_postgres():
                     conn.rollback()
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
-            except Exception:
-                pass
+            except Exception as e2:
+                logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e2}")
 
     try:
         conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        # FIX #3: Log final commit errors
+        logging.warning(f"⚠️ Помилка final commit в init_db: {e}")
     try:
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        # FIX #3: Log connection close errors
+        logging.warning(f"⚠️ Помилка закриття з'єднання: {e}")
 
     logging.info("✅ База даних ініціалізована.")
