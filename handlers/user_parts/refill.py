@@ -8,6 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 import config
 import database.db_api as db
+from database.models import get_connection, begin_transaction
 from handlers.common import show_dash
 from handlers.user_parts.utils import ensure_user, get_operator_personnel_name
 from keyboards.builders import main_dashboard, drivers_list
@@ -57,6 +58,7 @@ def _refill_allowed_now() -> tuple[bool, str]:
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
 async def refill_start(cb: types.CallbackQuery, state: FSMContext):
+    # FIX #21: Only check at init, not at every step
     ok, err = _refill_allowed_now()
     if not ok:
         return await cb.answer(err, show_alert=True)
@@ -79,11 +81,7 @@ async def refill_start(cb: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(RefillForm.driver, F.data.startswith("drv_"))
 async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
-    ok, err = _refill_allowed_now()
-    if not ok:
-        await state.clear()
-        return await cb.answer(err, show_alert=True)
-
+    # FIX #21: No check here - user already started the flow
     driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(
@@ -114,7 +112,7 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
                 await msg.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text="🧻 Введіть <b>номер чека</b>:",
+                    text="🧾 Введіть <b>номер чека</b>:",
                     reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
                 )
             except TelegramBadRequest as e:
@@ -138,6 +136,7 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
 
 @router.message(RefillForm.receipt)
 async def refill_save(msg: types.Message, state: FSMContext):
+    # FIX #21: Check again only at final save to catch edge cases
     ok, err = _refill_allowed_now()
     if not ok:
         await state.clear()
@@ -198,20 +197,46 @@ async def refill_save(msg: types.Message, state: FSMContext):
             pass
         return
 
-    # Записуємо подію в лог, а також оновлюємо локальний стан в БД (state.current_fuel)
-    db.add_log("refill", operator_personnel, str(liters), driver, receipt=receipt_num)
+    # FIX #20: Wrap refill in transaction to ensure consistency
+    conn = None
     try:
-        db.update_fuel(liters)
-    except Exception:
-        # Якщо з якоїсь причини state недоступний — лог все одно залишився
-        pass
+        conn = get_connection()
+        begin_transaction(conn)
+        
+        # Add log entry
+        db.add_log("refill", operator_personnel, str(liters), driver, receipt=receipt_num, conn=conn)
+        
+        # Update fuel state atomically
+        db.update_fuel(liters, conn=conn)
+        
+        conn.commit()
+        
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        
+        await state.clear()
+        
+        err_banner = f"❌ <b>Помилка збереження заправки</b>\n\n{e}"
+        await show_dash(msg, user[0], user[1], banner=err_banner)
+        return
+        
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     await state.clear()
 
     banner = (
         f"✅ <b>Паливо прийнято</b>\n"
         f"🛢 Літри: <b>{float(liters):.1f}</b>\n"
-        f"🧻 Чек: <b>{receipt_num}</b>\n"
+        f"🧾 Чек: <b>{receipt_num}</b>\n"
         f"🚛 Водій: <b>{driver}</b>\n"
         f"👤 Відповідальний: <b>{operator_personnel}</b>"
     )
