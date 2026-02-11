@@ -6,6 +6,7 @@ from datetime import datetime
 import database.db_api as db
 from handlers.user_parts.sheets_shift import shift_pretty
 from handlers.user_parts.utils import ensure_user
+from keyboards.builders import back_to_main
 
 router = Router()
 
@@ -58,6 +59,30 @@ def _fmt_log_line(
     if event_type == "sheet_force_online":
         return f"• {ts_pretty} — 🌐 Google Sheets: <b>OFFLINE вимкнено</b> ({who})"
 
+    if event_type == "corr_fuel_set":
+        val = (value or "").strip()
+        tail = f" — <b>{val} л</b>" if val else ""
+        who_tail = f" ({who})" if who else ""
+        return f"• {ts_pretty} — ⛽ <b>Корекція палива</b>{tail}{who_tail}"
+
+    if event_type == "corr_total_hours_set":
+        val = (value or "").strip()
+        tail = f" — <b>{val} год</b>" if val else ""
+        who_tail = f" ({who})" if who else ""
+        return f"• {ts_pretty} — ⏱ <b>Корекція мотогодин</b>{tail}{who_tail}"
+
+    if event_type == "corr_last_oil_set":
+        val = (value or "").strip()
+        tail = f" — <b>{val} год</b>" if val else ""
+        who_tail = f" ({who})" if who else ""
+        return f"• {ts_pretty} — 🛢 <b>Корекція: мастило</b>{tail}{who_tail}"
+
+    if event_type == "corr_last_spark_set":
+        val = (value or "").strip()
+        tail = f" — <b>{val} год</b>" if val else ""
+        who_tail = f" ({who})" if who else ""
+        return f"• {ts_pretty} — 🕯 <b>Корекція: свічки</b>{tail}{who_tail}"
+
     val = (value or "").strip()
     tail = f" — {val}" if val else ""
     who_tail = f" ({who})" if who else ""
@@ -83,9 +108,7 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
 
         txt = "🕘 <b>Останні події</b> (15)\n\n" + "\n".join(lines)
 
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]
-    ])
+    kb = back_to_main()
 
     try:
         await cb.message.edit_text(txt, reply_markup=kb)
