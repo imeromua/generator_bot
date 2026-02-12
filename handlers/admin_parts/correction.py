@@ -32,11 +32,11 @@ def _build_correction_text() -> str:
         fuel_consumption = config.FUEL_CONSUMPTION
     
     return (
-        "🧮 <b>Корекція</b>\n\n"
+        "🧩 <b>Корекція</b>\n\n"
         f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
-        f"⏱ Мотогодини (total): <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
-        f"🛢 Остання заміна мастила: <b>{float(st.get('last_oil', 0.0) or 0.0):.1f} год</b>\n"
-        f"🕯 Остання заміна свічок: <b>{float(st.get('last_spark', 0.0) or 0.0):.1f} год</b>\n"
+        f"⏱ Загальні мотогодини: <b>{float(st.get('total_hours', 0.0) or 0.0):.1f} год</b>\n"
+        f"🛢 Годин від заміни мастила: <b>{float(st.get('last_oil_change', 0.0) or 0.0):.1f} год</b>\n"
+        f"🕯 Годин від заміни свічок: <b>{float(st.get('last_spark_change', 0.0) or 0.0):.1f} год</b>\n"
         f"📊 Витрата палива: <b>{fuel_consumption:.2f} л/год</b>\n"
     )
 
@@ -52,12 +52,13 @@ async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
 
 
 # FIX #13: Generic handler for all numeric corrections to reduce code duplication
+# FIX #22: Use human-readable Ukrainian labels instead of technical field names
 CORRECTION_CONFIGS = {
     "fuel": {
         "state_key": "current_fuel",
         "state_obj": CorrectionForm.fuel,
         "prompt_emoji": "⛽️",
-        "prompt_text": "Поточний",
+        "prompt_text": "Поточний залишок палива",
         "units": "л",
         "log_event": "corr_fuel_set",
         "log_emoji": "⛽️",
@@ -69,7 +70,7 @@ CORRECTION_CONFIGS = {
         "state_key": "fuel_consumption",
         "state_obj": CorrectionForm.fuel_consumption,
         "prompt_emoji": "📊",
-        "prompt_text": "Поточна витрата",
+        "prompt_text": "Витрата палива",
         "units": "л/год",
         "log_event": "corr_fuel_consumption_set",
         "log_emoji": "📊",
@@ -77,12 +78,13 @@ CORRECTION_CONFIGS = {
         "max_val": 100.0,
         "db_setter": lambda v: db.set_state("fuel_consumption", str(v)),
         "get_current": lambda st: float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION),
+        "help_text": "\n\n💡 <i>Значення за замовчуванням: {:.2f} л/год (з .env).\nКорекція перевизначає це значення для розрахунку споживання палива.</i>".format(config.FUEL_CONSUMPTION),
     },
     "total_hours": {
         "state_key": "total_hours",
         "state_obj": CorrectionForm.total_hours,
         "prompt_emoji": "⏱",
-        "prompt_text": "Поточний total",
+        "prompt_text": "Загальні мотогодини",
         "units": "год",
         "log_event": "corr_total_hours_set",
         "log_emoji": "⏱",
@@ -94,7 +96,7 @@ CORRECTION_CONFIGS = {
         "state_key": "last_oil_change",
         "state_obj": CorrectionForm.last_oil,
         "prompt_emoji": "🛢",
-        "prompt_text": "Поточний last_oil_change",
+        "prompt_text": "Годин від заміни мастила",
         "units": "год",
         "log_event": "corr_last_oil_set",
         "log_emoji": "🛢",
@@ -106,7 +108,7 @@ CORRECTION_CONFIGS = {
         "state_key": "last_spark_change",
         "state_obj": CorrectionForm.last_spark,
         "prompt_emoji": "🕯",
-        "prompt_text": "Поточний last_spark_change",
+        "prompt_text": "Годин від заміни свічок",
         "units": "год",
         "log_event": "corr_last_spark_set",
         "log_emoji": "🕯",
@@ -133,8 +135,11 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
         get_current = config_dict.get("get_current", lambda st: float(st.get(config_dict["state_key"], 0.0) or 0.0))
         cur = get_current(st)
         
+        # FIX #22: Add optional help text for specific fields (e.g., fuel_consumption)
+        help_text = config_dict.get("help_text", "")
+        
         await cb.message.edit_text(
-            f"{config_dict['prompt_emoji']} {config_dict['prompt_text']}: <b>{cur:.1f} {config_dict['units']}</b>\nВведіть нове значення ({config_dict['units']}):",
+            f"{config_dict['prompt_emoji']} {config_dict['prompt_text']}: <b>{cur:.1f} {config_dict['units']}</b>\nВведіть нове значення ({config_dict['units']}):{help_text}",
             reply_markup=back_to_corr(),
         )
         await state.set_state(config_dict["state_obj"])
