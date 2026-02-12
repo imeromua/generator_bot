@@ -18,6 +18,7 @@ def _fmt_log_line(
     value: str | None,
     driver: str | None,
     receipt: str | None,
+    generator_id: str | None,
 ) -> str:
     # ts: 'YYYY-mm-dd HH:MM:SS'
     try:
@@ -27,11 +28,18 @@ def _fmt_log_line(
         ts_pretty = (ts or "").strip()[:16]
 
     who = (user_name or "").strip()
+    
+    # Іконка генератора
+    gen_icon = ""
+    if generator_id == "emergency":
+        gen_icon = "⚠️ "
+    elif generator_id == "main":
+        gen_icon = "🔋 "
 
     if event_type.endswith("_start"):
-        return f"• {ts_pretty} — ▶️ Старт: <b>{shift_pretty(event_type)}</b> ({who})"
+        return f"• {ts_pretty} — {gen_icon}▶️ Старт: <b>{shift_pretty(event_type)}</b> ({who})"
     if event_type.endswith("_end"):
-        return f"• {ts_pretty} — ⏹ Стоп: <b>{shift_pretty(event_type)}</b> ({who})"
+        return f"• {ts_pretty} — {gen_icon}⏹ Стоп: <b>{shift_pretty(event_type)}</b> ({who})"
 
     if event_type == "refill":
         liters = (str(value or "").strip().replace(",", "."))
@@ -82,6 +90,19 @@ def _fmt_log_line(
         tail = f" — <b>{val} год</b>" if val else ""
         who_tail = f" ({who})" if who else ""
         return f"• {ts_pretty} — 🕯 <b>Корекція: свічки</b>{tail}{who_tail}"
+    
+    if event_type == "sync":
+        return f"• {ts_pretty} — 🔄 <b>Синхронізація з Google Sheets</b> ({who})"
+    
+    if event_type == "generator_switch":
+        # value містить цільовий генератор
+        target = (value or "").strip()
+        if target == "main":
+            return f"• {ts_pretty} — 🔄 <b>Перемкнуто на ОСНОВНИЙ</b> ({who})"
+        elif target == "emergency":
+            return f"• {ts_pretty} — ⚠️ <b>Перемкнуто на АВАРІЙНИЙ</b> ({who})"
+        else:
+            return f"• {ts_pretty} — 🔄 <b>Перемикання генератора</b> ({who})"
 
     val = (value or "").strip()
     tail = f" — {val}" if val else ""
@@ -103,8 +124,8 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
         txt = "🕘 <b>Останні події</b>\n\nПоки немає записів."
     else:
         lines = []
-        for event_type, ts, u_name, value, driver_name, receipt_number in rows:
-            lines.append(_fmt_log_line(event_type, ts, u_name, value, driver_name, receipt_number))
+        for event_type, ts, u_name, value, driver_name, receipt_number, generator_id in rows:
+            lines.append(_fmt_log_line(event_type, ts, u_name, value, driver_name, receipt_number, generator_id))
 
         txt = "🕘 <b>Останні події</b> (15)\n\n" + "\n".join(lines)
 
