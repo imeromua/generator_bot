@@ -104,7 +104,8 @@ async def show_sync_menu(cb: types.CallbackQuery):
         "🔒 <b>Безпека:</b>\n"
         "• Доступна тільки адміністраторам\n"
         "• Можлива лише коли генератор вимкнено (OFF)\n"
-        "• Блокується під час виконання (lock)\n\n"
+        "• Блокується під час виконання (lock)\n"
+        "• Логується в системний журнал\n\n"
         "📊 Після синхронізації ви отримаєте детальний звіт.\n\n"
         "⚠️ <b>ВАЖЛИВО:</b> Синхронізація можлива тільки коли генератор ВИМКНЕНО."
     )
@@ -140,6 +141,7 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
         "✅ Перевіряє витрати палива (колонка U) на збіг з config.FUEL_CONSUMPTION\n"
         "✅ Синхронізує довідники водіїв та персоналу (колонки R, S)\n\n"
         "✅ Не перезаписує, а саме синхронізує зміни\n\n"
+        "📝 Логує подію в системний журнал (доступно в боті)\n\n"
         "🔒 Безпечно для БД та Sheets.\n\n"
         "⚠️ Генератор має бути ВИМКНЕНИЙ (зараз OFF ✅)."
     )
@@ -167,21 +169,30 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         if not is_off:
             return await cb.answer(error_msg, show_alert=True)
 
+        # Отримуємо ім'я користувача з БД
+        user = db.get_user(cb.from_user.id)
+        if user:
+            personnel_name = db.get_personnel_for_user(cb.from_user.id)
+            user_name = personnel_name if personnel_name else (cb.from_user.full_name or "admin")
+        else:
+            user_name = cb.from_user.full_name or "admin"
+
         await cb.answer("⚙️ Синхронізація запускається...", show_alert=False)
         await cb.message.edit_text(
             "⏳ <b>Розумна синхронізація...</b>\n\n"
             "Зачекайте, це може зайняти кілька секунд..."
         )
 
-        # Запускаємо двонаправлену синхронізацію
-        report = await asyncio.to_thread(bidirectional_sync)
+        # Запускаємо двонаправлену синхронізацію з user_name
+        report = await asyncio.to_thread(bidirectional_sync, user_name)
 
         # Формуємо звіт
         summary = report.summary()
 
         txt = (
             "✅ <b>Розумна синхронізація завершена!</b>\n"
-            f"{summary}"
+            f"{summary}\n\n"
+            "📝 Подія залогована в системний журнал (🕘 Останні події)."
         )
 
         await cb.message.edit_text(txt, reply_markup=_back_kb())
