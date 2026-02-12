@@ -10,6 +10,16 @@ from keyboards.builders import sync_menu
 from services.sheets_bidirectional_sync import bidirectional_sync
 from utils.messaging import notify_success, notify_error  # FIX #25
 
+# FIX: Import shift_pretty for user-friendly shift names
+try:
+    from handlers.user_parts.sheets_shift import shift_pretty
+except ImportError:
+    # Fallback if import fails
+    def shift_pretty(code: str) -> str:
+        mapping = {'m': '🟬 Зміна 1', 'd': '🟩 Зміна 2', 'e': '🟪 Зміна 3', 'x': '⚡ Екстра'}
+        c = code.split('_')[0].lower() if '_' in code else code.lower()
+        return mapping.get(c, code)
+
 # Старі модулі sheets_import.py та sheets_export.py залишені як резервні утиліти.
 # Можна використовувати через ручні скрипти якщо потрібно.
 
@@ -66,7 +76,9 @@ def _check_generator_off() -> tuple[bool, str]:
         
         if status == "ON":
             active_shift = st.get("active_shift", "none")
-            return False, f"⛔ Синхронізація неможлива поки генератор працює (зміна: {active_shift}).\n\n📌 Закрийте активну зміну перед синхронізацією!"
+            # FIX: Use shift_pretty() for user-friendly display
+            shift_name = shift_pretty(active_shift)
+            return False, f"⛔ Синхронізація неможлива поки генератор працює ({shift_name}).\n\n📌 Закрийте активну зміну перед синхронізацією!"
         
         return True, ""
     except Exception as e:
@@ -142,7 +154,7 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
         "✅ Перевіряє витрати палива (колонка U) на збіг з config.FUEL_CONSUMPTION\n"
         "✅ Синхронізує довідники водіїв та персоналу (колонки R, S)\n\n"
         "✅ Не перезаписує, а саме синхронізує зміни\n\n"
-        "📝 Логує подію в системний журнал (доступно в боті)\n\n"
+        "📏 Логує подію в системний журнал (доступно в боті)\n\n"
         "🔒 Безпечно для БД та Sheets.\n\n"
         "⚠️ Генератор має бути ВИМКНЕНИЙ (зараз OFF ✅)."
     )
@@ -197,7 +209,7 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         txt = (
             "✅ <b>Розумна синхронізація завершена!</b>\n"
             f"{summary}\n\n"
-            "📝 Подія залогована в системний журнал (🕘 Останні події)."
+            "📏 Подія залогована в системний журнал (🕘 Останні події)."
         )
 
         await cb.message.edit_text(txt, reply_markup=_back_kb())
