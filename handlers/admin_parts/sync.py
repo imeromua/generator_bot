@@ -14,9 +14,9 @@ from utils.messaging import notify_success, notify_error  # FIX #25
 try:
     from handlers.user_parts.sheets_shift import shift_pretty
 except ImportError:
-    # Fallback if import fails - FIX: correct emoji for shift 1
+    # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'m': '🟬 Зміна 1', 'd': '🟩 Зміна 2', 'e': '🟪 Зміна 3', 'x': '⚡ Екстра'}
+        mapping = {'m': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -154,7 +154,7 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
         "✅ Перевіряє витрати палива (колонка U) на збіг з config.FUEL_CONSUMPTION\n"
         "✅ Синхронізує довідники водіїв та персоналу (колонки R, S)\n\n"
         "✅ Не перезаписує, а саме синхронізує зміни\n\n"
-        "📏 Логує подію в системний журнал (доступно в боті)\n\n"
+        "📋 Логує подію в системний журнал (доступно в боті)\n\n"
         "🔒 Безпечно для БД та Sheets.\n\n"
         "⚠️ Генератор має бути ВИМКНЕНИЙ (зараз OFF ✅)."
     )
@@ -209,7 +209,7 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         txt = (
             "✅ <b>Розумна синхронізація завершена!</b>\n"
             f"{summary}\n\n"
-            "📏 Подія залогована в системний журнал (🕘 Останні події)."
+            "📋 Подія залогована в системний журнал (🕘 Останні події)."
         )
 
         await cb.message.edit_text(txt, reply_markup=_back_kb())

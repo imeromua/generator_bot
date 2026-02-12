@@ -14,9 +14,9 @@ from utils.time import format_hours_hhmm
 try:
     from handlers.user_parts.sheets_shift import shift_pretty
 except ImportError:
-    # Fallback if import fails - FIX: correct emojis
+    # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'m': '🟬 Зміна 1', 'd': '🟩 Зміна 2', 'e': '🟪 Зміна 3', 'x': '⚡ Екстра'}
+        mapping = {'m': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
