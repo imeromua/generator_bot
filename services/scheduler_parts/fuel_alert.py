@@ -5,6 +5,7 @@ import database.db_api as db
 from keyboards.builders import back_to_main
 from services.scheduler_parts.notify import send_single_window
 from utils.time import now_kiev
+from utils.messaging import notify_all_users  # FIX #25
 
 logger = logging.getLogger(__name__)
 
@@ -68,5 +69,11 @@ async def check_fuel_alert(bot, state: dict):
 
     for admin_id in config.ADMIN_IDS:
         await send_single_window(bot, int(admin_id), txt, reply_markup=kb_home)
+
+    # FIX #25: Save alert to message history for ALL users
+    notify_all_users(
+        f"⚠️ Паливо на нулі: {current_fuel:.1f} л",
+        "warning"
+    )
 
     db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))
