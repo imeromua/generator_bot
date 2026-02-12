@@ -37,6 +37,7 @@ from database.api.fuel import update_fuel
 from database.api.logs import (
     get_today_completed_shifts,
     get_last_logs,
+    get_last_sync,
     add_log,
     try_start_shift,
     try_stop_shift,
@@ -89,6 +90,7 @@ __all__ = [
     # logs
     "get_today_completed_shifts",
     "get_last_logs",
+    "get_last_sync",
     "add_log",
     "try_start_shift",
     "try_stop_shift",
