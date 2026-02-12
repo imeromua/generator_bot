@@ -9,7 +9,7 @@ def main_dashboard(role, active_shift, completed_shifts):
 
     def pretty(code: str) -> str:
         return {
-            "m": "🟪c Зміна 1",
+            "m": "🟬 Зміна 1",
             "d": "🟪 Зміна 2",
             "e": "🟪 Зміна 3",
             "x": "⚡ Екстра",
@@ -89,9 +89,10 @@ def admin_panel():
 # --- СИНХРОНІЗАЦІЯ ---
 def sync_menu():
     kb = [
-        [InlineKeyboardButton(text="🧠 Розумна синхронізація", callback_data="sync_smart")],
-        [InlineKeyboardButton(text="📥 Імпорт з Google Sheets", callback_data="sync_import")],
-        [InlineKeyboardButton(text="📤 Експорт в Google Sheets", callback_data="sync_export")],
+        [InlineKeyboardButton(text="🧠 Розумна синхронізація", callback_data="sync_smart", style="primary")],
+        [InlineKeyboardButton(text="─── Аварійні опції ───", callback_data="sync_menu_noop")],
+        [InlineKeyboardButton(text="📥 Імпорт (повне перезаписування БД)", callback_data="sync_import")],
+        [InlineKeyboardButton(text="📤 Експорт (тільки порожні дні)", callback_data="sync_export")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
