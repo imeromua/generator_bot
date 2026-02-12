@@ -8,6 +8,16 @@ import config
 import database.db_api as db
 from keyboards.builders import admin_panel
 
+# FIX: Import shift_pretty for consistent formatting
+try:
+    from handlers.user_parts.sheets_shift import shift_pretty
+except ImportError:
+    # Fallback if import fails
+    def shift_pretty(code: str) -> str:
+        mapping = {'m': '🟬 Зміна 1', 'd': '🟩 Зміна 2', 'e': '🟪 Зміна 3', 'x': '⚡ Екстра'}
+        c = code.split('_')[0].lower() if '_' in code else code.lower()
+        return mapping.get(c, code)
+
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -83,8 +93,9 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     status = st.get("status", "OFF")
     if status == "ON":
         active_shift = st.get("active_shift", "невідомо")
-        shift_code = active_shift.split("_")[0].upper() if "_" in active_shift else active_shift.upper()
-        status_line = f"🟭 <b>ПРАЦЮЄ</b> (Зміна: {shift_code})"
+        # FIX: Use shift_pretty() for consistent formatting
+        shift_name = shift_pretty(active_shift)
+        status_line = f"🟩 <b>ПРАЦЮЄ</b> ({shift_name})"
         start_time = st.get("start_time", "")
         if start_time:
             status_line += f"\n   ⏱ Старт: {start_time}"
