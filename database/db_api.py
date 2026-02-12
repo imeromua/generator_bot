@@ -56,7 +56,14 @@ from database.api.logs import (
     get_logs_for_period,
     get_refills_for_date,
 )
-from database.api.maintenance import update_hours, set_total_hours, record_maintenance
+from database.api.maintenance import (
+    update_hours, 
+    set_total_hours, 
+    record_maintenance,
+    get_maintenance_history,
+    get_maintenance_stats,
+    get_next_maintenance_type,
+)
 from database.api.schedule import toggle_schedule, set_schedule_range, get_schedule
 from database.api.messages import (
     add_message,
@@ -133,6 +140,9 @@ __all__ = [
     "update_hours",
     "set_total_hours",
     "record_maintenance",
+    "get_maintenance_history",
+    "get_maintenance_stats",
+    "get_next_maintenance_type",
     # schedule
     "toggle_schedule",
     "set_schedule_range",
