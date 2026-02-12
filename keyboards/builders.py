@@ -1,4 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database.db_api as db
 from datetime import datetime
 import config
@@ -64,6 +65,8 @@ def main_dashboard(role, active_shift, completed_shifts):
     kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
     kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init", style="primary")])
     kb.append([InlineKeyboardButton(text="🕘 Останні події", callback_data="events_last")])
+    # FIX #25: Add Messages button
+    kb.append([InlineKeyboardButton(text="📨 Повідомлення", callback_data="view_messages")])
 
     if role == 'admin':
         kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home", style="primary")])
@@ -75,13 +78,13 @@ def admin_panel():
     kb = [
         [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
         [InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu")],
-        [InlineKeyboardButton(text="🧮 Корекція", callback_data="corr_menu")],
+        [InlineKeyboardButton(text="🧩 Корекція", callback_data="corr_menu")],
         [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
         [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
         [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
         [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
         [InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm")],
-        [InlineKeyboardButton(text="🔙 На головну", callback_data="home")]
+        [InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -171,7 +174,7 @@ def drivers_list(drivers):
     kb = []
     for d in drivers:
         kb.append([InlineKeyboardButton(text=d, callback_data=f"drv_{d}")])
-    kb.append([InlineKeyboardButton(text="🔙 Скасувати", callback_data="home")])
+    kb.append([InlineKeyboardButton(text="🔙 Скасувати", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
@@ -180,7 +183,7 @@ def back_to_admin():
 
 
 def back_to_main():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="home")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]])
 
 
 def back_to_mnt():
