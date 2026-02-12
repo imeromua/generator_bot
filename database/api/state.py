@@ -18,6 +18,11 @@ def set_state(key, value):
         )
 
 
+def set_state_value(key, value):
+    """Публічний аліас для set_state (backward compatibility)."""
+    set_state(key, value)
+
+
 def get_state_value(key: str, default=None):
     with get_connection() as conn:
         row = conn.execute(
