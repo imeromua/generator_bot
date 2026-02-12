@@ -20,9 +20,11 @@ from keyboards.builders import InlineKeyboardBuilder
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.cell.cell import MergedCell
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False
+    MergedCell = None
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -257,16 +259,23 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
             
             row += 1
         
-        # Автоширина колонок
-        for column in ws.columns:
+        # Автоширина колонок (безпечно обробляємо MergedCell)
+        for col_idx in range(1, 6):  # Колонки A-E
             max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
+            column_letter = ws.cell(row=1, column=col_idx).column_letter
+            
+            for row_idx in range(1, ws.max_row + 1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                # Пропускаємо об'єднані комірки
+                if MergedCell and isinstance(cell, MergedCell):
+                    continue
                 try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(cell.value)
-                except:
+                    cell_len = len(str(cell.value or ""))
+                    if cell_len > max_length:
+                        max_length = cell_len
+                except Exception:
                     pass
+            
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
         
