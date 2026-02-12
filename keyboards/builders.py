@@ -75,16 +75,46 @@ def main_dashboard(role, active_shift, completed_shifts):
 
 # --- АДМІН ПАНЕЛЬ ---
 def admin_panel():
+    """FIX: Improved admin panel with color-coded buttons and 2-column layout.
+    
+    Priority levels:
+    - High (primary/blue): Frequent operations (Sync, Schedule)
+    - Normal (no style): Regular operations (Personnel, Drivers, Corrections, Maintenance, Users)
+    - Danger (red): Destructive operations (DB Cleanup)
+    
+    Layout optimizations:
+    - Most important buttons on top
+    - Related functions grouped in rows (2 buttons per row where logical)
+    - Dangerous operations isolated at bottom
+    """
     kb = [
-        [InlineKeyboardButton(text="📅 Графік Відключень", callback_data="sched_select_date")],
-        [InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu")],
-        [InlineKeyboardButton(text="🧩 Корекція", callback_data="corr_menu")],
-        [InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu")],
-        [InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list")],
-        [InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start")],
-        [InlineKeyboardButton(text="🛠 Меню ТО (Мастило/Години)", callback_data="mnt_menu")],
-        [InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm")],
-        [InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]
+        # Row 1: Most frequent operations (2 in row)
+        [
+            InlineKeyboardButton(text="📅 Графік", callback_data="sched_select_date"),
+            InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu", style="primary"),
+        ],
+        # Row 2: People management (2 in row)
+        [
+            InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu"),
+            InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start"),
+        ],
+        # Row 3: Technical operations (2 in row)
+        [
+            InlineKeyboardButton(text="🧩 Корекція", callback_data="corr_menu"),
+            InlineKeyboardButton(text="🛠 Меню ТО", callback_data="mnt_menu"),
+        ],
+        # Row 4: User management (single, less frequent)
+        [
+            InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list"),
+        ],
+        # Row 5: Dangerous operation (isolated, red)
+        [
+            InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm", style="danger"),
+        ],
+        # Row 6: Navigation
+        [
+            InlineKeyboardButton(text="🏠 На головну", callback_data="main_menu"),
+        ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
