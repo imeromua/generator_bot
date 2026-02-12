@@ -24,9 +24,9 @@ class RefillForm(StatesGroup):
 
 
 def _within_work_window(now_t, start_t, end_t) -> bool:
-    """True if now_t is inside [start_t, end_t) window.
+    """Труе якщо now_t всередині [start_t, end_t) вікна.
 
-    Works for windows that do NOT cross midnight (start<=end) and windows that DO cross midnight.
+    Працює для вікон, які НЕ перетинають північ (start<=end) та які перетинають північ.
     """
     if start_t <= end_t:
         return start_t <= now_t < end_t
@@ -35,9 +35,9 @@ def _within_work_window(now_t, start_t, end_t) -> bool:
 
 
 def _refill_allowed_now() -> tuple[bool, str]:
-    """Checks if refill actions are allowed now based on WORK_START_TIME/WORK_END_TIME.
+    """Перевіряє чи дозволено прийом палива зараз на основі WORK_START_TIME/WORK_END_TIME.
 
-    Returns (ok, human_message).
+    Повертає (ok, human_message).
     """
     try:
         now = now_kiev()
@@ -53,6 +53,24 @@ def _refill_allowed_now() -> tuple[bool, str]:
     except Exception:
         # якщо конфіг часу некоректний — не блокуємо
         return True, ""
+
+
+def _fuel_quick_buttons() -> types.InlineKeyboardMarkup:
+    """FIX #21: Швидкі кнопки для вибору кількості палива."""
+    kb = [
+        [
+            types.InlineKeyboardButton(text="20 л", callback_data="fuel_20"),
+            types.InlineKeyboardButton(text="40 л", callback_data="fuel_40"),
+        ],
+        [
+            types.InlineKeyboardButton(text="60 л", callback_data="fuel_60"),
+            types.InlineKeyboardButton(text="80 л", callback_data="fuel_80"),
+        ],
+        [
+            types.InlineKeyboardButton(text="🔢 Інша кількість", callback_data="fuel_custom"),
+        ],
+    ]
+    return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 # --- ЗАПРАВКА ---
@@ -85,15 +103,46 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
     driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(
-        f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято? (Напишіть цифру)",
-        reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+        f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято?",
+        reply_markup=_fuel_quick_buttons()
     )
     await state.set_state(RefillForm.liters)
     await cb.answer()
 
 
+@router.callback_query(RefillForm.liters, F.data.startswith("fuel_"))
+async def refill_quick_amount(cb: types.CallbackQuery, state: FSMContext):
+    """FIX #21: Обробка швидких кнопок вибору кількості палива."""
+    fuel_type = cb.data.split("_")[1]
+    
+    if fuel_type == "custom":
+        # Користувач хоче ввести вручну
+        await cb.message.edit_text(
+            f"🔢 Введіть кількість літрів (числом):",
+            reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+        )
+        await cb.answer()
+        return
+    
+    # Швидкий вибір: 20, 40, 60, 80
+    try:
+        liters = float(fuel_type)
+    except Exception:
+        await cb.answer("⚠️ Помилка вибору кількості", show_alert=True)
+        return
+    
+    await state.update_data(liters=liters)
+    await cb.message.edit_text(
+        f"Літри: <b>{liters:.0f} л</b>\n🧾 Введіть <b>номер чека</b>:",
+        reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+    )
+    await state.set_state(RefillForm.receipt)
+    await cb.answer()
+
+
 @router.message(RefillForm.liters)
 async def refill_ask_receipt(msg: types.Message, state: FSMContext):
+    """Обробка ручного вводу кількості літрів."""
     data = await state.get_data()
     chat_id = int(data.get("ui_chat_id", msg.chat.id))
     message_id = int(data.get("ui_message_id", 0))
@@ -112,7 +161,7 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
                 await msg.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text="🧾 Введіть <b>номер чека</b>:",
+                    text=f"Літри: <b>{liters:.1f} л</b>\n🧾 Введіть <b>номер чека</b>:",
                     reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
                 )
             except TelegramBadRequest as e:
