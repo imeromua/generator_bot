@@ -247,6 +247,15 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
+        # FIX #25: Add table for message history (max 5 per user with rotation)
+        c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            message_text TEXT NOT NULL,
+            message_type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )''')
 
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
@@ -258,12 +267,22 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)''')
+        # FIX #25: Add table for message history (max 5 per user with rotation)
+        c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            message_text TEXT NOT NULL,
+            message_type TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )''')
 
     # Індекси для оптимізації пошуку в таблиці logs
     index_statements = [
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
         "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
+        # FIX #25: Index for fast message history retrieval
+        "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
     for stmt in index_statements:
         try:
