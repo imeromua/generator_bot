@@ -94,10 +94,10 @@ def admin_panel():
             InlineKeyboardButton(text="📅 Графік", callback_data="sched_select_date"),
             InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu", style="primary"),
         ],
-        # Row 2: People management (2 in row)
+        # Row 2: People management (2 in row) - FIXED: Drivers button now points to drivers_menu
         [
             InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu"),
-            InlineKeyboardButton(text="🚛 Водії (+)", callback_data="add_driver_start"),
+            InlineKeyboardButton(text="🚛 Водії", callback_data="drivers_menu"),
         ],
         # Row 3: Technical operations (2 in row)
         [
@@ -222,8 +222,8 @@ def back_to_mnt():
 
 
 def after_add_menu():
+    """Universal 'after add' menu for both drivers and personnel."""
     kb = [
-        [InlineKeyboardButton(text="➕ Додати ще", callback_data="add_driver_start")],
         [InlineKeyboardButton(text="🔙 В адмінку", callback_data="admin_home")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
