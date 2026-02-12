@@ -127,7 +127,7 @@ BOT_STATUS = os.getenv("BOT_STATUS", "ON")
 REGISTRATION_OPEN = (BOT_STATUS == "ON")
 WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
 
-# --- ПАЛИВО ---
+# --- ПАЛИВО (ОСНОВНИЙ ГЕНЕРАТОР) ---
 FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")
 
 if FUEL_RATE_STR:
@@ -142,6 +142,24 @@ else:
     print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
     FUEL_CONSUMPTION = 5.3
 
+# --- ПАЛИВО (АВАРІЙНИЙ ГЕНЕРАТОР) ---
+# Якщо не вказано - використовує FUEL_CONSUMPTION як дефолт
+EMERGENCY_FUEL_STR = os.getenv("EMERGENCY_FUEL_CONSUMPTION")
+
+if EMERGENCY_FUEL_STR:
+    try:
+        EMERGENCY_FUEL_CONSUMPTION = float(EMERGENCY_FUEL_STR)
+    except ValueError:
+        print(
+            f"⚠️  УВАГА: EMERGENCY_FUEL_CONSUMPTION='{EMERGENCY_FUEL_STR}' не є числом, "
+            f"використано {FUEL_CONSUMPTION} л/год (як для основного)"
+        )
+        EMERGENCY_FUEL_CONSUMPTION = FUEL_CONSUMPTION
+else:
+    # Якщо не вказано - використовуємо таку ж витрату як у основного
+    EMERGENCY_FUEL_CONSUMPTION = FUEL_CONSUMPTION
+
+# --- СПОВІЩЕННЯ ПРО ПАЛИВО ---
 try:
     FUEL_ALERT_THRESHOLD_L = float(os.getenv("FUEL_ALERT_THRESHOLD", "40"))
 except Exception:
@@ -176,7 +194,8 @@ if __name__ == "__main__":
     print(f"ID таблиці: {SHEET_ID}")
     print(f"Вкладка логів: {LOGS_SHEET_NAME}")
     print(f"Адміни: {ADMIN_IDS}")
-    print(f"Витрата палива: {FUEL_CONSUMPTION} л/год")
+    print(f"Витрата палива (основний): {FUEL_CONSUMPTION} л/год")
+    print(f"Витрата палива (аварійний): {EMERGENCY_FUEL_CONSUMPTION} л/год")
     print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")
     print(f"Таймзона: {KYIV}")
     print("=" * 60 + "\n")
