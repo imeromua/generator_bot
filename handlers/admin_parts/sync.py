@@ -16,7 +16,7 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'m': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -66,11 +66,22 @@ def _release_sync_lock():
 
 
 def _check_generator_off() -> tuple[bool, str]:
-    """Перевіряє чи генератор вимкнений.
+    """Перевіряє чи генератор вимкнений та чи активний основний.
     
     Returns: (is_off: bool, message: str)
     """
     try:
+        # Перевірка 1: Активний генератор - має бути основний
+        active_gen = db.get_active_generator()
+        if active_gen == "emergency":
+            return False, (
+                "⛔ Синхронізація з Google Sheets заблокована!\n\n"
+                "⚠️ Активний аварійний генератор.\n\n"
+                "📊 Звіт аварійного генератора експортується окремо в Excel.\n"
+                "🔄 Перемкніть на основний генератор для синхронізації."
+            )
+        
+        # Перевірка 2: Статус - має бути OFF
         st = db.get_state() or {}
         status = (st.get("status") or "OFF").upper()
         
@@ -78,7 +89,7 @@ def _check_generator_off() -> tuple[bool, str]:
             active_shift = st.get("active_shift", "none")
             # FIX: Use shift_pretty() for user-friendly display
             shift_name = shift_pretty(active_shift)
-            return False, f"⛔ Синхронізація неможлива поки генератор працює ({shift_name}).\n\n📌 Закрийте активну зміну перед синхронізацією!"
+            return False, f"⛔ Синхронізація неможлива поки генератор працює ({shift_name}).\n\n📋 Закрийте активну зміну перед синхронізацією!"
         
         return True, ""
     except Exception as e:
@@ -120,7 +131,9 @@ async def show_sync_menu(cb: types.CallbackQuery):
         "• Блокується під час виконання (lock)\n"
         "• Логується в системний журнал\n\n"
         "📊 Після синхронізації ви отримаєте детальний звіт.\n\n"
-        "⚠️ <b>ВАЖЛИВО:</b> Синхронізація можлива тільки коли генератор ВИМКНЕНО."
+        "⚠️ <b>ВАЖЛИВО:</b>\n"
+        "• Синхронізація можлива тільки коли генератор ВИМКНЕНО\n"
+        "• Аварійний генератор НЕ синхронізується (звіт в Excel)"
     )
     await cb.message.edit_text(txt, reply_markup=sync_menu())
     await cb.answer()
@@ -137,7 +150,7 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
     if db.get_state_value("sync_in_progress", "0") == "1":
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
-    # Перевірка чи генератор вимкнений
+    # Перевірка чи генератор вимкнений та основний активний
     is_off, error_msg = _check_generator_off()
     if not is_off:
         return await cb.answer(error_msg, show_alert=True)
@@ -196,7 +209,7 @@ async def sync_smart_execute(cb: types.CallbackQuery):
 
         await cb.answer("⚙️ Синхронізація запускається...", show_alert=False)
         await cb.message.edit_text(
-            "⏳ <b>Розумна синхронізація...</b>\n\n"
+            "⌛ <b>Розумна синхронізація...</b>\n\n"
             "Зачекайте, це може зайняти кілька секунд..."
         )
 
