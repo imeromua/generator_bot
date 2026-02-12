@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class SetHoursForm(StatesGroup):
     generator = State()  # Який генератор
     hours = State()  # Значення мотогодин
+    message_id = State()  # ID повідомлення для редагування
 
 
 class MaintenanceForm(StatesGroup):
@@ -261,7 +262,7 @@ async def mnt_hours_choose_gen(cb: types.CallbackQuery, state: FSMContext):
 async def ask_hours(cb: types.CallbackQuery, state: FSMContext):
     """Запит нового значення мотогодин."""
     generator_id = cb.data.replace("mnt_hours_", "")
-    await state.update_data(generator=generator_id)
+    await state.update_data(generator=generator_id, message_id=cb.message.message_id)
     
     gen_name = db.get_generator_name(generator_id)
     stats = db.get_maintenance_stats(generator_id)
@@ -282,38 +283,101 @@ async def save_hours(msg: types.Message, state: FSMContext):
         await state.clear()
         return await msg.answer("⛔ Тільки для адмінів")
     
+    data = await state.get_data()
+    bot_message_id = data.get("message_id")
+    generator_id = data.get("generator", "main")
+    gen_name = db.get_generator_name(generator_id)
+    stats = db.get_maintenance_stats(generator_id)
+    
     try:
         val_text = msg.text.replace(",", ".").strip()
         val = float(val_text)
         
+        # Валідація
         if val < 0:
-            return await msg.answer("❌ Значення не може бути від'ємним", reply_markup=back_to_mnt())
+            await msg.delete()
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=msg.chat.id,
+                    message_id=bot_message_id,
+                    text=(
+                        f"⏱ <b>Корекція мотогодин: {gen_name}</b>\n\n"
+                        f"Поточне значення: <b>{stats['total_hours']:.1f} год</b>\n\n"
+                        f"❌ <b>Помилка:</b> Значення не може бути від'ємним\n\n"
+                        f"Введіть нове значення:"
+                    ),
+                    reply_markup=back_to_mnt()
+                )
+            except Exception:
+                pass
+            return
         
         if val > 100000:
-            return await msg.answer("❌ Значення занадто велике (максимум 100000)", reply_markup=back_to_mnt())
+            await msg.delete()
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=msg.chat.id,
+                    message_id=bot_message_id,
+                    text=(
+                        f"⏱ <b>Корекція мотогодин: {gen_name}</b>\n\n"
+                        f"Поточне значення: <b>{stats['total_hours']:.1f} год</b>\n\n"
+                        f"❌ <b>Помилка:</b> Значення занадто велике (максимум 100000)\n\n"
+                        f"Введіть нове значення:"
+                    ),
+                    reply_markup=back_to_mnt()
+                )
+            except Exception:
+                pass
+            return
         
-        data = await state.get_data()
-        generator_id = data.get("generator", "main")
-        
+        # Збереження
         db.set_total_hours(val, generator_id)
         
-        gen_name = db.get_generator_name(generator_id)
         actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
         logger.info(f"⏱ {actor} встановив мотогодини для {gen_name}: {val}")
         
-        await msg.answer(f"✅ Встановлено для {gen_name}: <b>{val} год</b>")
+        # Видаляємо повідомлення користувача
+        await msg.delete()
         
-        # Показуємо оновлене меню
+        # Оновлюємо повідомлення бота з меню ТО
         main_status = format_mnt_status("main")
         emergency_status = format_mnt_status("emergency")
         
         txt = (
+            f"✅ <b>Встановлено для {gen_name}: {val} год</b>\n"
+            f"────────\n\n"
             f"🛠 <b>Технічне Обслуговування</b>\n\n"
             f"{main_status}\n\n"
             f"{emergency_status}"
         )
         
-        await msg.answer(txt, reply_markup=maintenance_menu_new())
+        try:
+            await msg.bot.edit_message_text(
+                chat_id=msg.chat.id,
+                message_id=bot_message_id,
+                text=txt,
+                reply_markup=maintenance_menu_new()
+            )
+        except TelegramBadRequest:
+            # Якщо не вдалося відредагувати, відправляємо нове
+            await msg.answer(txt, reply_markup=maintenance_menu_new())
+        
         await state.clear()
+        
     except ValueError:
-        await msg.answer("❌ Введіть число (наприклад 100.5)", reply_markup=back_to_mnt())
+        # Неправильний формат
+        await msg.delete()
+        try:
+            await msg.bot.edit_message_text(
+                chat_id=msg.chat.id,
+                message_id=bot_message_id,
+                text=(
+                    f"⏱ <b>Корекція мотогодин: {gen_name}</b>\n\n"
+                    f"Поточне значення: <b>{stats['total_hours']:.1f} год</b>\n\n"
+                    f"❌ <b>Помилка:</b> Введіть число (наприклад 100.5)\n\n"
+                    f"Введіть нове значення:"
+                ),
+                reply_markup=back_to_mnt()
+            )
+        except Exception:
+            pass
