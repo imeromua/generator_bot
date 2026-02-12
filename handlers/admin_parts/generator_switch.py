@@ -129,6 +129,12 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
     
     active_gen = db.get_active_generator()
     
+    # Отримуємо залишок палива як float
+    try:
+        current_fuel = float(db.get_state_value('current_fuel', '0.0'))
+    except (ValueError, TypeError):
+        current_fuel = 0.0
+    
     text = (
         f"📊 <b>Статистика генераторів</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n\n"
@@ -143,7 +149,7 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
         f"{'🔹' if active_gen == 'main' else '🔸'} - Активний генератор\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"💡 Спільні параметри:\n"
-        f"  ⛽ Залишок палива: {db.get_state_value('current_fuel', '0.0')} л\n"
+        f"  ⛽ Залишок палива: {current_fuel:.1f} л\n"
         f"  👥 Персонал та водії\n"
     )
     
