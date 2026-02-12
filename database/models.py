@@ -236,7 +236,7 @@ def init_db():
     """Створення схеми (ідемпотентно) + seed generator_state defaults.
     
     Підтримка двох генераторів: основного та аварійного.
-    Додано generator_id в logs для розділення записів.
+    Додано generator_id в logs та maintenance для розділення записів.
     """
     conn = get_connection()
     c = conn.cursor()
@@ -257,7 +257,14 @@ def init_db():
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
-        c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id INTEGER PRIMARY KEY, date TEXT, type TEXT, hours REAL, admin TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
+            id INTEGER PRIMARY KEY, 
+            date TEXT, 
+            type TEXT, 
+            hours REAL, 
+            admin TEXT,
+            generator_id TEXT DEFAULT 'main'
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
@@ -286,7 +293,14 @@ def init_db():
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
-        c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id BIGSERIAL PRIMARY KEY, date TEXT, type TEXT, hours DOUBLE PRECISION, admin TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
+            id BIGSERIAL PRIMARY KEY, 
+            date TEXT, 
+            type TEXT, 
+            hours DOUBLE PRECISION, 
+            admin TEXT,
+            generator_id TEXT DEFAULT 'main'
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)''')
@@ -304,6 +318,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
         "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
         "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",  # NEW: index for emergency generator
+        "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",  # NEW: index for maintenance per generator
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
     for stmt in index_statements:
@@ -336,12 +351,12 @@ def init_db():
             else:
                 logging.warning(f"⚠️ Не вдалося додати receipt_number: {e}")
 
-    # Міграція: додавання generator_id (нове для підтримки аварійного генератора)
+    # Міграція: додавання generator_id в logs (нове для підтримки аварійного генератора)
     try:
         c.execute("SELECT generator_id FROM logs LIMIT 1")
-        logging.info("✅ Колонка generator_id вже існує")
+        logging.info("✅ Колонка generator_id в logs вже існує")
     except Exception:
-        logging.info("🔧 Додаємо колонку generator_id...")
+        logging.info("🔧 Додаємо колонку generator_id в logs...")
         try:
             begin_transaction(conn)
             c.execute("ALTER TABLE logs ADD COLUMN generator_id TEXT DEFAULT 'main'")
@@ -349,16 +364,40 @@ def init_db():
                 conn.commit()
             except Exception as e:
                 logging.warning(f"⚠️ Помилка commit після додавання generator_id: {e}")
-            logging.info("✅ Колонка generator_id додана")
+            logging.info("✅ Колонка generator_id в logs додана")
         except Exception as e:
             try:
                 conn.rollback()
             except Exception as re:
                 logging.warning(f"⚠️ Помилка rollback: {re}")
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
-                logging.info("✅ Колонка generator_id вже існує")
+                logging.info("✅ Колонка generator_id в logs вже існує")
             else:
                 logging.warning(f"⚠️ Не вдалося додати generator_id: {e}")
+
+    # Міграція: додавання generator_id в maintenance (нове для ТО по генераторах)
+    try:
+        c.execute("SELECT generator_id FROM maintenance LIMIT 1")
+        logging.info("✅ Колонка generator_id в maintenance вже існує")
+    except Exception:
+        logging.info("🔧 Додаємо колонку generator_id в maintenance...")
+        try:
+            begin_transaction(conn)
+            c.execute("ALTER TABLE maintenance ADD COLUMN generator_id TEXT DEFAULT 'main'")
+            try:
+                conn.commit()
+            except Exception as e:
+                logging.warning(f"⚠️ Помилка commit після додавання generator_id в maintenance: {e}")
+            logging.info("✅ Колонка generator_id в maintenance додана")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception as re:
+                logging.warning(f"⚠️ Помилка rollback: {re}")
+            if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                logging.info("✅ Колонка generator_id в maintenance вже існує")
+            else:
+                logging.warning(f"⚠️ Не вдалося додати generator_id в maintenance: {e}")
 
     # Дефолтні значення generator_state
     defaults = [
@@ -413,4 +452,4 @@ def init_db():
     except Exception as e:
         logging.warning(f"⚠️ Помилка закриття з'єднання: {e}")
 
-    logging.info("✅ База даних ініціалізована (підтримка 2 генераторів).")
+    logging.info("✅ База даних ініціалізована (підтримка 2 генераторів + ТО).")
