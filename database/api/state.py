@@ -230,3 +230,126 @@ def get_state():
             "current_fuel": fuel,
             "active_shift": active_shift,
         }
+
+
+# ========== ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: ОСНОВНИЙ ТА АВАРІЙНИЙ ==========
+
+def get_active_generator() -> str:
+    """Повертає ID активного генератора: 'main' або 'emergency'."""
+    return str(get_state_value("active_generator", "main") or "main").strip()
+
+
+def set_active_generator(generator_id: str):
+    """Встановлює активний генератор: 'main' або 'emergency'."""
+    if generator_id not in ("main", "emergency"):
+        raise ValueError(f"Invalid generator_id: {generator_id}. Must be 'main' or 'emergency'.")
+    set_state("active_generator", generator_id)
+
+
+def is_emergency_active() -> bool:
+    """Перевіряє, чи активний аварійний генератор."""
+    return get_active_generator() == "emergency"
+
+
+def get_generator_state(generator_id: str | None = None):
+    """Повертає стан конкретного генератора.
+    
+    Args:
+        generator_id: 'main', 'emergency' або None (автовизначення активного)
+    
+    Returns:
+        dict з полями: status, start_time, start_date, total_hours, last_oil, last_spark, current_fuel, active_shift
+    """
+    if generator_id is None:
+        generator_id = get_active_generator()
+    
+    if generator_id == "main":
+        # Основний генератор - стандартні ключі
+        return get_state()
+    
+    elif generator_id == "emergency":
+        # Аварійний генератор - окремі ключі, але спільний status/shift/fuel
+        with get_connection() as conn:
+            def _get(k: str, default: str = "") -> str:
+                return _conn_get_state_value(conn, k, default)
+
+            # Спільні параметри (статус, зміна, паливо)
+            status = _get("status", "OFF")
+            start_time = _get("last_start_time", "")
+            start_date = _get("last_start_date", "")
+            active_shift = _get("active_shift", "none")
+
+            def _get_f(k: str, default: float = 0.0) -> float:
+                return _conn_get_state_float(conn, k, default)
+
+            # Окремі параметри аварійного генератора
+            total = _get_f("emergency_total_hours", 0.0)
+            last_oil = _get_f("emergency_last_oil_change", 0.0)
+            last_spark = _get_f("emergency_last_spark_change", 0.0)
+            
+            # Паливо спільне
+            fuel = _get_f("current_fuel", 0.0)
+
+            return {
+                "status": status,
+                "start_time": start_time,
+                "start_date": start_date,
+                "total_hours": total,
+                "last_oil": last_oil,
+                "last_spark": last_spark,
+                "current_fuel": fuel,
+                "active_shift": active_shift,
+            }
+    
+    else:
+        raise ValueError(f"Unknown generator_id: {generator_id}")
+
+
+def get_emergency_total_hours() -> float:
+    """Повертає загальні мотогодини аварійного генератора."""
+    try:
+        return float(get_state_value("emergency_total_hours", "0.0") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def set_emergency_total_hours(hours: float):
+    """Встановлює загальні мотогодини аварійного генератора."""
+    set_state("emergency_total_hours", str(float(hours)))
+
+
+def get_emergency_last_oil_change() -> float:
+    """Повертає мотогодини при останній заміні мастила (аварійний)."""
+    try:
+        return float(get_state_value("emergency_last_oil_change", "0.0") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def set_emergency_last_oil_change(hours: float):
+    """Встановлює мотогодини при останній заміні мастила (аварійний)."""
+    set_state("emergency_last_oil_change", str(float(hours)))
+
+
+def get_emergency_last_spark_change() -> float:
+    """Повертає мотогодини при останній заміні свічок (аварійний)."""
+    try:
+        return float(get_state_value("emergency_last_spark_change", "0.0") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def set_emergency_last_spark_change(hours: float):
+    """Встановлює мотогодини при останній заміні свічок (аварійний)."""
+    set_state("emergency_last_spark_change", str(float(hours)))
+
+
+def get_fuel_consumption_rate() -> float:
+    """Повертає витрати палива для активного генератора (л/год).
+    
+    Основний: config.FUEL_CONSUMPTION
+    Аварійний: config.EMERGENCY_FUEL_CONSUMPTION
+    """
+    if is_emergency_active():
+        return float(getattr(config, "EMERGENCY_FUEL_CONSUMPTION", config.FUEL_CONSUMPTION))
+    return float(config.FUEL_CONSUMPTION)
