@@ -193,13 +193,31 @@ def schedule_grid(date_str, is_today_and_working=False):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- ТО ---
-def maintenance_menu():
+# --- ТО (НОВЕ МЕНЮ) ---
+def maintenance_menu_new():
+    """Нове меню ТО з підтримкою двох генераторів."""
     kb = [
+        [InlineKeyboardButton(text="✅ Виконати ТО", callback_data="mnt_perform", style="primary")],
+        [InlineKeyboardButton(text="📜 Історія ТО", callback_data="mnt_history")],
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# --- ТО (СТАРЕ МЕНЮ - для зворотної сумісності) ---
+def maintenance_menu():
+    """Старе меню ТО - залишається для зворотної сумісності."""
+    return maintenance_menu_new()
+
+
+def maintenance_action_menu():
+    """Меню вибору дій ТО."""
+    kb = [
         [InlineKeyboardButton(text="🛢 Заміна мастила", callback_data="mnt_oil")],
         [InlineKeyboardButton(text="🕯 Заміна свічок", callback_data="mnt_spark")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
+        [InlineKeyboardButton(text="🔧 Планове ТО", callback_data="mnt_maintenance")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="mnt_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
