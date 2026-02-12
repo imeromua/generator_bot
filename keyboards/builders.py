@@ -86,13 +86,16 @@ def admin_panel():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- СИНХРОНІЗАЦІЯ ---
+# --- СИНХРОНІЗАЦІЯ (тільки розумна) ---
 def sync_menu():
+    """Меню синхронізації - тільки розумна двонаправлена синхронізація.
+    
+    Старі окремі імпорт/експорт видалені для запобігання помилкам.
+    Розумна синхронізація автоматично визначає що треба синхронізувати.
+    Модулі sheets_import.py та sheets_export.py залишені як резервні утиліти.
+    """
     kb = [
         [InlineKeyboardButton(text="🧠 Розумна синхронізація", callback_data="sync_smart", style="primary")],
-        [InlineKeyboardButton(text="─── Аварійні опції ───", callback_data="sync_menu_noop")],
-        [InlineKeyboardButton(text="📥 Імпорт (повне перезаписування БД)", callback_data="sync_import")],
-        [InlineKeyboardButton(text="📤 Експорт (тільки порожні дні)", callback_data="sync_export")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
