@@ -14,6 +14,7 @@ from handlers.user_parts.sheets_shift import (
 )
 from handlers.user_parts.utils import ensure_user, get_operator_personnel_name
 from utils.time import format_hours_hhmm, now_kiev
+from utils.messaging import notify_success, notify_error  # FIX #25
 
 
 router = Router()
@@ -37,10 +38,14 @@ async def gen_start(cb: types.CallbackQuery):
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
 
+    user_id = cb.from_user.id  # FIX #25
+
     # FIX #17: Check DB state FIRST before expensive Sheet call to reduce TOCTOU window
     st = db.get_state()
     if st['status'] == 'ON':
         active = st.get('active_shift', 'none')
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(active)})")
         return await cb.answer(
             f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
             show_alert=True
@@ -64,6 +69,8 @@ async def gen_start(cb: types.CallbackQuery):
     # FIX #17: If Sheet says shift is open, sync and reject
     if sheet_ok and open_shift:
         sync_db_from_sheet_open_shift(open_shift, start_times)
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(open_shift)})")
         return await cb.answer(
             f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(open_shift)})",
             show_alert=True
@@ -72,6 +79,8 @@ async def gen_start(cb: types.CallbackQuery):
     shift_code = cb.data.split("_", 1)[0]
 
     if sheet_ok and shift_code in completed_sheet:
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Зміна {shift_pretty(shift_code)} вже відпрацьована сьогодні")
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     completed_db = db.get_today_completed_shifts()
@@ -82,12 +91,16 @@ async def gen_start(cb: types.CallbackQuery):
     # Черга змін: 1 -> 2 -> 3 (екстра без черги)
     prev_required = shift_prev_required(shift_code)
     if prev_required and (prev_required not in completed_total):
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Спочатку закрийте {shift_pretty(prev_required)}")
         return await cb.answer(
             f"⛔ Спочатку закрийте {shift_pretty(prev_required)}.",
             show_alert=True
         )
 
     if shift_code in completed_db:
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Зміна {shift_pretty(shift_code)} вже відпрацьована сьогодні")
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     now = now_kiev()
@@ -97,6 +110,11 @@ async def gen_start(cb: types.CallbackQuery):
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         if not _within_work_window(now.time(), start_t, end_t):
+            # FIX #25: Notify error
+            notify_error(
+                user_id, 
+                f"❌ Заборонено відкривати зміни поза {config.WORK_START_TIME}-{config.WORK_END_TIME}"
+            )
             return await cb.answer(
                 f"⛔ Заборонено відкривати зміни поза робочим часом ({config.WORK_START_TIME}-{config.WORK_END_TIME}).\n"
                 f"Зараз: {now.strftime('%H:%M')}",
@@ -114,11 +132,18 @@ async def gen_start(cb: types.CallbackQuery):
     if not res.get("ok"):
         if res.get("reason") == "already_on":
             active = res.get('active_shift', 'none')
+            # FIX #25: Notify error
+            notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(active)})")
             return await cb.answer(
                 f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
                 show_alert=True
             )
+        # FIX #25: Notify error
+        notify_error(user_id, "❌ Помилка старту зміни")
         return await cb.answer("❌ Помилка старту. Спробуйте ще раз.", show_alert=True)
+
+    # FIX #25: Notify success
+    notify_success(user_id, f"✅ Зміна {shift_pretty(cb.data)} запущена о {now.strftime('%H:%M')}")
 
     banner = f"✅ <b>{shift_pretty(cb.data)}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
     await show_dash(cb.message, user[0], user[1], banner=banner)
@@ -131,6 +156,8 @@ async def gen_stop(cb: types.CallbackQuery):
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
+
+    user_id = cb.from_user.id  # FIX #25
 
     expected_start = cb.data.replace("_end", "_start")
     expected_code = expected_start.split("_", 1)[0]
@@ -169,6 +196,8 @@ async def gen_stop(cb: types.CallbackQuery):
 
     # Якщо таблиця каже, що відкрита інша зміна
     if sheet_ok and open_shift and open_shift != expected_code:
+        # FIX #25: Notify error
+        notify_error(user_id, f"❌ Зараз активний {shift_pretty(open_shift)}, а не {shift_pretty(expected_code)}")
         return await cb.answer(
             f"⛔ Помилка! Зараз активний {shift_pretty(open_shift)}.\nНатисніть відповідну кнопку СТОП.",
             show_alert=True
@@ -209,10 +238,14 @@ async def gen_stop(cb: types.CallbackQuery):
             return await cb.answer("⛔ Вже вимкнено.", show_alert=True)
         if res.get("reason") == "wrong_shift":
             active = res.get("active_shift", "none")
+            # FIX #25: Notify error
+            notify_error(user_id, f"❌ Зараз активний {shift_pretty(active)}, а не {shift_pretty(expected_code)}")
             return await cb.answer(
                 f"⛔ Помилка! Зараз активний {shift_pretty(active)}.\nНатисніть відповідну кнопку СТОП.",
                 show_alert=True
             )
+        # FIX #25: Notify error
+        notify_error(user_id, "❌ Помилка закриття зміни")
         return await cb.answer("❌ Помилка закриття. Спробуйте ще раз.", show_alert=True)
 
     # FIX #16, #19: Get metrics from try_stop_shift result (calculated atomically)
@@ -227,6 +260,12 @@ async def gen_stop(cb: types.CallbackQuery):
         canonical_fuel = float(st.get('current_fuel', 0.0) or 0.0)
     except Exception:
         canonical_fuel = 0.0
+
+    # FIX #25: Notify success
+    notify_success(
+        user_id, 
+        f"✅ Зміна {shift_pretty(expected_code)} закрита: {dur_hhmm}, використано {fuel_consumed:.1f} л"
+    )
 
     banner = (
         f"🏁 <b>{shift_pretty(expected_code)} закрито!</b>\n"
