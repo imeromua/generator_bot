@@ -118,7 +118,14 @@ async def gen_switch_menu(cb: types.CallbackQuery, state: FSMContext):
             f"💡 Для перемикання генератор має бути вимкнений (OFF)"
         )
     
-    await cb.message.edit_text(info_text, reply_markup=_generator_keyboard())
+    # Перевіряємо, чи це текстове повідомлення
+    if cb.message.text:
+        # Якщо текстове - редагуємо
+        await cb.message.edit_text(info_text, reply_markup=_generator_keyboard())
+    else:
+        # Якщо документ - видаляємо і створюємо нове
+        await cb.message.delete()
+        await cb.message.answer(info_text, reply_markup=_generator_keyboard())
 
 
 @router.callback_query(F.data.startswith("gen_switch_"))
