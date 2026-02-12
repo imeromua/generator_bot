@@ -6,11 +6,20 @@ from database.models import get_connection, begin_transaction
 from database.api.state import _conn_get_state_float, _conn_get_state_value, _conn_set_state_value
 
 
-def get_today_completed_shifts():
+def get_today_completed_shifts(generator_id: str | None = None):
+    """Отримує завершені зміни за сьогодні.
+    
+    Args:
+        generator_id: фільтр по генератору ('main', 'emergency' або None для всіх)
+    """
     date_str = datetime.now(config.KYIV).strftime("%Y-%m-%d")
     with get_connection() as conn:
-        query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end')"
-        rows = conn.execute(query, (f"{date_str}%",)).fetchall()
+        if generator_id:
+            query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end') AND generator_id = ?"
+            rows = conn.execute(query, (f"{date_str}%", generator_id)).fetchall()
+        else:
+            query = "SELECT event_type FROM logs WHERE timestamp LIKE ? AND event_type IN ('m_end', 'd_end', 'e_end', 'x_end')"
+            rows = conn.execute(query, (f"{date_str}%",)).fetchall()
 
     completed = set()
     for r in rows:
@@ -20,11 +29,15 @@ def get_today_completed_shifts():
     return completed
 
 
-def get_last_logs(limit: int = 15):
+def get_last_logs(limit: int = 15, generator_id: str | None = None):
     """Повертає останні N подій у хронології за часом (новіші → старіші).
 
     Використовує ORDER BY timestamp DESC, id DESC, щоб коректно показувати
     хронологію навіть після імпорту старих подій (коли id >, але дата <).
+    
+    Args:
+        limit: кількість подій
+        generator_id: фільтр по генератору ('main', 'emergency' або None для всіх)
     """
     try:
         lim = int(limit)
@@ -35,13 +48,23 @@ def get_last_logs(limit: int = 15):
         lim = 15
 
     with get_connection() as conn:
-        query = """
-            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-            FROM logs
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ?
-        """
-        return conn.execute(query, (lim,)).fetchall()
+        if generator_id:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                WHERE generator_id = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+            """
+            return conn.execute(query, (generator_id, lim)).fetchall()
+        else:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ?
+            """
+            return conn.execute(query, (lim,)).fetchall()
 
 
 def get_last_sync():
@@ -64,10 +87,19 @@ def get_last_sync():
         return None, None
 
 
-def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = None, conn=None):
+def add_log(
+    event: str,
+    user: str,
+    val: str | None = None,
+    driver: str | None = None,
+    receipt: str | None = None,
+    ts: str | None = None,
+    conn=None,
+    generator_id: str | None = None,
+):
     """FIX #7: Add optional conn parameter for transactional operations.
     
-    Додає подію в журнал. Тепер підтримує receipt_number.
+    Додає подію в журнал. Тепер підтримує receipt_number та generator_id.
     
     Args:
         event: Event type
@@ -77,6 +109,7 @@ def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = N
         receipt: Optional receipt number
         ts: Optional timestamp (defaults to now)
         conn: Optional existing connection for atomic operations with state changes
+        generator_id: Генератор ('main' або 'emergency'). Якщо None - визначається автоматично.
     """
     ts_val = ts or datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
     
@@ -85,10 +118,16 @@ def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = N
         conn = get_connection()
         close_conn = True
     
+    # Якщо generator_id не вказаний - отримуємо поточний
+    if generator_id is None:
+        gen_id = _conn_get_state_value(conn, "active_generator", "main")
+    else:
+        gen_id = generator_id
+    
     try:
         conn.execute(
-            "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
-            (event, ts_val, user, val, driver, receipt),
+            "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id) VALUES (?,?,?,?,?,?,?)",
+            (event, ts_val, user, val, driver, receipt, gen_id),
         )
     finally:
         if close_conn:
@@ -99,7 +138,10 @@ def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = N
 
 
 def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
-    """Атомарний старт зміни: тільки перший виграє (CAS по status OFF->ON)."""
+    """Атомарний старт зміни: тільки перший виграє (CAS по status OFF->ON).
+    
+    Підтримка аварійного генератора: записує generator_id в лог.
+    """
     ts = dt.strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         try:
@@ -115,8 +157,6 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
                 "UPDATE generator_state SET value = 'ON' WHERE key = 'status' AND value = 'OFF'"
             )
             if cur.rowcount == 0:
-                # FIX #5: Remove early commit - we haven't modified anything if CAS failed
-                # Just rollback and return error
                 active = _conn_get_state_value(conn, "active_shift", "none")
                 st_time = _conn_get_state_value(conn, "last_start_time", "")
                 try:
@@ -129,14 +169,17 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
             _conn_set_state_value(conn, "last_start_time", dt.strftime("%H:%M"))
             _conn_set_state_value(conn, "last_start_date", dt.strftime("%Y-%m-%d"))
 
-            # FIX #7: Use transactional add_log with existing connection
+            # Отримуємо поточний генератор
+            generator_id = _conn_get_state_value(conn, "active_generator", "main")
+
+            # Записуємо лог з generator_id
             conn.execute(
-                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
-                (event_type, ts, user_name, None, None, None),
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id) VALUES (?,?,?,?,?,?,?)",
+                (event_type, ts, user_name, None, None, None, generator_id),
             )
 
             conn.commit()
-            return {"ok": True, "ts": ts}
+            return {"ok": True, "ts": ts, "generator_id": generator_id}
 
         except Exception as e:
             try:
@@ -152,7 +195,10 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
     
     FIX #6: Fuel consumption handled here atomically.
     FIX #19: Hours update also done atomically within same transaction.
-    This prevents race conditions and ensures data consistency.
+    Підтримка аварійного генератора:
+    - Записує generator_id в лог
+    - Використовує відповідні витрати палива (main або emergency)
+    - Оновлює відповідні мотогодини та ТО
     """
     ts = dt.strftime("%Y-%m-%d %H:%M:%S")
     expected_start = end_event_type.replace("_end", "_start")
@@ -180,6 +226,10 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
                 except Exception:
                     pass
                 return {"ok": False, "reason": "wrong_shift", "active_shift": active}
+
+            # Отримуємо поточний генератор
+            generator_id = _conn_get_state_value(conn, "active_generator", "main")
+            is_emergency = (generator_id == "emergency")
 
             # FIX #19: Calculate duration, fuel, and hours atomically
             duration_hours = 0.0
@@ -215,35 +265,54 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
                         duration_hours = 0.0
                     
                     if duration_hours > 0:
-                        # Get fuel consumption rate from state or config
-                        fuel_rate_str = _conn_get_state_value(conn, "fuel_consumption", str(config.FUEL_CONSUMPTION))
-                        try:
-                            fuel_rate = float(fuel_rate_str or config.FUEL_CONSUMPTION)
-                            if fuel_rate <= 0:
+                        # Визначаємо витрати палива залежно від генератора
+                        if is_emergency:
+                            # Аварійний генератор - з config.EMERGENCY_FUEL_CONSUMPTION
+                            fuel_rate = getattr(config, "EMERGENCY_FUEL_CONSUMPTION", config.FUEL_CONSUMPTION)
+                        else:
+                            # Основний генератор - з state або config.FUEL_CONSUMPTION
+                            fuel_rate_str = _conn_get_state_value(conn, "fuel_consumption", str(config.FUEL_CONSUMPTION))
+                            try:
+                                fuel_rate = float(fuel_rate_str or config.FUEL_CONSUMPTION)
+                                if fuel_rate <= 0:
+                                    fuel_rate = config.FUEL_CONSUMPTION
+                            except Exception:
                                 fuel_rate = config.FUEL_CONSUMPTION
-                        except Exception:
-                            fuel_rate = config.FUEL_CONSUMPTION
                         
                         fuel_consumed = duration_hours * fuel_rate
                         
-                        # FIX #19: Update hours atomically (was done outside transaction before)
-                        total_hours = _conn_get_state_float(conn, "total_hours", 0.0)
-                        new_total = total_hours + duration_hours
-                        _conn_set_state_value(conn, "total_hours", str(new_total))
+                        # Оновлюємо мотогодини відповідного генератора
+                        if is_emergency:
+                            # Аварійний генератор
+                            total_hours = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
+                            new_total = total_hours + duration_hours
+                            _conn_set_state_value(conn, "emergency_total_hours", str(new_total))
+                            
+                            # Оновлюємо ТО
+                            last_oil = _conn_get_state_float(conn, "emergency_last_oil_change", 0.0)
+                            last_spark = _conn_get_state_float(conn, "emergency_last_spark_change", 0.0)
+                            _conn_set_state_value(conn, "emergency_last_oil_change", str(last_oil + duration_hours))
+                            _conn_set_state_value(conn, "emergency_last_spark_change", str(last_spark + duration_hours))
+                        else:
+                            # Основний генератор
+                            total_hours = _conn_get_state_float(conn, "total_hours", 0.0)
+                            new_total = total_hours + duration_hours
+                            _conn_set_state_value(conn, "total_hours", str(new_total))
+                            
+                            # Оновлюємо ТО
+                            last_oil = _conn_get_state_float(conn, "last_oil_change", 0.0)
+                            last_spark = _conn_get_state_float(conn, "last_spark_change", 0.0)
+                            _conn_set_state_value(conn, "last_oil_change", str(last_oil + duration_hours))
+                            _conn_set_state_value(conn, "last_spark_change", str(last_spark + duration_hours))
                         
-                        # Update maintenance counters
-                        last_oil = _conn_get_state_float(conn, "last_oil_change", 0.0)
-                        last_spark = _conn_get_state_float(conn, "last_spark_change", 0.0)
-                        _conn_set_state_value(conn, "last_oil_change", str(last_oil + duration_hours))
-                        _conn_set_state_value(conn, "last_spark_change", str(last_spark + duration_hours))
-                        
-                        # Apply atomic fuel update
+                        # Оновлюємо спільний залишок палива
                         current_fuel = _conn_get_state_float(conn, "current_fuel", 0.0)
                         new_fuel = max(0.0, current_fuel - fuel_consumed)
                         _conn_set_state_value(conn, "current_fuel", str(new_fuel))
                         
+                        gen_name = "АВАРІЙНИЙ" if is_emergency else "ОСНОВНИЙ"
                         logging.info(
-                            f"⛽ Shift closed: duration={duration_hours:.2f}h, "
+                            f"⛽ [{gen_name}] Shift closed: duration={duration_hours:.2f}h, "
                             f"fuel_consumed={fuel_consumed:.2f}L, rate={fuel_rate:.2f}L/h, "
                             f"total_hours={new_total:.2f}h"
                         )
@@ -257,10 +326,10 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
             _conn_set_state_value(conn, "status", "OFF")
             _conn_set_state_value(conn, "active_shift", "none")
 
-            # FIX #7: Use transactional add_log
+            # Записуємо лог з generator_id
             conn.execute(
-                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number) VALUES (?,?,?,?,?,?)",
-                (end_event_type, ts, user_name, None, None, None),
+                "INSERT INTO logs (event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id) VALUES (?,?,?,?,?,?,?)",
+                (end_event_type, ts, user_name, None, None, None, generator_id),
             )
 
             conn.commit()
@@ -269,6 +338,7 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
                 "ts": ts,
                 "duration_hours": duration_hours,
                 "fuel_consumed": fuel_consumed,
+                "generator_id": generator_id,
             }
 
         except Exception as e:
@@ -281,8 +351,14 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
 
 
 def get_unsynced():
+    """Повертає несинхронізовані записи ОСНОВНОГО генератора.
+    
+    Аварійний генератор НЕ синхронізується з Sheets.
+    """
     with get_connection() as conn:
-        return conn.execute("SELECT * FROM logs WHERE is_synced = 0 ORDER BY id ASC").fetchall()
+        return conn.execute(
+            "SELECT * FROM logs WHERE is_synced = 0 AND generator_id = 'main' ORDER BY id ASC"
+        ).fetchall()
 
 
 def mark_synced(ids):
@@ -300,29 +376,62 @@ def mark_synced(ids):
         logging.error(f"Помилка позначення синхронізованих: {e}")
 
 
-def get_logs_for_period(start_date, end_date):
+def get_logs_for_period(start_date, end_date, generator_id: str | None = None):
+    """Отримує логи за період.
+    
+    Args:
+        start_date: початкова дата
+        end_date: кінцева дата
+        generator_id: фільтр по генератору ('main', 'emergency' або None для всіх)
+    """
     with get_connection() as conn:
-        query = """
-            SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
-            FROM logs
-            WHERE timestamp >= ? AND timestamp <= ?
-            ORDER BY timestamp ASC
-        """
-        return conn.execute(
-            query,
-            (start_date + " 00:00:00", end_date + " 23:59:59"),
-        ).fetchall()
+        if generator_id:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                WHERE timestamp >= ? AND timestamp <= ? AND generator_id = ?
+                ORDER BY timestamp ASC
+            """
+            return conn.execute(
+                query,
+                (start_date + " 00:00:00", end_date + " 23:59:59", generator_id),
+            ).fetchall()
+        else:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                WHERE timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp ASC
+            """
+            return conn.execute(
+                query,
+                (start_date + " 00:00:00", end_date + " 23:59:59"),
+            ).fetchall()
 
 
-def get_refills_for_date(date_str: str):
-    """Повертає всі заправки за дату (для агрегації і idempotent sync у Sheet)."""
+def get_refills_for_date(date_str: str, generator_id: str | None = None):
+    """Повертає всі заправки за дату (для агрегації і idempotent sync у Sheet).
+    
+    Args:
+        date_str: дата у форматі YYYY-MM-DD
+        generator_id: фільтр по генератору
+    """
     if not date_str:
         return []
     with get_connection() as conn:
-        query = """
-            SELECT timestamp, user_name, value, driver_name, receipt_number
-            FROM logs
-            WHERE event_type = 'refill' AND timestamp LIKE ?
-            ORDER BY timestamp ASC
-        """
-        return conn.execute(query, (f"{date_str}%",)).fetchall()
+        if generator_id:
+            query = """
+                SELECT timestamp, user_name, value, driver_name, receipt_number
+                FROM logs
+                WHERE event_type = 'refill' AND timestamp LIKE ? AND generator_id = ?
+                ORDER BY timestamp ASC
+            """
+            return conn.execute(query, (f"{date_str}%", generator_id)).fetchall()
+        else:
+            query = """
+                SELECT timestamp, user_name, value, driver_name, receipt_number
+                FROM logs
+                WHERE event_type = 'refill' AND timestamp LIKE ?
+                ORDER BY timestamp ASC
+            """
+            return conn.execute(query, (f"{date_str}%",)).fetchall()
