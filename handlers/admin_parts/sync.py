@@ -70,6 +70,25 @@ def _release_sync_lock():
         logger.error(f"Failed to release sync lock: {e}")
 
 
+def _check_generator_off() -> tuple[bool, str]:
+    """Перевіряє чи генератор вимкнений.
+    
+    Returns: (is_off: bool, message: str)
+    """
+    try:
+        st = db.get_state() or {}
+        status = (st.get("status") or "OFF").upper()
+        
+        if status == "ON":
+            active_shift = st.get("active_shift", "none")
+            return False, f"⛔ Синхронізація неможлива поки генератор працює (зміна: {active_shift}).\n\n📌 Закрийте активну зміну перед синхронізацією!"
+        
+        return True, ""
+    except Exception as e:
+        logger.error(f"Error checking generator status: {e}")
+        return False, "⚠️ Помилка перевірки статусу генератора"
+
+
 @router.callback_query(F.data == "sync_menu")
 async def show_sync_menu(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -79,14 +98,19 @@ async def show_sync_menu(cb: types.CallbackQuery):
     sync_in_progress = db.get_state_value("sync_in_progress", "0") == "1"
     status_text = "\n⚠️ <b>Синхронізація вже виконується!</b>\n" if sync_in_progress else ""
     
+    # Перевірка статусу генератора
+    is_off, gen_msg = _check_generator_off()
+    if not is_off:
+        status_text += f"\n{gen_msg}\n"
+    
     txt = (
         "🔄 <b>Обмін з Google Sheets</b>\n\n"
         f"{status_text}"
-        "🧠 <b>Розумна синхронізація</b> — автоматично визначає що змінилось в БД чи Sheets, \n"
+        "🧠 <b>Розумна синхронізація</b> (рекомендовано) — автоматично визначає що змінилось, \n"
         "синхронізує тільки зміни, перевіряє витрати палива та оновлює довідники.\n\n"
-        "📥 <b>Імпорт</b> — читає дані з основної вкладки Sheets і повністю перезаписує БД.\n"
-        "📤 <b>Експорт</b> — дописує/оновлює дні з логів БД в основну вкладку Sheets, не чіпаючи дні, де дані вже є.\n\n"
-        "⚠️ Імпорт повністю очищає БД перед завантаженням (потрібне підтвердження).\n"
+        "📥 <b>Імпорт</b> (аварійний) — ПОВНІСТЮ очищає БД і завантажує з Sheets.\n"
+        "📤 <b>Експорт</b> (аварійний) — дописує з БД тільки порожні дні в Sheets.\n\n"
+        "⚠️ <b>ВАЖЛИВО:</b> Синхронізація можлива тільки коли генератор ВИМКНЕНО.\n"
         "⚠️ Ніяких фонових синхронізацій, тільки ручні операції.\n"
     )
     await cb.message.edit_text(txt, reply_markup=sync_menu())
@@ -103,13 +127,10 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
     if db.get_state_value("sync_in_progress", "0") == "1":
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
-    # Safety guard: не синхронізуємо, якщо генератор "ON" (може йти зміна прямо зараз)
-    try:
-        st = db.get_state() or {}
-        if (st.get("status") or "OFF") == "ON":
-            return await cb.answer("⛔ Спочатку закрийте активну зміну (генератор ON)", show_alert=True)
-    except Exception:
-        pass
+    # Перевірка чи генератор вимкнений
+    is_off, error_msg = _check_generator_off()
+    if not is_off:
+        return await cb.answer(error_msg, show_alert=True)
 
     txt = (
         "⚠️ <b>Підтвердження розумної синхронізації</b>\n\n"
@@ -123,7 +144,8 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
         "✅ Перевіряє витрати палива (колонка U) на збіг з config.FUEL_CONSUMPTION\n"
         "✅ Синхронізує довідники водіїв та персоналу (колонки R, S)\n\n"
         "✅ Не перезаписує, а саме синхронізує зміни\n\n"
-        "🔒 Безпечно для БД та Sheets."
+        "🔒 Безпечно для БД та Sheets.\n\n"
+        "⚠️ Генератор має бути ВИМКНЕНИЙ (зараз OFF ✅)."
     )
 
     await cb.message.edit_text(txt, reply_markup=_smart_sync_confirm_kb())
@@ -140,6 +162,11 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     try:
+        # Подвійна перевірка перед виконанням
+        is_off, error_msg = _check_generator_off()
+        if not is_off:
+            return await cb.answer(error_msg, show_alert=True)
+
         await cb.answer("⚙️ Синхронізація запускається...", show_alert=False)
         await cb.message.edit_text("⏳ <b>Розумна синхронізація...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
@@ -167,7 +194,7 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         _release_sync_lock()
 
 
-# --- ІМПОРТ ---
+# --- ІМПОРТ (АВАРІЙНИЙ) ---
 @router.callback_query(F.data == "sync_import")
 async def sync_import_confirm(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -177,22 +204,21 @@ async def sync_import_confirm(cb: types.CallbackQuery):
     if db.get_state_value("sync_in_progress", "0") == "1":
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
-    # Safety guard: не імпортуємо, якщо генератор "ON" (може йти зміна прямо зараз)
-    try:
-        st = db.get_state() or {}
-        if (st.get("status") or "OFF") == "ON":
-            return await cb.answer("⛔ Спочатку закрийте активну зміну (генератор ON)", show_alert=True)
-    except Exception:
-        pass
+    # Перевірка чи генератор вимкнений
+    is_off, error_msg = _check_generator_off()
+    if not is_off:
+        return await cb.answer(error_msg, show_alert=True)
 
     txt = (
-        "⚠️ <b>Підтвердження імпорту</b>\n\n"
+        "⚠️ <b>Підтвердження імпорту (АВАРІЙНА ОПЦІЯ)</b>\n\n"
+        "❌ <b>ЦЕ ДЕСТРУКТИВНА ОПЕРАЦІЯ!</b>\n\n"
         "Імпорт зробить наступне:\n"
-        "• Повністю очистить БД\n"
+        "• ПОВНІСТЮ очистить БД (всі дані будуть видалені)\n"
         "• Завантажить дані з основної вкладки Google Sheets\n"
-        "• Відновить журнал подій і стан генератора з цієї вкладки\n\n"
+        "• Відновить журнал подій і стан генератора\n\n"
         "❌ <b>Цю операцію НЕМОЖЛИВО ВІДМІНИТИ!</b>\n\n"
-        "Рекомендація: перед імпортом зробіть експорт як резервну копію."
+        "👉 Рекомендація: використовуйте <b>Розумну синхронізацію</b> замість імпорту.\n"
+        "👉 Використовуйте імпорт тільки для повного відновлення з Sheets."
     )
 
     await cb.message.edit_text(txt, reply_markup=_import_confirm_kb())
@@ -209,6 +235,11 @@ async def sync_import_execute(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     try:
+        # Подвійна перевірка перед виконанням
+        is_off, error_msg = _check_generator_off()
+        if not is_off:
+            return await cb.answer(error_msg, show_alert=True)
+
         await cb.answer("⚙️ Імпорт запускається...", show_alert=False)
         await cb.message.edit_text("⏳ <b>Імпорт з Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
@@ -238,7 +269,7 @@ async def sync_import_execute(cb: types.CallbackQuery):
         _release_sync_lock()
 
 
-# --- ЕКСПОРТ ---
+# --- ЕКСПОРТ (АВАРІЙНИЙ) ---
 @router.callback_query(F.data == "sync_export")
 async def sync_export_confirm(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -248,13 +279,19 @@ async def sync_export_confirm(cb: types.CallbackQuery):
     if db.get_state_value("sync_in_progress", "0") == "1":
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
+    # Перевірка чи генератор вимкнений
+    is_off, error_msg = _check_generator_off()
+    if not is_off:
+        return await cb.answer(error_msg, show_alert=True)
+
     txt = (
-        "⚠️ <b>Підтвердження експорту</b>\n\n"
+        "⚠️ <b>Підтвердження експорту (АВАРІЙНА ОПЦІЯ)</b>\n\n"
         "Експорт зробить наступне:\n"
-        "• Для кожного дня з логів БД допише/оновить дані в основній вкладці Sheets,\n"
-        "  якщо для цієї дати (B..I,N,P,Q) ще порожні.\n"
-        "• Дні, де в Sheets вже є дані в B..I,N,P,Q, будуть пропущені без змін.\n\n"
-        "Це безпечно для БД, але може дописувати/оновлювати незаповнені дні в таблиці."
+        "• Для кожного дня з логів БД допише/оновить дані в Sheets\n"
+        "• Тільки для дат, де колонки B..I,N,P,Q ще порожні\n"
+        "• Дні з даними в Sheets будуть пропущені\n\n"
+        "✅ Безпечно для БД, але може дописувати незаповнені дні в таблиці.\n\n"
+        "👉 Рекомендація: використовуйте <b>Розумну синхронізацію</b> замість експорту."
     )
 
     await cb.message.edit_text(txt, reply_markup=_export_confirm_kb())
@@ -271,6 +308,11 @@ async def sync_export_execute(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Синхронізація вже виконується. Зачекайте.", show_alert=True)
 
     try:
+        # Подвійна перевірка перед виконанням
+        is_off, error_msg = _check_generator_off()
+        if not is_off:
+            return await cb.answer(error_msg, show_alert=True)
+
         await cb.answer("⚙️ Експорт запускається...", show_alert=False)
         await cb.message.edit_text("⏳ <b>Експорт в Google Sheets...</b>\n\nЗачекайте, це може зайняти кілька секунд...")
 
