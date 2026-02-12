@@ -148,7 +148,22 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
     async def save_handler(msg: types.Message, state: FSMContext):
         if msg.from_user.id not in config.ADMIN_IDS:
             await state.clear()
-            return await msg.answer("⛔ Тільки для адмінів")
+            # FIX #24: Delete user message to maintain single-window UI
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            return
+
+        # FIX #24: Get UI message ID for single-window editing
+        ui_msg = db.get_ui_message(msg.from_user.id)
+        if not ui_msg:
+            # Fallback: if no UI message tracked, use old behavior
+            await state.clear()
+            await msg.answer("⛔ Помилка: втрачено зв'язок з UI. Поверніться в меню.")
+            return
+        
+        ui_chat_id, ui_msg_id = ui_msg
 
         # FIX #12: Transactional status check at write time
         conn = get_connection()
@@ -160,7 +175,23 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
             if current_status == "ON":
                 conn.rollback()
                 await state.clear()
-                return await msg.answer("⛔ Корекції заборонені під час активної зміни")
+                
+                # FIX #24: Edit UI message and delete user message
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                
+                try:
+                    await msg.bot.edit_message_text(
+                        chat_id=ui_chat_id,
+                        message_id=ui_msg_id,
+                        text="⛔ Корекції заборонені під час активної зміни.\n\n" + _build_correction_text(),
+                        reply_markup=correction_menu(),
+                    )
+                except Exception:
+                    pass
+                return
             
             # Validate and parse input
             try:
@@ -169,10 +200,43 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
 
                 if val < config_dict["min_val"]:
                     conn.rollback()
-                    return await msg.answer(f"❌ Значення не може бути менше {config_dict['min_val']}", reply_markup=back_to_corr())
+                    
+                    # FIX #24: Edit UI message and delete user message
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                    
+                    try:
+                        await msg.bot.edit_message_text(
+                            chat_id=ui_chat_id,
+                            message_id=ui_msg_id,
+                            text=f"❌ Значення не може бути менше {config_dict['min_val']}.\n\n{config_dict['prompt_emoji']} {config_dict['prompt_text']}: введіть коректне значення.",
+                            reply_markup=back_to_corr(),
+                        )
+                    except Exception:
+                        pass
+                    return
+                    
                 if val > config_dict["max_val"]:
                     conn.rollback()
-                    return await msg.answer(f"❌ Значення занадто велике (максимум {config_dict['max_val']})", reply_markup=back_to_corr())
+                    
+                    # FIX #24: Edit UI message and delete user message
+                    try:
+                        await msg.delete()
+                    except Exception:
+                        pass
+                    
+                    try:
+                        await msg.bot.edit_message_text(
+                            chat_id=ui_chat_id,
+                            message_id=ui_msg_id,
+                            text=f"❌ Значення занадто велике (максимум {config_dict['max_val']}).\n\n{config_dict['prompt_emoji']} {config_dict['prompt_text']}: введіть коректне значення.",
+                            reply_markup=back_to_corr(),
+                        )
+                    except Exception:
+                        pass
+                    return
 
                 # Apply the change
                 config_dict["db_setter"](val)
@@ -185,12 +249,42 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                 conn.commit()
 
                 await state.clear()
+                
+                # FIX #24: Edit UI message and delete user message
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                
                 txt = "✅ Збережено.\n\n" + _build_correction_text()
-                await msg.answer(txt, reply_markup=correction_menu())
+                try:
+                    await msg.bot.edit_message_text(
+                        chat_id=ui_chat_id,
+                        message_id=ui_msg_id,
+                        text=txt,
+                        reply_markup=correction_menu(),
+                    )
+                except Exception:
+                    pass
 
             except ValueError:
                 conn.rollback()
-                await msg.answer("❌ Введіть число (наприклад 171.0)", reply_markup=back_to_corr())
+                
+                # FIX #24: Edit UI message and delete user message
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
+                
+                try:
+                    await msg.bot.edit_message_text(
+                        chat_id=ui_chat_id,
+                        message_id=ui_msg_id,
+                        text=f"❌ Введіть число (наприклад 171.0).\n\n{config_dict['prompt_emoji']} {config_dict['prompt_text']}: введіть коректне значення.",
+                        reply_markup=back_to_corr(),
+                    )
+                except Exception:
+                    pass
         
         except Exception as e:
             try:
@@ -199,7 +293,22 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                 pass
             logger.error(f"Помилка корекції {corr_type}: {e}", exc_info=True)
             await state.clear()
-            await msg.answer(f"❌ Помилка: {e}")
+            
+            # FIX #24: Edit UI message and delete user message
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+            
+            try:
+                await msg.bot.edit_message_text(
+                    chat_id=ui_chat_id,
+                    message_id=ui_msg_id,
+                    text=f"❌ Помилка: {e}\n\n" + _build_correction_text(),
+                    reply_markup=correction_menu(),
+                )
+            except Exception:
+                pass
         finally:
             try:
                 conn.close()
