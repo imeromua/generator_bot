@@ -44,6 +44,26 @@ def get_last_logs(limit: int = 15):
         return conn.execute(query, (lim,)).fetchall()
 
 
+def get_last_sync():
+    """FIX #23: Повертає час останньої синхронізації та ім'я користувача.
+    
+    Returns:
+        tuple: (timestamp_str, user_name) або (None, None) якщо синхронізації не було
+    """
+    with get_connection() as conn:
+        query = """
+            SELECT timestamp, user_name
+            FROM logs
+            WHERE event_type = 'sync'
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+        """
+        row = conn.execute(query).fetchone()
+        if row:
+            return row[0], row[1]
+        return None, None
+
+
 def add_log(event, user, val=None, driver=None, receipt=None, ts: str | None = None, conn=None):
     """FIX #7: Add optional conn parameter for transactional operations.
     
