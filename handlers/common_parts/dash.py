@@ -21,6 +21,36 @@ def _fmt_state_ts(ts_raw: str | None) -> str:
         return ""
 
 
+def _format_sync_time(ts_str: str | None) -> str:
+    """Форматує час синхронізації у зручному вигляді."""
+    if not ts_str:
+        return "ніколи"
+    
+    try:
+        # Парсимо час із бази
+        dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        dt = dt.replace(tzinfo=config.KYIV)
+        now = datetime.now(config.KYIV)
+        
+        # Обчислюємо різницю
+        diff = now - dt
+        
+        if diff.total_seconds() < 60:
+            return "щойно"
+        elif diff.total_seconds() < 3600:
+            mins = int(diff.total_seconds() // 60)
+            return f"{mins} хв тому"
+        elif diff.total_seconds() < 86400:
+            hours = int(diff.total_seconds() // 3600)
+            return f"{hours} год тому"
+        elif dt.date() == (now - timedelta(days=1)).date():
+            return f"вчора о {dt.strftime('%H:%M')}"
+        else:
+            return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return ts_str
+
+
 def _calc_run_hours(st: dict, now: datetime) -> float:
     """Best-effort runtime hours from state start_date/start_time.
 
@@ -55,7 +85,13 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
 
     completed = db.get_today_completed_shifts()
 
-    status_icon = "🟢 ПРАЦЮЄ" if st['status'] == 'ON' else "💤 ВИМКНЕНО"
+    # FIX #23: Покращений дизайн статусу
+    if st['status'] == 'ON':
+        active_shift = st.get('active_shift', 'невідомо')
+        shift_code = active_shift.split("_")[0].upper() if "_" in active_shift else active_shift.upper()
+        status_icon = f"🟭 <b>ПРАЦЮЄ</b> (Зміна: {shift_code})"
+    else:
+        status_icon = "🟢 <b>ВИМКНЕНО</b>"
 
     to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
     to_service_hhmm = format_hours_hhmm(to_service)
@@ -89,24 +125,33 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     mode_mark = ""
     try:
         if bool(getattr(config, "IS_TEST_MODE", False)):
-            mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n➖➖➖➖➖➖\n"
+            mode_mark = "🧪 <b>ТЕСТОВИЙ РЕЖИМ</b>\n──────────────\n"
     except Exception:
         pass
 
-    # REMOVED: OFFLINE mode message - not relevant for manual sync workflow (SHEETS_RUNTIME_ENABLED=0)
-    # Users now manually import/export data via admin commands
+    # FIX #23: Отримуємо останню синхронізацію
+    last_sync_ts, last_sync_user = db.get_last_sync()
+    if last_sync_ts:
+        sync_time = _format_sync_time(last_sync_ts)
+        sync_line = f"🔄 Остання синхронізація: {sync_time}"
+    else:
+        sync_line = "🔄 Остання синхронізація: ніколи"
 
+    # FIX #23: Покращений визуальний дизайн
     txt = (
         f"{mode_mark}"
-        f"🔋 <b>Генератор:</b> {status_icon}\n"
+        f"🟢 <b>Генератор:</b> {status_icon}\n"
+        f"──────────────\n"
         f"⛽ Залишок палива{fuel_mark}: <b>{current_fuel:.1f} л</b>\n"
-        f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
+        f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n"
+        f"🛢 До ТО: <b>{to_service_hhmm}</b>\n"
+        f"──────────────\n"
         f"👤 <b>Ви:</b> {user_name}\n"
-        f"🛢 До ТО: <b>{to_service_hhmm}</b>"
+        f"{sync_line}"
     )
 
     if st['status'] == 'ON':
-        txt += f"\n⏱ Старт був о: {st['start_time']}"
+        txt += f"\n⏱ Старт був о: <b>{st['start_time']}</b>"
 
     if banner:
         txt = f"{banner}\n\n" + txt
