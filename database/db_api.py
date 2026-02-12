@@ -15,8 +15,17 @@ from database.api.personnel import (
     get_all_users_with_personnel,
     sync_personnel_from_sheet,
     get_personnel_names,
+    add_personnel_name,
+    update_personnel_name,
+    delete_personnel_name,
 )
-from database.api.drivers import add_driver, get_drivers, sync_drivers_from_sheet, delete_driver
+from database.api.drivers import (
+    add_driver, 
+    get_drivers, 
+    update_driver,
+    delete_driver,
+    sync_drivers_from_sheet,
+)
 from database.api.state import (
     _OFFLINE_THRESHOLD_SECONDS,
     set_state,
@@ -71,11 +80,15 @@ __all__ = [
     "get_all_users_with_personnel",
     "sync_personnel_from_sheet",
     "get_personnel_names",
+    "add_personnel_name",
+    "update_personnel_name",
+    "delete_personnel_name",
     # drivers
     "add_driver",
     "get_drivers",
-    "sync_drivers_from_sheet",
+    "update_driver",
     "delete_driver",
+    "sync_drivers_from_sheet",
     # state
     "_OFFLINE_THRESHOLD_SECONDS",
     "set_state",
