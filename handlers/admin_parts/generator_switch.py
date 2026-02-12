@@ -4,6 +4,7 @@
 - Перемикання між генераторами (тільки коли статус OFF)
 - Показ статистики кожного генератора
 - Експорт звіту аварійного генератора в Excel
+- Архів звітів
 """
 
 import logging
@@ -31,6 +32,9 @@ except ImportError:
 router = Router()
 logger = logging.getLogger(__name__)
 
+# Максимальна кількість звітів в архіві
+MAX_ARCHIVE_SIZE = 10
+
 
 def _generator_keyboard(last_export_time: str = None):
     """Клавіатура для управління генераторами.
@@ -54,10 +58,19 @@ def _generator_keyboard(last_export_time: str = None):
         if last_export_time:
             export_text += f" • {last_export_time}"
         builder.button(text=export_text, callback_data="gen_export_excel")
+        builder.button(text="📂 Архів звітів", callback_data="gen_archive")
     
     builder.button(text="🔙 Назад", callback_data="admin_home")
     builder.adjust(1)
     
+    return builder.as_markup()
+
+
+def _document_keyboard():
+    """Клавіатура для документа звіту."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Повернутися до меню", callback_data="generator_switch")
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -169,6 +182,77 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
     builder.button(text="🔙 Назад", callback_data="generator_switch")
     
     await cb.message.edit_text(text, reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data == "gen_archive")
+async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext):
+    """Показ архіву звітів."""
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+    
+    # Отримуємо архів звітів з state
+    archive_json = db.get_state_value('reports_archive', '[]')
+    try:
+        import json
+        archive = json.loads(archive_json)
+    except Exception:
+        archive = []
+    
+    if not archive:
+        await cb.answer("📂 Архів звітів порожній", show_alert=True)
+        return
+    
+    text = (
+        f"📂 <b>Архів звітів</b>\n"
+        f"──────────────────\n"
+        f"Останні {len(archive)} звітів:\n\n"
+    )
+    
+    builder = InlineKeyboardBuilder()
+    
+    for idx, report in enumerate(reversed(archive), 1):
+        file_id = report.get('file_id')
+        timestamp = report.get('timestamp', '')
+        
+        # Форматуємо дату
+        try:
+            dt = datetime.fromisoformat(timestamp)
+            date_str = dt.strftime("%d.%m.%Y %H:%M")
+        except Exception:
+            date_str = timestamp
+        
+        text += f"{idx}. 📊 {date_str}\n"
+        builder.button(text=f"📥 Звіт #{idx}", callback_data=f"gen_get_report_{file_id}")
+    
+    builder.button(text="🔙 Назад", callback_data="generator_switch")
+    builder.adjust(1)
+    
+    await cb.message.edit_text(text, reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data.startswith("gen_get_report_"))
+async def gen_get_report(cb: types.CallbackQuery, state: FSMContext):
+    """Отримати звіт з архіву."""
+    if cb.from_user.id not in config.ADMIN_IDS:
+        return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
+    
+    file_id = cb.data.replace("gen_get_report_", "")
+    
+    await cb.answer("📤 Відправляю звіт...")
+    
+    try:
+        # Видаляємо старе меню (єдине вікно)
+        await cb.message.delete()
+        
+        # Відправляємо документ з кнопками
+        await cb.message.answer_document(
+            document=file_id,
+            caption="📊 Звіт аварійного генератора з архіву",
+            reply_markup=_document_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Помилка отримання звіту з архіву: {e}")
+        await cb.answer(f"❌ Помилка: {e}", show_alert=True)
 
 
 @router.callback_query(F.data == "gen_export_excel")
@@ -291,36 +375,37 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
         filename = f"emergency_generator_{datetime.now(config.KYIV).strftime('%Y%m%d_%H%M')}.xlsx"
         file = types.BufferedInputFile(buffer.read(), filename=filename)
         
-        await cb.message.answer_document(
+        # Видаляємо старе меню (концепція єдиного вікна)
+        await cb.message.delete()
+        
+        # Відправляємо документ з кнопками
+        sent_msg = await cb.message.answer_document(
             document=file,
-            caption=f"📊 Звіт аварійного генератора\n🗓 Період: {start_date} — {end_date}\n📁 {len(logs)} подій"
+            caption=f"📊 Звіт аварійного генератора\n🗓 Період: {start_date} — {end_date}\n📁 {len(logs)} подій",
+            reply_markup=_document_keyboard()
         )
         
-        # Оновлюємо меню з підтвердженням та часом експорту
-        export_time = datetime.now(config.KYIV).strftime("%H:%M")
+        # Зберігаємо в архів
+        import json
+        archive_json = db.get_state_value('reports_archive', '[]')
+        try:
+            archive = json.loads(archive_json)
+        except Exception:
+            archive = []
         
-        active_gen = db.get_active_generator()
-        gen_name = db.get_generator_name(active_gen)
-        st = db.get_state()
-        status = st.get("status", "OFF")
-        stats = db.get_generator_stats("emergency")
+        # Додаємо новий звіт
+        archive.append({
+            'file_id': sent_msg.document.file_id,
+            'timestamp': datetime.now(config.KYIV).isoformat(),
+            'filename': filename
+        })
         
-        info_text = (
-            f"⚡ <b>Управління генераторами</b>\n"
-            f"──────────────────\n"
-            f"⚠️ Активний: {gen_name}\n"
-            f"📊 Статус: {'🟢 ВИМКНЕНО' if status == 'OFF' else '🟩 ПРАЦЮЄ'}\n\n"
-            f"📈 Аварійний генератор:\n"
-            f"  ⏱ Мотогодини: {stats['total_hours']:.1f} год\n"
-            f"  🛢 Мастило: {stats['last_oil_change']:.1f} год\n"
-            f"  🕯 Свічки: {stats['last_spark_change']:.1f} год\n\n"
-            f"✅ <b>Звіт відправлено вище!</b>\n\n"
-            f"⚠️ <b>УВАГА!</b> Аварійний генератор НЕ синхронізується з Google Sheets.\n"
-            f"Звіт можна експортувати в Excel.\n\n"
-            f"💡 Для перемикання генератор має бути вимкнений (OFF)"
-        )
+        # Обмежуємо розмір архіву
+        if len(archive) > MAX_ARCHIVE_SIZE:
+            archive = archive[-MAX_ARCHIVE_SIZE:]
         
-        await cb.message.edit_text(info_text, reply_markup=_generator_keyboard(last_export_time=export_time))
+        # Зберігаємо назад в БД
+        db.set_state_value('reports_archive', json.dumps(archive))
         
     except Exception as e:
         logger.error(f"Помилка експорту Excel: {e}", exc_info=True)
