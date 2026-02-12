@@ -48,6 +48,12 @@ from database.api.logs import (
 )
 from database.api.maintenance import update_hours, set_total_hours, record_maintenance
 from database.api.schedule import toggle_schedule, set_schedule_range, get_schedule
+from database.api.messages import (
+    add_message,
+    get_user_messages,
+    clear_user_messages,
+    get_message_count,
+)
 
 
 __all__ = [
@@ -106,4 +112,9 @@ __all__ = [
     "toggle_schedule",
     "set_schedule_range",
     "get_schedule",
+    # messages
+    "add_message",
+    "get_user_messages",
+    "clear_user_messages",
+    "get_message_count",
 ]
