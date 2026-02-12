@@ -1,6 +1,7 @@
 from aiogram import Router
 
-from handlers.admin_parts.correction import router as correction_router
+# DEPRECATED: Correction functionality moved to other menus
+# from handlers.admin_parts.correction import router as correction_router
 from handlers.admin_parts.db_cleanup import router as db_cleanup_router
 from handlers.admin_parts.drivers import router as drivers_router
 from handlers.admin_parts.fuel import router as fuel_router
@@ -17,7 +18,6 @@ router = Router()
 
 # Підключаємо роутери частин адмінки
 router.include_router(home_router)
-# router.include_router(sheet_mode_router)  <-- ВИДАЛЕНО
 router.include_router(personnel_router)
 router.include_router(schedule_router)
 router.include_router(maintenance_router)
@@ -26,6 +26,9 @@ router.include_router(reports_router)
 router.include_router(drivers_router)
 router.include_router(fuel_router)
 router.include_router(users_router)
-router.include_router(correction_router)
+# DEPRECATED: Correction menu removed - functionality moved to:
+#   - Hours: Maintenance menu (mnt_set_hours)
+#   - Fuel/Consumption: Generator-specific settings
+# router.include_router(correction_router)
 router.include_router(sync_router)
 router.include_router(db_cleanup_router)
