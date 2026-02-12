@@ -76,17 +76,17 @@ def main_dashboard(role, active_shift, completed_shifts):
 
 # --- АДМІН ПАНЕЛЬ ---
 def admin_panel():
-    """FIX: Improved admin panel with color-coded buttons and 2-column layout.
+    """Admin panel with streamlined operations.
+    
+    Removed deprecated Correction menu - its functionality has been moved to:
+    - Maintenance hours: TO menu (mnt_set_hours)
+    - Fuel correction: Direct fuel management in appropriate contexts
+    - Consumption rate: Generator-specific settings
     
     Priority levels:
     - High (primary/blue): Frequent operations (Sync, Schedule)
-    - Normal (no style): Regular operations (Personnel, Drivers, Corrections, Maintenance, Users)
+    - Normal (no style): Regular operations (Personnel, Drivers, Maintenance, Users)
     - Danger (red): Destructive operations (DB Cleanup)
-    
-    Layout optimizations:
-    - Most important buttons on top
-    - Related functions grouped in rows (2 buttons per row where logical)
-    - Dangerous operations isolated at bottom
     """
     kb = [
         # Row 1: Most frequent operations (2 in row)
@@ -98,14 +98,13 @@ def admin_panel():
         [
             InlineKeyboardButton(text="🔄 Перемикання генераторів", callback_data="generator_switch"),
         ],
-        # Row 3: People management (2 in row) - FIXED: Drivers button now points to drivers_menu
+        # Row 3: People management (2 in row)
         [
             InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu"),
             InlineKeyboardButton(text="🚛 Водії", callback_data="drivers_menu"),
         ],
-        # Row 4: Technical operations (2 in row)
+        # Row 4: Maintenance operations (single, prominent)
         [
-            InlineKeyboardButton(text="🧩 Корекція", callback_data="corr_menu"),
             InlineKeyboardButton(text="🛠 Меню ТО", callback_data="mnt_menu"),
         ],
         # Row 5: User management (single, less frequent)
@@ -139,21 +138,27 @@ def sync_menu():
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-# --- КОРЕКЦІЯ ---
+# --- КОРЕКЦІЯ (DEPRECATED - залишено для зворотної сумісності) ---
 def correction_menu():
+    """DEPRECATED: Correction menu is no longer used.
+    
+    Functionality moved to:
+    - Hours correction: Maintenance menu (mnt_set_hours)
+    - Fuel/consumption: Generator-specific settings
+    
+    This function is kept for backward compatibility but should not be called.
+    """
     kb = [
-        [InlineKeyboardButton(text="⛽️ Корекція залишку палива", callback_data="corr_fuel_set")],
-        [InlineKeyboardButton(text="📊 Корекція витрати палива (л/год)", callback_data="corr_fuel_consumption_set")],
-        [InlineKeyboardButton(text="⏱ Корекція мотогодин", callback_data="corr_total_hours_set")],
-        [InlineKeyboardButton(text="🛢 Корекція: остання заміна мастила", callback_data="corr_last_oil_set")],
-        [InlineKeyboardButton(text="🕯 Корекція: остання заміна свічок", callback_data="corr_last_spark_set")],
+        [InlineKeyboardButton(text="⚠️ Меню корекції видалено", callback_data="admin_home")],
+        [InlineKeyboardButton(text="🛠 Перейти до меню ТО", callback_data="mnt_menu")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
 def back_to_corr():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="corr_menu")]])
+    """DEPRECATED: Redirects to admin home."""
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 До адмін-панелі", callback_data="admin_home")]])
 
 
 # --- ГРАФІК ---
