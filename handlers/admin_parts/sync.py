@@ -14,7 +14,7 @@ from utils.messaging import notify_success, notify_error  # FIX #25
 try:
     from handlers.user_parts.sheets_shift import shift_pretty
 except ImportError:
-    # Fallback if import fails
+    # Fallback if import fails - FIX: correct emoji for shift 1
     def shift_pretty(code: str) -> str:
         mapping = {'m': '🟬 Зміна 1', 'd': '🟩 Зміна 2', 'e': '🟪 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
