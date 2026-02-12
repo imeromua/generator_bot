@@ -163,17 +163,30 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     # FIX #23: Покращений дизайн адмін панелі з назвою генератора
     txt = (
         f"⚙️ <b>Адмін Панель</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"──────────────────\n"
         f"{gen_label}\n"
         f"{status_line}\n\n"
         f"{fuel_line}\n"
         f"{mnt_line}\n"
         f"{total_line}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"──────────────────\n"
         f"{sync_line}\n"
     )
 
-    await cb.message.edit_text(text=txt, reply_markup=admin_panel())
+    # Перевіряємо, чи це текстове повідомлення
+    if cb.message.text:
+        # Якщо текстове - редагуємо
+        await cb.message.edit_text(text=txt, reply_markup=admin_panel())
+    else:
+        # Якщо документ - видаляємо і створюємо нове
+        await cb.message.delete()
+        new_msg = await cb.message.answer(text=txt, reply_markup=admin_panel())
+        # Фіксуємо message_id нового повідомлення
+        try:
+            db.set_ui_message(int(cb.from_user.id), int(new_msg.chat.id), int(new_msg.message_id))
+        except Exception:
+            pass
+        return
 
     # Фіксуємо message_id як єдине вікно для адміна
     try:
