@@ -1,4 +1,4 @@
-"""UI для перемикання між основним та аварійним генератором.
+"""Управління генераторами: UI для перемикання між основним та аварійним генератором.
 
 Функціонал:
 - Перемикання між генераторами (тільки коли статус OFF)
@@ -8,6 +8,7 @@
 
 import logging
 from io import BytesIO
+from datetime import datetime, timedelta
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -27,8 +28,12 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-def _generator_keyboard():
-    """Клавіатура для управління генераторами."""
+def _generator_keyboard(last_export_time: str = None):
+    """Клавіатура для управління генераторами.
+    
+    Args:
+        last_export_time: Час останнього експорту (наприклад "21:36")
+    """
     builder = InlineKeyboardBuilder()
     
     active_gen = db.get_active_generator()
@@ -41,7 +46,10 @@ def _generator_keyboard():
     builder.button(text="📊 Статистика генераторів", callback_data="gen_stats")
     
     if active_gen == "emergency":
-        builder.button(text="📥 Експорт звіту (Excel)", callback_data="gen_export_excel")
+        export_text = "📥 Експорт звіту (Excel)"
+        if last_export_time:
+            export_text += f" • {last_export_time}"
+        builder.button(text=export_text, callback_data="gen_export_excel")
     
     builder.button(text="🔙 Назад", callback_data="admin_home")
     builder.adjust(1)
@@ -68,26 +76,26 @@ async def gen_switch_menu(cb: types.CallbackQuery, state: FSMContext):
         stats = db.get_generator_stats("main")
         info_text = (
             f"⚡ <b>Управління генераторами</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"──────────────────\n"
             f"🔋 Активний: {gen_name}\n"
             f"📊 Статус: {'🟢 ВИМКНЕНО' if status == 'OFF' else '🟩 ПРАЦЮЄ'}\n\n"
             f"📈 Основний генератор:\n"
             f"  ⏱ Мотогодини: {stats['total_hours']:.1f} год\n"
             f"  🛢 Мастило: {stats['last_oil_change']:.1f} год\n"
-            f"  🔌 Свічки: {stats['last_spark_change']:.1f} год\n\n"
+            f"  🕯 Свічки: {stats['last_spark_change']:.1f} год\n\n"
             f"💡 Для перемикання генератор має бути вимкнений (OFF)"
         )
     else:
         stats = db.get_generator_stats("emergency")
         info_text = (
             f"⚡ <b>Управління генераторами</b>\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
+            f"──────────────────\n"
             f"⚠️ Активний: {gen_name}\n"
             f"📊 Статус: {'🟢 ВИМКНЕНО' if status == 'OFF' else '🟩 ПРАЦЮЄ'}\n\n"
             f"📈 Аварійний генератор:\n"
             f"  ⏱ Мотогодини: {stats['total_hours']:.1f} год\n"
             f"  🛢 Мастило: {stats['last_oil_change']:.1f} год\n"
-            f"  🔌 Свічки: {stats['last_spark_change']:.1f} год\n\n"
+            f"  🕯 Свічки: {stats['last_spark_change']:.1f} год\n\n"
             f"⚠️ <b>УВАГА!</b> Аварійний генератор НЕ синхронізується з Google Sheets.\n"
             f"Звіт можна експортувати в Excel.\n\n"
             f"💡 Для перемикання генератор має бути вимкнений (OFF)"
@@ -137,17 +145,17 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
     
     text = (
         f"📊 <b>Статистика генераторів</b>\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"{'🔹' if active_gen == 'main' else '▫️'} <b>Основний генератор</b>\n"
-        f"  ⏱ Мотогодини: {main_stats['total_hours']:.1f} год\n"
-        f"  🛢 Від заміни мастила: {main_stats['last_oil_change']:.1f} год\n"
-        f"  🔌 Від заміни свічок: {main_stats['last_spark_change']:.1f} год\n\n"
-        f"{'🔸' if active_gen == 'emergency' else '▫️'} <b>Аварійний генератор</b>\n"
-        f"  ⏱ Мотогодини: {emerg_stats['total_hours']:.1f} год\n"
-        f"  🛢 Від заміни мастила: {emerg_stats['last_oil_change']:.1f} год\n"
-        f"  🔌 Від заміни свічок: {emerg_stats['last_spark_change']:.1f} год\n\n"
-        f"{'🔹' if active_gen == 'main' else '🔸'} - Активний генератор\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        f"──────────────────\n\n"
+        f"{'\ud83d\udd39' if active_gen == 'main' else '\u25ab\ufe0f'} <b>\u041e\u0441\u043d\u043e\u0432\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>\n"
+        f"  \u23f1 \u041c\u043e\u0442\u043e\u0433\u043e\u0434\u0438\u043d\u0438: {main_stats['total_hours']:.1f} \u0433\u043e\u0434\n"
+        f"  \ud83d\udee2 \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u043c\u0430\u0441\u0442\u0438\u043b\u0430: {main_stats['last_oil_change']:.1f} \u0433\u043e\u0434\n"
+        f"  \ud83d\udd6f \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u0441\u0432\u0456\u0447\u043e\u043a: {main_stats['last_spark_change']:.1f} \u0433\u043e\u0434\n\n"
+        f"{'\ud83d\udd38' if active_gen == 'emergency' else '\u25ab\ufe0f'} <b>\u0410\u0432\u0430\u0440\u0456\u0439\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>\n"
+        f"  \u23f1 \u041c\u043e\u0442\u043e\u0433\u043e\u0434\u0438\u043d\u0438: {emerg_stats['total_hours']:.1f} \u0433\u043e\u0434\n"
+        f"  \ud83d\udee2 \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u043c\u0430\u0441\u0442\u0438\u043b\u0430: {emerg_stats['last_oil_change']:.1f} \u0433\u043e\u0434\n"
+        f"  \ud83d\udd6f \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u0441\u0432\u0456\u0447\u043e\u043a: {emerg_stats['last_spark_change']:.1f} \u0433\u043e\u0434\n\n"
+        f"{'\ud83d\udd39' if active_gen == 'main' else '\ud83d\udd38'} - \u0410\u043a\u0442\u0438\u0432\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440\n"
+        f"──────────────────\n"
         f"💡 Спільні параметри:\n"
         f"  ⛽ Залишок палива: {current_fuel:.1f} л\n"
         f"  👥 Персонал та водії\n"
@@ -218,7 +226,6 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
             cell.alignment = Alignment(horizontal="center")
         
         # Отримуємо всі логи аварійного генератора за останні 30 днів
-        from datetime import datetime, timedelta
         end_date = datetime.now(config.KYIV).strftime("%Y-%m-%d")
         start_date = (datetime.now(config.KYIV) - timedelta(days=30)).strftime("%Y-%m-%d")
         
@@ -269,9 +276,7 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
         buffer.seek(0)
         
         # Відправляємо файл
-        from datetime import datetime
         filename = f"emergency_generator_{datetime.now(config.KYIV).strftime('%Y%m%d_%H%M')}.xlsx"
-        
         file = types.BufferedInputFile(buffer.read(), filename=filename)
         
         await cb.message.answer_document(
@@ -279,7 +284,31 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
             caption=f"📊 Звіт аварійного генератора\n🗓 Період: {start_date} — {end_date}\n📁 {len(logs)} подій"
         )
         
-        await cb.answer("✅ Звіт відправлено")
+        # Оновлюємо меню з підтвердженням та часом експорту
+        export_time = datetime.now(config.KYIV).strftime("%H:%M")
+        
+        active_gen = db.get_active_generator()
+        gen_name = db.get_generator_name(active_gen)
+        st = db.get_state()
+        status = st.get("status", "OFF")
+        stats = db.get_generator_stats("emergency")
+        
+        info_text = (
+            f"⚡ <b>Управління генераторами</b>\n"
+            f"──────────────────\n"
+            f"⚠️ Активний: {gen_name}\n"
+            f"📊 Статус: {'🟢 ВИМКНЕНО' if status == 'OFF' else '🟩 ПРАЦЮЄ'}\n\n"
+            f"📈 Аварійний генератор:\n"
+            f"  ⏱ Мотогодини: {stats['total_hours']:.1f} год\n"
+            f"  🛢 Мастило: {stats['last_oil_change']:.1f} год\n"
+            f"  🕯 Свічки: {stats['last_spark_change']:.1f} год\n\n"
+            f"✅ <b>Звіт відправлено вище!</b>\n\n"
+            f"⚠️ <b>УВАГА!</b> Аварійний генератор НЕ синхронізується з Google Sheets.\n"
+            f"Звіт можна експортувати в Excel.\n\n"
+            f"💡 Для перемикання генератор має бути вимкнений (OFF)"
+        )
+        
+        await cb.message.edit_text(info_text, reply_markup=_generator_keyboard(last_export_time=export_time))
         
     except Exception as e:
         logger.error(f"Помилка експорту Excel: {e}", exc_info=True)
