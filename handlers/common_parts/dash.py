@@ -10,6 +10,16 @@ import database.db_api as db
 from keyboards.builders import main_dashboard
 from utils.time import format_hours_hhmm
 
+# FIX: Import shift_pretty for consistent formatting
+try:
+    from handlers.user_parts.sheets_shift import shift_pretty
+except ImportError:
+    # Fallback if import fails
+    def shift_pretty(code: str) -> str:
+        mapping = {'m': 'Зміна 1', 'd': 'Зміна 2', 'e': 'Зміна 3', 'x': 'Екстра'}
+        c = code.split('_')[0].lower() if '_' in code else code.lower()
+        return mapping.get(c, code)
+
 router = Router()
 
 
@@ -54,28 +64,6 @@ def _format_sync_time(ts_str: str | None) -> str:
         return ts_str
 
 
-def _shift_display_name(shift_code: str) -> str:
-    """Конвертує код зміни в читабельну назву.
-    
-    Args:
-        shift_code: 'm_start', 'd_start', 'e_start', 'x_start' або 'M', 'D', 'E', 'X'
-    
-    Returns:
-        Читабельна назва: 'Зміна 1', 'Зміна 2', 'Зміна 3', 'Екстра'
-    """
-    # Нормалізуємо до однієї літери
-    code = shift_code.split("_")[0].lower() if "_" in shift_code else shift_code.lower()
-    
-    mapping = {
-        'm': 'Зміна 1',
-        'd': 'Зміна 2',
-        'e': 'Зміна 3',
-        'x': 'Екстра'
-    }
-    
-    return mapping.get(code, shift_code.upper())
-
-
 def _calc_run_hours(st: dict, now: datetime) -> float:
     """Best-effort runtime hours from state start_date/start_time.
 
@@ -113,7 +101,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     # FIX: Покращений дизайн статусу з правильним емодзі та назвою зміни
     if st['status'] == 'ON':
         active_shift = st.get('active_shift', 'невідомо')
-        shift_name = _shift_display_name(active_shift)
+        shift_name = shift_pretty(active_shift)
         status_icon = f"🟩 <b>ПРАЦЮЄ</b> ({shift_name})"
     else:
         status_icon = "🟢 <b>ВИМКНЕНО</b>"
