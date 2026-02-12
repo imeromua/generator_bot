@@ -6,6 +6,7 @@
 3. Вирішує конфлікти на основі повноти даних
 4. Перевіряє відповідність витрат палива (колонка U)
 5. Синхронізує довідники водіїв та персоналу
+6. Логує подію синхронізації в системний журнал
 
 Колонки Sheets:
 - A: ДАТА
@@ -28,6 +29,7 @@ from datetime import datetime
 from typing import Literal
 
 import config
+import database.db_api as db
 from database.models import get_connection
 from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
 
@@ -78,6 +80,20 @@ class SyncReport:
                 parts.append(f"  ... та ще {len(self.errors) - 5}")
 
         return "\n".join(parts)
+
+    def log_summary(self) -> str:
+        """Коротка версія для логування в БД."""
+        parts = [
+            f"Експорт: {len(self.db_to_sheets)}",
+            f"Імпорт: {len(self.sheets_to_db)}",
+            f"Конфлікти: {len(self.conflicts)}",
+            f"Пропущено: {len(self.skipped)}",
+        ]
+        if self.fuel_rate_warnings:
+            parts.append(f"Попередження: {len(self.fuel_rate_warnings)}")
+        if self.errors:
+            parts.append(f"Помилки: {len(self.errors)}")
+        return "; ".join(parts)
 
 
 def _parse_date(date_str: str) -> str | None:
@@ -404,7 +420,7 @@ def _sync_references(sheets_data: dict, report: SyncReport):
     conn.close()
 
 
-def bidirectional_sync() -> SyncReport:
+def bidirectional_sync(user_name: str = "system") -> SyncReport:
     """Виконує двонаправлену синхронізацію між БД та Google Sheets.
 
     Алгоритм:
@@ -415,6 +431,10 @@ def bidirectional_sync() -> SyncReport:
        - Якщо є в обох → вирішує конфлікт (більше даних = приоритет)
     3. Перевіряє колонку U (витрати палива)
     4. Синхронізує довідники
+    5. Логує подію синхронізації в системний журнал
+
+    Args:
+        user_name: Ім'я користувача що виконав синхронізацію (для логування)
 
     Повертає: SyncReport з детальним звітом
     """
@@ -491,10 +511,35 @@ def bidirectional_sync() -> SyncReport:
         # Синхронізуємо довідники
         _sync_references(sheets_data, report)
 
+        # Логуємо подію синхронізації в системний журнал
+        try:
+            db.add_log(
+                event="sync",
+                user=user_name,
+                val=report.log_summary(),
+                driver=None,
+                receipt=None,
+            )
+            logger.info(f"📝 Подія синхронізації залогована: {user_name}")
+        except Exception as e:
+            logger.error(f"⚠️ Не вдалося залогувати подію синхронізації: {e}")
+
         logger.info("✅ Синхронізація завершена!")
 
     except Exception as e:
         logger.error(f"❌ Критична помилка синхронізації: {e}", exc_info=True)
         report.errors.append(("GLOBAL", str(e)))
+
+        # Логуємо помилку синхронізації
+        try:
+            db.add_log(
+                event="sync_error",
+                user=user_name,
+                val=str(e)[:500],  # обмежуємо довжину
+                driver=None,
+                receipt=None,
+            )
+        except Exception:
+            pass
 
     return report
