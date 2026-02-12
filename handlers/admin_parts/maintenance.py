@@ -28,10 +28,7 @@ class MaintenanceForm(StatesGroup):
 def format_mnt_status(generator_id: str) -> str:
     """Форматує статус ТО для генератора."""
     stats = db.get_maintenance_stats(generator_id)
-    gen_name = db.get_generator_name(generator_id)
-    
-    # Іконки генераторів
-    gen_icon = "🔋" if generator_id == "main" else "⚠️"
+    gen_name = db.get_generator_name(generator_id)  # Вже містить емодзі!
     
     # Форматування з попередженнями
     def fmt_line(name: str, icon: str, current: float, needed: float, interval: int) -> str:
@@ -48,7 +45,7 @@ def format_mnt_status(generator_id: str) -> str:
     mnt_line = fmt_line("Планове ТО", "🔧", stats['total_hours'] % config.MAINTENANCE_INTERVAL, stats['maintenance_needed'], config.MAINTENANCE_INTERVAL)
     
     return (
-        f"{gen_icon} <b>{gen_name}</b>:\n"
+        f"<b>{gen_name}</b>:\n"  # gen_name вже має емодзі
         f"⏱ Загальний пробіг: <b>{stats['total_hours']:.1f} год</b>\n"
         f"{oil_line}\n"
         f"{spark_line}\n"
