@@ -10,6 +10,7 @@ from services.scheduler_parts.morning_brief import maybe_send_morning_brief
 from services.scheduler_parts.auto_close import maybe_auto_close_shift
 from services.scheduler_parts.stop_reminder import maybe_send_stop_reminder
 from services.scheduler_parts.fuel_alert import check_fuel_alert
+from services.scheduler_parts.maintenance_alert import check_maintenance_alert  # FIX #25
 
 # Синхронізацію прибрали, бо вона тепер ручна
 # from services.google_sync_parts.sync_cycle import sync_cycle
@@ -83,6 +84,9 @@ async def scheduler_loop(bot):
 
             # 4. АЛЕРТИ ПО ПАЛИВУ (низький рівень)
             await check_fuel_alert(bot, state)
+
+            # 5. FIX #25: АЛЕРТИ ПО ТО (наближення техобслуговування)
+            await check_maintenance_alert(bot, state)
 
             # --- АВТОМАТИЧНУ СИНХРОНІЗАЦІЮ ВИДАЛЕНО ---
             # Тепер ми покладаємося тільки на БД.
