@@ -312,21 +312,6 @@ def init_db():
             timestamp TEXT NOT NULL
         )''')
 
-    # Індекси для оптимізації пошуку в таблиці logs
-    index_statements = [
-        "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
-        "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
-        "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
-        "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",  # NEW: index for emergency generator
-        "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",  # NEW: index for maintenance per generator
-        "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
-    ]
-    for stmt in index_statements:
-        try:
-            c.execute(stmt)
-        except Exception as e:
-            logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
-
     # Міграція: додавання receipt_number (старий код)
     try:
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
@@ -398,6 +383,21 @@ def init_db():
                 logging.info("✅ Колонка generator_id в maintenance вже існує")
             else:
                 logging.warning(f"⚠️ Не вдалося додати generator_id в maintenance: {e}")
+
+    # Індекси для оптимізації пошуку (створюються ПІСЛЯ міграцій!)
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
+        "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",  # NEW: index for emergency generator
+        "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",  # NEW: index for maintenance per generator
+        "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
+    ]
+    for stmt in index_statements:
+        try:
+            c.execute(stmt)
+        except Exception as e:
+            logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
 
     # Дефолтні значення generator_state
     defaults = [
