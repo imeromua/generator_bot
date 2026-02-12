@@ -4,6 +4,7 @@ from handlers.admin_parts.correction import router as correction_router
 from handlers.admin_parts.db_cleanup import router as db_cleanup_router
 from handlers.admin_parts.drivers import router as drivers_router
 from handlers.admin_parts.fuel import router as fuel_router
+from handlers.admin_parts.generator_switch import router as generator_switch_router
 from handlers.admin_parts.home import router as home_router
 from handlers.admin_parts.maintenance import router as maintenance_router
 from handlers.admin_parts.personnel import router as personnel_router
@@ -20,6 +21,7 @@ router.include_router(home_router)
 router.include_router(personnel_router)
 router.include_router(schedule_router)
 router.include_router(maintenance_router)
+router.include_router(generator_switch_router)
 router.include_router(reports_router)
 router.include_router(drivers_router)
 router.include_router(fuel_router)
