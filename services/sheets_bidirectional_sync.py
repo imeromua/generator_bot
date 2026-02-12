@@ -5,7 +5,7 @@
 2. Синхронізує тільки зміни (не перезаписує все)
 3. Вирішує конфлікти на основі повноти даних
 4. Перевіряє відповідність витрат палива (колонка U)
-5. Синхронізує довідники водіїв та персоналу
+5. Синхронізує довідники водіїв та персоналу ДВОНАПРАВЛЕНО (БД ⇄ Sheets)
 6. Логує подію синхронізації в системний журнал
 
 Колонки Sheets:
@@ -15,11 +15,11 @@
 - N: ПРИВЕЗЕНО ПАЛИВА
 - P: НОМЕР ЧЕКА
 - Q: ПАЛИВО ПРЕВІЗ (водій)
-- R: ВОДІЇЇ (довідник)
-- S: ПЕРСОНАЛ
+- R (28): ВОДІЇЇ (довідник) - СИНХРОНІЗУЄТЬСЯ ДВОНАПРАВЛЕНО
+- S (29): ПЕРСОНАЛ (довідник) - СИНХРОНІЗУЄТЬСЯ ДВОНАПРАВЛЕНО
 - U: витрати палива л/год (має збігатися з config.FUEL_CONSUMPTION)
 
-Бот записує: B, C, D, E, F, G, H, I, N, P, Q
+Бот записує: B, C, D, E, F, G, H, I, N, P, Q, R, S
 Бот читає: B, C, D, E, F, G, H, I, K, N, P, Q, R, S
 """
 
@@ -36,6 +36,8 @@ from services.google_sync_parts.client import make_client, open_spreadsheet, ope
 logger = logging.getLogger(__name__)
 
 _COL_U_INDEX = 20  # Колонка U (0-based: U = 20)
+_COL_R_INDEX = 17  # Колонка R - водії (0-based: R = 17)
+_COL_S_INDEX = 18  # Колонка S - персонал (0-based: S = 18)
 
 
 class SyncReport:
@@ -47,9 +49,26 @@ class SyncReport:
         self.conflicts: list[str] = []  # дати з конфліктами (вирішені)
         self.skipped: list[str] = []  # дати що однакові в обох
         self.fuel_rate_warnings: list[tuple[str, float]] = []  # дати де U не збігається
-        self.new_drivers: list[str] = []  # нові водії додані
-        self.new_personnel: list[str] = []  # новий персонал доданий
+        self.new_drivers: list[str] = []  # нові водії додані з Sheets → БД
+        self.new_personnel: list[str] = []  # новий персонал доданий з Sheets → БД
+        self.drivers_synced_to_sheets: int = 0  # водії записані в Sheets
+        self.personnel_synced_to_sheets: int = 0  # персонал записаний в Sheets
         self.errors: list[tuple[str, str]] = []  # помилки (дата, текст)
+
+    @property
+    def total_dates(self) -> int:
+        """Загальна кількість оброблених дат."""
+        return len(self.db_to_sheets) + len(self.sheets_to_db) + len(self.conflicts) + len(self.skipped)
+
+    @property
+    def imported(self) -> int:
+        """Кількість імпортованих дат (Sheets → БД)."""
+        return len(self.sheets_to_db)
+
+    @property
+    def exported(self) -> int:
+        """Кількість експортованих дат (БД → Sheets)."""
+        return len(self.db_to_sheets)
 
     def summary(self) -> str:
         """Текстовий звіт для адміна."""
@@ -61,16 +80,25 @@ class SyncReport:
             f"⏭ Пропущено (однакові): <b>{len(self.skipped)}</b> днів",
         ]
 
+        # Звіт про довідники
+        if self.new_drivers or self.drivers_synced_to_sheets:
+            parts.append(f"\n🚛 <b>Водії:</b>")
+            if self.new_drivers:
+                parts.append(f"  📥 Додано з Sheets → БД: {', '.join(self.new_drivers)}")
+            if self.drivers_synced_to_sheets > 0:
+                parts.append(f"  📤 Записано БД → Sheets: {self.drivers_synced_to_sheets} водіїв")
+
+        if self.new_personnel or self.personnel_synced_to_sheets:
+            parts.append(f"\n👥 <b>Персонал:</b>")
+            if self.new_personnel:
+                parts.append(f"  📥 Додано з Sheets → БД: {', '.join(self.new_personnel)}")
+            if self.personnel_synced_to_sheets > 0:
+                parts.append(f"  📤 Записано БД → Sheets: {self.personnel_synced_to_sheets} осіб")
+
         if self.fuel_rate_warnings:
             parts.append(f"\n⚠️ <b>Попередження витрат палива (колонка U):</b>")
             for date, rate in self.fuel_rate_warnings:
                 parts.append(f"  • {date}: {rate} л/год (очікується {config.FUEL_CONSUMPTION})")
-
-        if self.new_drivers:
-            parts.append(f"\n🚗 Додано водіїв: {', '.join(self.new_drivers)}")
-
-        if self.new_personnel:
-            parts.append(f"👥 Додано персонал: {', '.join(self.new_personnel)}")
 
         if self.errors:
             parts.append(f"\n❌ <b>Помилки ({len(self.errors)}):</b>")
@@ -89,6 +117,10 @@ class SyncReport:
             f"Конфлікти: {len(self.conflicts)}",
             f"Пропущено: {len(self.skipped)}",
         ]
+        if self.new_drivers or self.drivers_synced_to_sheets:
+            parts.append(f"Водії: +{len(self.new_drivers)} (БД), {self.drivers_synced_to_sheets} (Sheets)")
+        if self.new_personnel or self.personnel_synced_to_sheets:
+            parts.append(f"Персонал: +{len(self.new_personnel)} (БД), {self.personnel_synced_to_sheets} (Sheets)")
         if self.fuel_rate_warnings:
             parts.append(f"Попередження: {len(self.fuel_rate_warnings)}")
         if self.errors:
@@ -244,8 +276,8 @@ def _get_sheets_data_by_date(worksheet) -> dict[str, dict]:
                 pass
 
         # Читаємо довідники
-        drivers_list = [d.strip() for d in _get(17).split(",") if d.strip()]  # R
-        personnel_list = [p.strip() for p in _get(18).split(",") if p.strip()]  # S
+        drivers_list = [d.strip() for d in _get(_COL_R_INDEX).split(",") if d.strip()]  # R
+        personnel_list = [p.strip() for p in _get(_COL_S_INDEX).split(",") if p.strip()]  # S
 
         days[date_str] = {
             "row_idx": idx,
@@ -381,8 +413,11 @@ def _write_sheets_to_db(date: str, sheets_data: dict, conn):
         )
 
 
-def _sync_references(sheets_data: dict, report: SyncReport):
-    """Синхронізує довідники водіїв та персоналу."""
+def _sync_references_from_sheets_to_db(sheets_data: dict, report: SyncReport):
+    """Синхронізує довідники водіїв та персоналу: Sheets → БД.
+    
+    Додає нових водіїв/персонал з Sheets що відсутні в БД.
+    """
     conn = get_connection()
 
     # Збираємо всіх водіїв та персонал з Sheets
@@ -406,6 +441,7 @@ def _sync_references(sheets_data: dict, report: SyncReport):
         try:
             conn.execute("INSERT INTO drivers (name) VALUES (?)", (driver,))
             report.new_drivers.append(driver)
+            logger.info(f"📥 Додано водія з Sheets → БД: {driver}")
         except Exception as e:
             logger.warning(f"Не вдалося додати водія {driver}: {e}")
 
@@ -413,11 +449,46 @@ def _sync_references(sheets_data: dict, report: SyncReport):
         try:
             conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (person,))
             report.new_personnel.append(person)
+            logger.info(f"📥 Додано персонал з Sheets → БД: {person}")
         except Exception as e:
             logger.warning(f"Не вдалося додати персонал {person}: {e}")
 
     conn.commit()
     conn.close()
+
+
+def _write_references_to_sheets(worksheet, report: SyncReport):
+    """Записує довідники водіїв та персоналу: БД → Sheets.
+    
+    Записує всіх водіїв з БД в колонку R (28) та персонал в S (29) рядка 2.
+    Формат: через кому, без дублікатів.
+    """
+    try:
+        # Отримуємо водіїв та персонал з БД
+        drivers_list = db.get_drivers()
+        personnel_list = db.get_personnel_names()
+
+        # Форматуємо у вигляді рядка через кому
+        drivers_str = ", ".join(drivers_list) if drivers_list else ""
+        personnel_str = ", ".join(personnel_list) if personnel_list else ""
+
+        # Записуємо в рядок 2 (перший рядок з даними після заголовка)
+        # Колонка R (індекс 17, але в нотації A1 це R)
+        # Колонка S (індекс 18, але в нотації A1 це S)
+        
+        if drivers_str:
+            worksheet.update("R2", [[drivers_str]], value_input_option="USER_ENTERED")
+            report.drivers_synced_to_sheets = len(drivers_list)
+            logger.info(f"📤 Записано {len(drivers_list)} водіїв БД → Sheets (колонка R)")
+        
+        if personnel_str:
+            worksheet.update("S2", [[personnel_str]], value_input_option="USER_ENTERED")
+            report.personnel_synced_to_sheets = len(personnel_list)
+            logger.info(f"📤 Записано {len(personnel_list)} персоналу БД → Sheets (колонка S)")
+
+    except Exception as e:
+        logger.error(f"❌ Помилка запису довідників БД → Sheets: {e}", exc_info=True)
+        report.errors.append(("REFERENCES_TO_SHEETS", str(e)))
 
 
 def bidirectional_sync(user_name: str = "system") -> SyncReport:
@@ -430,7 +501,9 @@ def bidirectional_sync(user_name: str = "system") -> SyncReport:
        - Якщо є тільки в Sheets → імпорт в БД
        - Якщо є в обох → вирішує конфлікт (більше даних = приоритет)
     3. Перевіряє колонку U (витрати палива)
-    4. Синхронізує довідники
+    4. Синхронізує довідники ДВОНАПРАВЛЕНО:
+       - Sheets → БД: додає нових водіїв/персонал
+       - БД → Sheets: записує всіх водіїв (R) та персонал (S)
     5. Логує подію синхронізації в системний журнал
 
     Args:
@@ -508,8 +581,14 @@ def bidirectional_sync(user_name: str = "system") -> SyncReport:
         conn.commit()
         conn.close()
 
-        # Синхронізуємо довідники
-        _sync_references(sheets_data, report)
+        # Синхронізуємо довідники ДВОНАПРАВЛЕНО
+        logger.info("🔄 Синхронізація довідників...")
+        
+        # 1. Sheets → БД (додаємо нових)
+        _sync_references_from_sheets_to_db(sheets_data, report)
+        
+        # 2. БД → Sheets (записуємо всіх)
+        _write_references_to_sheets(worksheet, report)
 
         # Логуємо подію синхронізації в системний журнал
         try:
