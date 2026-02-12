@@ -13,6 +13,7 @@ from handlers.common import show_dash
 from handlers.user_parts.utils import ensure_user, get_operator_personnel_name
 from keyboards.builders import main_dashboard, drivers_list
 from utils.time import now_kiev
+from utils.messaging import notify_success, notify_error  # FIX #25
 
 router = Router()
 
@@ -191,6 +192,8 @@ async def refill_save(msg: types.Message, state: FSMContext):
         await state.clear()
         user = ensure_user(msg.from_user.id, msg.from_user.first_name)
         if user:
+            # FIX #25: Notify error
+            notify_error(msg.from_user.id, "❌ Прийом палива заборонено поза робочим часом")
             await show_dash(msg, user[0], user[1], banner=err)
         else:
             try:
@@ -269,6 +272,9 @@ async def refill_save(msg: types.Message, state: FSMContext):
         
         await state.clear()
         
+        # FIX #25: Notify error
+        notify_error(msg.from_user.id, f"❌ Помилка збереження заправки: {str(e)[:50]}")
+        
         err_banner = f"❌ <b>Помилка збереження заправки</b>\n\n{e}"
         await show_dash(msg, user[0], user[1], banner=err_banner)
         return
@@ -281,6 +287,12 @@ async def refill_save(msg: types.Message, state: FSMContext):
                 pass
 
     await state.clear()
+
+    # FIX #25: Notify success
+    notify_success(
+        msg.from_user.id, 
+        f"✅ Прийнято {float(liters):.1f} л палива (Водій: {driver}, Чек: {receipt_num})"
+    )
 
     banner = (
         f"✅ <b>Паливо прийнято</b>\n"
