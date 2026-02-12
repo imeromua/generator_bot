@@ -41,6 +41,7 @@ from database.api.state import (
     sheet_check_offline,
     sheet_is_offline,
     get_state,
+    get_fuel_consumption_rate,  # FIX: Export for real-time fuel calculation
 )
 from database.api.fuel import update_fuel
 from database.api.logs import (
@@ -114,6 +115,7 @@ __all__ = [
     "sheet_check_offline",
     "sheet_is_offline",
     "get_state",
+    "get_fuel_consumption_rate",  # FIX: Export for real-time fuel calculation
     # fuel
     "update_fuel",
     # logs
