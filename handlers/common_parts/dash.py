@@ -1,13 +1,16 @@
 import asyncio
 from datetime import datetime, timedelta
 
-from aiogram import types
+from aiogram import Router, F, types
+from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 
 import config
 import database.db_api as db
 from keyboards.builders import main_dashboard
 from utils.time import format_hours_hhmm
+
+router = Router()
 
 
 def _fmt_state_ts(ts_raw: str | None) -> str:
@@ -202,3 +205,26 @@ async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: st
         db.set_ui_message(user_id, sent.chat.id, sent.message_id)
     except Exception:
         pass
+
+
+# FIX #25: Add main_menu callback handler for single-window navigation
+@router.callback_query(F.data == "main_menu")
+async def main_menu_callback(cb: types.CallbackQuery, state: FSMContext):
+    """Повертає користувача на головну сторінку."""
+    await state.clear()
+    
+    user_id = cb.from_user.id
+    user_info = db.get_user(user_id)
+    user_name = user_info[1] if user_info else cb.from_user.full_name
+    
+    txt, markup = _build_dash_text(user_id, user_name)
+    
+    await cb.message.edit_text(txt, reply_markup=markup)
+    
+    # Зберігаємо UI message ID
+    try:
+        db.set_ui_message(user_id, cb.message.chat.id, cb.message.message_id)
+    except Exception:
+        pass
+    
+    await cb.answer()
