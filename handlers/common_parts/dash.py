@@ -16,7 +16,7 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'m': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -98,6 +98,16 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
 
     completed = db.get_today_completed_shifts()
 
+    # Отримуємо активний генератор
+    active_gen = db.get_active_generator()
+    gen_name = db.get_generator_name(active_gen)
+    
+    # Іконка генератора
+    if active_gen == "emergency":
+        gen_icon = "⚠️"
+    else:
+        gen_icon = "🔋"
+
     # FIX: Покращений дизайн статусу з правильним емодзі та назвою зміни
     if st['status'] == 'ON':
         active_shift = st.get('active_shift', 'невідомо')
@@ -122,17 +132,26 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     fuel_mark = ""
 
     try:
-        if st.get('status') == 'ON' and float(config.FUEL_CONSUMPTION or 0.0) > 0:
-            dur_h = _calc_run_hours(st, now)
-            if dur_h > 0:
-                current_fuel = max(0.0, current_fuel_raw - (dur_h * float(config.FUEL_CONSUMPTION)))
-                fuel_mark = " (оцінка)"
+        if st.get('status') == 'ON':
+            # Використовуємо відповідні витрати палива
+            fuel_rate = db.get_fuel_consumption_rate()
+            if fuel_rate > 0:
+                dur_h = _calc_run_hours(st, now)
+                if dur_h > 0:
+                    current_fuel = max(0.0, current_fuel_raw - (dur_h * fuel_rate))
+                    fuel_mark = " (оцінка)"
     except Exception:
         # якщо щось не так — показуємо канонічне
         current_fuel = current_fuel_raw
         fuel_mark = ""
 
-    hours_left = current_fuel / config.FUEL_CONSUMPTION if config.FUEL_CONSUMPTION > 0 else 0
+    # Використовуємо відповідні витрати для прогнозу
+    try:
+        fuel_rate_for_calc = db.get_fuel_consumption_rate()
+    except Exception:
+        fuel_rate_for_calc = config.FUEL_CONSUMPTION
+    
+    hours_left = current_fuel / fuel_rate_for_calc if fuel_rate_for_calc > 0 else 0
     hours_left_hhmm = format_hours_hhmm(hours_left)
 
     mode_mark = ""
@@ -150,10 +169,10 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     else:
         sync_line = "🔄 Остання синхронізація: ніколи"
 
-    # FIX: Покращений візуальний дизайн
+    # FIX: Покращений візуальний дизайн з назвою генератора
     txt = (
         f"{mode_mark}"
-        f"🟢 <b>Генератор:</b> {status_icon}\n"
+        f"{gen_icon} <b>Генератор {gen_name}:</b> {status_icon}\n"
         f"──────────────\n"
         f"⛽ Залишок палива{fuel_mark}: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n"
