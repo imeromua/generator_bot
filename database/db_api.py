@@ -29,6 +29,7 @@ from database.api.drivers import (
 from database.api.state import (
     _OFFLINE_THRESHOLD_SECONDS,
     set_state,
+    set_state_value,  # NEW: Public API for setting state values
     get_state_value,
     _conn_get_state_value,
     _conn_set_state_value,
@@ -110,6 +111,7 @@ __all__ = [
     # state
     "_OFFLINE_THRESHOLD_SECONDS",
     "set_state",
+    "set_state_value",  # NEW: Public API for setting state values
     "get_state_value",
     "_conn_get_state_value",
     "_conn_set_state_value",
