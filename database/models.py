@@ -233,21 +233,34 @@ def begin_transaction(conn):
 
 
 def init_db():
-    """Create schema (idempotent) + seed generator_state defaults."""
+    """Створення схеми (ідемпотентно) + seed generator_state defaults.
+    
+    Підтримка двох генераторів: основного та аварійного.
+    Додано generator_id в logs для розділення записів.
+    """
     conn = get_connection()
     c = conn.cursor()
 
     if not _is_postgres():
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id INTEGER PRIMARY KEY, name TEXT UNIQUE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, receipt_number TEXT, is_synced INTEGER DEFAULT 0)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY, 
+            event_type TEXT, 
+            timestamp TEXT, 
+            user_name TEXT, 
+            value TEXT, 
+            driver_name TEXT, 
+            receipt_number TEXT, 
+            is_synced INTEGER DEFAULT 0,
+            generator_id TEXT DEFAULT 'main'
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id INTEGER PRIMARY KEY, date TEXT, type TEXT, hours REAL, admin TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
-        # FIX #25: Add table for message history (max 5 per user with rotation)
         c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -260,14 +273,23 @@ def init_db():
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS logs (id BIGSERIAL PRIMARY KEY, event_type TEXT, timestamp TEXT, user_name TEXT, value TEXT, driver_name TEXT, receipt_number TEXT, is_synced INTEGER DEFAULT 0)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id BIGSERIAL PRIMARY KEY, 
+            event_type TEXT, 
+            timestamp TEXT, 
+            user_name TEXT, 
+            value TEXT, 
+            driver_name TEXT, 
+            receipt_number TEXT, 
+            is_synced INTEGER DEFAULT 0,
+            generator_id TEXT DEFAULT 'main'
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (id BIGSERIAL PRIMARY KEY, date TEXT, type TEXT, hours DOUBLE PRECISION, admin TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
         c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)''')
-        # FIX #25: Add table for message history (max 5 per user with rotation)
         c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
             id BIGSERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -281,17 +303,16 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
         "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
-        # FIX #25: Index for fast message history retrieval
+        "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",  # NEW: index for emergency generator
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
     for stmt in index_statements:
         try:
             c.execute(stmt)
         except Exception as e:
-            # FIX #3: Keep warning logging for diagnostics
             logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
 
-    # Міграція receipt_number для SQLite і Postgres (з транзакцією)
+    # Міграція: додавання receipt_number (старий код)
     try:
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
         logging.info("✅ Колонка receipt_number вже існує")
@@ -303,22 +324,45 @@ def init_db():
             try:
                 conn.commit()
             except Exception as e:
-                # FIX #3: Log commit errors
                 logging.warning(f"⚠️ Помилка commit після додавання receipt_number: {e}")
             logging.info("✅ Колонка receipt_number додана")
         except Exception as e:
             try:
                 conn.rollback()
             except Exception as re:
-                # FIX #3: Log rollback errors
                 logging.warning(f"⚠️ Помилка rollback: {re}")
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                 logging.info("✅ Колонка receipt_number вже існує")
             else:
-                # FIX #3: Keep error logging
                 logging.warning(f"⚠️ Не вдалося додати receipt_number: {e}")
 
+    # Міграція: додавання generator_id (нове для підтримки аварійного генератора)
+    try:
+        c.execute("SELECT generator_id FROM logs LIMIT 1")
+        logging.info("✅ Колонка generator_id вже існує")
+    except Exception:
+        logging.info("🔧 Додаємо колонку generator_id...")
+        try:
+            begin_transaction(conn)
+            c.execute("ALTER TABLE logs ADD COLUMN generator_id TEXT DEFAULT 'main'")
+            try:
+                conn.commit()
+            except Exception as e:
+                logging.warning(f"⚠️ Помилка commit після додавання generator_id: {e}")
+            logging.info("✅ Колонка generator_id додана")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception as re:
+                logging.warning(f"⚠️ Помилка rollback: {re}")
+            if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                logging.info("✅ Колонка generator_id вже існує")
+            else:
+                logging.warning(f"⚠️ Не вдалося додати generator_id: {e}")
+
+    # Дефолтні значення generator_state
     defaults = [
+        # Основні параметри
         ('total_hours', '0.0'),
         ('last_oil_change', '0.0'),
         ('last_spark_change', '0.0'),
@@ -334,7 +378,13 @@ def init_db():
         ('sheet_first_fail_ts', ''),
         ('sheet_offline', '0'),
         ('sheet_offline_since_ts', ''),
-        ('sync_in_progress', '0'),  # FIX #14: Add sync lock state
+        ('sync_in_progress', '0'),
+        
+        # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
+        ('active_generator', 'main'),  # 'main' або 'emergency'
+        ('emergency_total_hours', '0.0'),  # мотогодини аварійного
+        ('emergency_last_oil_change', '0.0'),  # остання заміна мастила (аварійний)
+        ('emergency_last_spark_change', '0.0'),  # остання заміна свічок (аварійний)
     ]
 
     for k, v in defaults:
@@ -347,7 +397,6 @@ def init_db():
                 (k, v),
             )
         except Exception as e:
-            # FIX #3: Log upsert failures
             try:
                 if _is_postgres():
                     conn.rollback()
@@ -358,12 +407,10 @@ def init_db():
     try:
         conn.commit()
     except Exception as e:
-        # FIX #3: Log final commit errors
         logging.warning(f"⚠️ Помилка final commit в init_db: {e}")
     try:
         conn.close()
     except Exception as e:
-        # FIX #3: Log connection close errors
         logging.warning(f"⚠️ Помилка закриття з'єднання: {e}")
 
-    logging.info("✅ База даних ініціалізована.")
+    logging.info("✅ База даних ініціалізована (підтримка 2 генераторів).")
