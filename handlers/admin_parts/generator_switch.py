@@ -21,10 +21,12 @@ try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.cell.cell import MergedCell
+    from openpyxl.utils import get_column_letter
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False
     MergedCell = None
+    get_column_letter = None
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -148,15 +150,15 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
     text = (
         f"📊 <b>Статистика генераторів</b>\n"
         f"──────────────────\n\n"
-        f"{'\ud83d\udd39' if active_gen == 'main' else '\u25ab\ufe0f'} <b>\u041e\u0441\u043d\u043e\u0432\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>\n"
-        f"  \u23f1 \u041c\u043e\u0442\u043e\u0433\u043e\u0434\u0438\u043d\u0438: {main_stats['total_hours']:.1f} \u0433\u043e\u0434\n"
-        f"  \ud83d\udee2 \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u043c\u0430\u0441\u0442\u0438\u043b\u0430: {main_stats['last_oil_change']:.1f} \u0433\u043e\u0434\n"
-        f"  \ud83d\udd6f \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u0441\u0432\u0456\u0447\u043e\u043a: {main_stats['last_spark_change']:.1f} \u0433\u043e\u0434\n\n"
-        f"{'\ud83d\udd38' if active_gen == 'emergency' else '\u25ab\ufe0f'} <b>\u0410\u0432\u0430\u0440\u0456\u0439\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440</b>\n"
-        f"  \u23f1 \u041c\u043e\u0442\u043e\u0433\u043e\u0434\u0438\u043d\u0438: {emerg_stats['total_hours']:.1f} \u0433\u043e\u0434\n"
-        f"  \ud83d\udee2 \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u043c\u0430\u0441\u0442\u0438\u043b\u0430: {emerg_stats['last_oil_change']:.1f} \u0433\u043e\u0434\n"
-        f"  \ud83d\udd6f \u0412\u0456\u0434 \u0437\u0430\u043c\u0456\u043d\u0438 \u0441\u0432\u0456\u0447\u043e\u043a: {emerg_stats['last_spark_change']:.1f} \u0433\u043e\u0434\n\n"
-        f"{'\ud83d\udd39' if active_gen == 'main' else '\ud83d\udd38'} - \u0410\u043a\u0442\u0438\u0432\u043d\u0438\u0439 \u0433\u0435\u043d\u0435\u0440\u0430\u0442\u043e\u0440\n"
+        f"{'🔹' if active_gen == 'main' else '▫️'} <b>Основний генератор</b>\n"
+        f"  ⏱ Мотогодини: {main_stats['total_hours']:.1f} год\n"
+        f"  🛢 Від заміни мастила: {main_stats['last_oil_change']:.1f} год\n"
+        f"  🕯 Від заміни свічок: {main_stats['last_spark_change']:.1f} год\n\n"
+        f"{'🔸' if active_gen == 'emergency' else '▫️'} <b>Аварійний генератор</b>\n"
+        f"  ⏱ Мотогодини: {emerg_stats['total_hours']:.1f} год\n"
+        f"  🛢 Від заміни мастила: {emerg_stats['last_oil_change']:.1f} год\n"
+        f"  🕯 Від заміни свічок: {emerg_stats['last_spark_change']:.1f} год\n\n"
+        f"{'🔹' if active_gen == 'main' else '🔸'} - Активний генератор\n"
         f"──────────────────\n"
         f"💡 Спільні параметри:\n"
         f"  ⛽ Залишок палива: {current_fuel:.1f} л\n"
@@ -262,7 +264,8 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext):
         # Автоширина колонок (безпечно обробляємо MergedCell)
         for col_idx in range(1, 6):  # Колонки A-E
             max_length = 0
-            column_letter = ws.cell(row=1, column=col_idx).column_letter
+            # Отримуємо літеру колонки безпечно через функцію
+            column_letter = get_column_letter(col_idx)
             
             for row_idx in range(1, ws.max_row + 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
