@@ -31,6 +31,10 @@ def fmt_range(start_h: int, end_h: int) -> str:
 
 
 def yesterday_shifts_summary(now: datetime) -> str:
+    """Генерує зведення по змінах за вчора.
+    
+    FIX #20: Додано receipt_number (6-те поле) в розпакуванні логів.
+    """
     y = (now - timedelta(days=1)).date()
     y_str = y.strftime("%Y-%m-%d")
 
@@ -38,7 +42,8 @@ def yesterday_shifts_summary(now: datetime) -> str:
 
     shifts = {"m": {}, "d": {}, "e": {}, "x": {}}
 
-    for event_type, ts, user_name, value, driver_name in logs:
+    # FIX #20: Тепер в БД 6 полів (додали receipt_number)
+    for event_type, ts, user_name, value, driver_name, receipt_number in logs:
         if event_type in ("m_start", "m_end", "d_start", "d_end", "e_start", "e_end", "x_start", "x_end"):
             code = event_type.split("_")[0]
             act = event_type.split("_")[1]
