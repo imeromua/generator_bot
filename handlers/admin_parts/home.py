@@ -14,7 +14,7 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'m': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -89,6 +89,18 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     # 1. Отримуємо актуальний стан з БД
     st = db.get_state()
 
+    # Отримуємо активний генератор
+    active_gen = db.get_active_generator()
+    gen_name = db.get_generator_name(active_gen)
+    
+    # Іконка генератора
+    if active_gen == "emergency":
+        gen_icon = "⚠️"
+        gen_label = f"{gen_icon} <b>Генератор {gen_name}</b>"
+    else:
+        gen_icon = "🔋"
+        gen_label = f"{gen_icon} <b>Генератор {gen_name}</b>"
+
     # --- СТАТУС ГЕНЕРАТОРА ---
     status = st.get("status", "OFF")
     if status == "ON":
@@ -148,10 +160,11 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     else:
         sync_line = "🔄 Остання синхронізація: ніколи"
 
-    # FIX #23: Покращений дизайн адмін панелі
+    # FIX #23: Покращений дизайн адмін панелі з назвою генератора
     txt = (
         f"⚙️ <b>Адмін Панель</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
+        f"{gen_label}\n"
         f"{status_line}\n\n"
         f"{fuel_line}\n"
         f"{mnt_line}\n"
