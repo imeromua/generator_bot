@@ -54,6 +54,28 @@ def _format_sync_time(ts_str: str | None) -> str:
         return ts_str
 
 
+def _shift_display_name(shift_code: str) -> str:
+    """Конвертує код зміни в читабельну назву.
+    
+    Args:
+        shift_code: 'm_start', 'd_start', 'e_start', 'x_start' або 'M', 'D', 'E', 'X'
+    
+    Returns:
+        Читабельна назва: 'Зміна 1', 'Зміна 2', 'Зміна 3', 'Екстра'
+    """
+    # Нормалізуємо до однієї літери
+    code = shift_code.split("_")[0].lower() if "_" in shift_code else shift_code.lower()
+    
+    mapping = {
+        'm': 'Зміна 1',
+        'd': 'Зміна 2',
+        'e': 'Зміна 3',
+        'x': 'Екстра'
+    }
+    
+    return mapping.get(code, shift_code.upper())
+
+
 def _calc_run_hours(st: dict, now: datetime) -> float:
     """Best-effort runtime hours from state start_date/start_time.
 
@@ -88,11 +110,11 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
 
     completed = db.get_today_completed_shifts()
 
-    # FIX #23: Покращений дизайн статусу
+    # FIX: Покращений дизайн статусу з правильним емодзі та назвою зміни
     if st['status'] == 'ON':
         active_shift = st.get('active_shift', 'невідомо')
-        shift_code = active_shift.split("_")[0].upper() if "_" in active_shift else active_shift.upper()
-        status_icon = f"🟭 <b>ПРАЦЮЄ</b> (Зміна: {shift_code})"
+        shift_name = _shift_display_name(active_shift)
+        status_icon = f"🟩 <b>ПРАЦЮЄ</b> ({shift_name})"
     else:
         status_icon = "🟢 <b>ВИМКНЕНО</b>"
 
@@ -140,7 +162,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     else:
         sync_line = "🔄 Остання синхронізація: ніколи"
 
-    # FIX #23: Покращений визуальний дизайн
+    # FIX: Покращений візуальний дизайн
     txt = (
         f"{mode_mark}"
         f"🟢 <b>Генератор:</b> {status_icon}\n"
