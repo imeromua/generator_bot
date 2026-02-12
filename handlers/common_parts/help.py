@@ -2,6 +2,7 @@ from aiogram import Router, types
 from aiogram.filters import Command
 
 import config
+import database.db_api as db
 
 
 router = Router()
@@ -12,6 +13,20 @@ def _nav_kb(user_id: int) -> types.InlineKeyboardMarkup:
     if user_id in config.ADMIN_IDS:
         kb.insert(0, [types.InlineKeyboardButton(text="⚙️ Адмін панель", callback_data="admin_home")])
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+async def _delete_old_ui_message(user_id: int, bot):
+    """Видаляє старе UI повідомлення для збереження single-window концепції."""
+    try:
+        prev = db.get_ui_message(user_id)
+        if prev:
+            prev_chat_id, prev_msg_id = prev
+            try:
+                await bot.delete_message(chat_id=prev_chat_id, message_id=prev_msg_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 @router.message(Command("help"))
@@ -33,16 +48,25 @@ async def cmd_help(msg: types.Message):
         "• Поза робочим часом (<b>WORK_START_TIME–WORK_END_TIME</b>) заборонено: <b>СТАРТ</b> та <b>ПРИЙОМ ПАЛИВА</b>.\n\n"
         "<b>⚙️ Адмінам</b>\n"
         "• <b>🧠 Розумна синхронізація</b> — автоматично синхронізує дані між БД та Google Sheets. Порівнює дані по датах, синхронізує тільки зміни (не перезаписує все), автоматично вирішує конфлікти, перевіряє витрати палива та оновлює довідники. <b>Можлива тільки коли генератор вимкнено (OFF)</b>.\n"
-        "• <b>🧮 Корекція</b> — коригування залишку палива, мотогодин, витрат палива та дат ТО.\n"
-        "• <b>👥 Персонал</b> — прив’язка користувачів до ПІБ персоналу.\n"
+        "• <b>🧩 Корекція</b> — коригування залишку палива, мотогодин, витрат палива та дат ТО.\n"
+        "• <b>👥 Персонал</b> — прив'язка користувачів до ПІБ персоналу.\n"
         "• <b>🚛 Водії</b> — додавання нових водіїв для вибору при прийомі палива.\n"
         "• <b>🛠 ТО</b> — заміна мастила та свічок, нагадування про ТО.\n"
         "• <b>📅 Графік відключень</b> — редагування графіку на сьогодні/завтра, сповіщення про зміни.\n\n"
-        "<b>ℹ️ Якщо бачите</b> «Нема прив’язки до персоналу» — попросіть адміна призначити вам ПІБ.\n\n"
+        "<b>ℹ️ Якщо бачите</b> «Нема прив'язки до персоналу» — попросіть адміна призначити вам ПІБ.\n\n"
         "📖 Політика приватності: /privacy"
     )
 
-    await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
+    # FIX: Видаляємо старе UI повідомлення для збереження single-window
+    await _delete_old_ui_message(msg.from_user.id, msg.bot)
+
+    sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
+    
+    # FIX: Зберігаємо нове UI message ID
+    try:
+        db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
+    except Exception:
+        pass
 
 
 @router.message(Command("privacy"))
@@ -51,8 +75,8 @@ async def cmd_privacy(msg: types.Message):
     txt = (
         "🔒 <b>Політика приватності</b>\n\n"
         "<b>Які дані зберігаються:</b>\n"
-        "• Ваш Telegram ID та ім’я\n"
-        "• ПІБ (якщо адмін призначив прив’язку до персоналу)\n"
+        "• Ваш Telegram ID та ім'я\n"
+        "• ПІБ (якщо адмін призначив прив'язку до персоналу)\n"
         "• Журнал подій:\n"
         "  - старт/стоп змін з часом\n"
         "  - прийом палива (літри, чек, водій)\n"
@@ -72,9 +96,32 @@ async def cmd_privacy(msg: types.Message):
         "<b>Ваші права:</b>\n"
         "Щоб видалити ваш запис або виправити дані — зверніться до адміністраторів. Вони можуть:\n"
         "• Відредагувати ваше ПІБ\n"
-        "• Видалити прив’язку до персоналу\n"
+        "• Видалити прив'язку до персоналу\n"
         "• Очистити журнал подій (якщо потрібно)\n\n"
         "📧 Питання? Напишіть адміну вашої організації."
     )
 
-    await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
+    # FIX: Видаляємо старе UI повідомлення для збереження single-window
+    await _delete_old_ui_message(msg.from_user.id, msg.bot)
+
+    sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
+    
+    # FIX: Зберігаємо нове UI message ID
+    try:
+        db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
+    except Exception:
+        pass
+
+
+# FIX: Add callback handler for "home" button to return to dashboard
+@router.callback_query(lambda cb: cb.data == "home")
+async def cb_home(cb: types.CallbackQuery):
+    """Повернення на головну сторінку (дашборд)."""
+    from handlers.common_parts.dash import show_dash
+    
+    user_id = cb.from_user.id
+    user_info = db.get_user(user_id)
+    user_name = user_info[1] if user_info else cb.from_user.full_name
+    
+    await show_dash(cb.message, user_id, user_name)
+    await cb.answer()
