@@ -8,6 +8,7 @@ import config
 import database.db_api as db
 from keyboards.builders import sync_menu
 from services.sheets_bidirectional_sync import bidirectional_sync
+from utils.messaging import notify_success, notify_error  # FIX #25
 
 # Старі модулі sheets_import.py та sheets_export.py залишені як резервні утиліти.
 # Можна використовувати через ручні скрипти якщо потрібно.
@@ -156,6 +157,8 @@ async def sync_smart_execute(cb: types.CallbackQuery):
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
+    user_id = cb.from_user.id  # FIX #25: For notifications
+
     # FIX #14: Acquire lock before starting
     if not _acquire_sync_lock():
         return await cb.answer(
@@ -167,6 +170,8 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         # Подвійна перевірка перед виконанням
         is_off, error_msg = _check_generator_off()
         if not is_off:
+            # FIX #25: Notify error
+            notify_error(user_id, "❌ Синхронізація неможлива під час роботи генератора")
             return await cb.answer(error_msg, show_alert=True)
 
         # Отримуємо ім'я користувача з БД
@@ -196,9 +201,21 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         )
 
         await cb.message.edit_text(txt, reply_markup=_back_kb())
+        
+        # FIX #25: Notify success
+        notify_success(
+            user_id, 
+            f"✅ Синхронізовано: {report.total_dates} дат, "
+            f"імпорт: {report.imported}, експорт: {report.exported}"
+        )
 
     except Exception as e:
         logger.error(f"❌ Помилка синхронізації: {e}", exc_info=True)
+        
+        # FIX #25: Notify error
+        error_msg = str(e)[:100]  # Обрізаємо довгі помилки
+        notify_error(user_id, f"❌ Помилка синхронізації: {error_msg}")
+        
         await cb.message.edit_text(
             f"❌ <b>Помилка синхронізації</b>\n\n{e}",
             reply_markup=_back_kb(),
