@@ -44,8 +44,8 @@ async def gen_start(cb: types.CallbackQuery):
     st = db.get_state()
     if st['status'] == 'ON':
         active = st.get('active_shift', 'none')
-        # FIX #25: Notify error
-        notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(active)})")
+        # FIX #25: Notify error (shift_pretty already contains emoji and name)
+        notify_error(user_id, f"❌ Генератор вже працює ({shift_pretty(active)})")
         return await cb.answer(
             f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
             show_alert=True
@@ -70,7 +70,7 @@ async def gen_start(cb: types.CallbackQuery):
     if sheet_ok and open_shift:
         sync_db_from_sheet_open_shift(open_shift, start_times)
         # FIX #25: Notify error
-        notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(open_shift)})")
+        notify_error(user_id, f"❌ Генератор вже працює ({shift_pretty(open_shift)})")
         return await cb.answer(
             f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(open_shift)})",
             show_alert=True
@@ -79,8 +79,8 @@ async def gen_start(cb: types.CallbackQuery):
     shift_code = cb.data.split("_", 1)[0]
 
     if sheet_ok and shift_code in completed_sheet:
-        # FIX #25: Notify error
-        notify_error(user_id, f"❌ Зміна {shift_pretty(shift_code)} вже відпрацьована сьогодні")
+        # FIX: shift_pretty already includes "Зміна 2" etc
+        notify_error(user_id, f"❌ {shift_pretty(shift_code)} вже відпрацьована сьогодні")
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     completed_db = db.get_today_completed_shifts()
@@ -99,8 +99,8 @@ async def gen_start(cb: types.CallbackQuery):
         )
 
     if shift_code in completed_db:
-        # FIX #25: Notify error
-        notify_error(user_id, f"❌ Зміна {shift_pretty(shift_code)} вже відпрацьована сьогодні")
+        # FIX: shift_pretty already includes "Зміна 2" etc
+        notify_error(user_id, f"❌ {shift_pretty(shift_code)} вже відпрацьована сьогодні")
         return await cb.answer("⛔ Ця зміна вже відпрацьована сьогодні!", show_alert=True)
 
     now = now_kiev()
@@ -133,7 +133,7 @@ async def gen_start(cb: types.CallbackQuery):
         if res.get("reason") == "already_on":
             active = res.get('active_shift', 'none')
             # FIX #25: Notify error
-            notify_error(user_id, f"❌ Генератор вже працює (Зміна: {shift_pretty(active)})")
+            notify_error(user_id, f"❌ Генератор вже працює ({shift_pretty(active)})")
             return await cb.answer(
                 f"⛔ ВЖЕ ПРАЦЮЄ! (Активна зміна: {shift_pretty(active)})",
                 show_alert=True
@@ -142,8 +142,8 @@ async def gen_start(cb: types.CallbackQuery):
         notify_error(user_id, "❌ Помилка старту зміни")
         return await cb.answer("❌ Помилка старту. Спробуйте ще раз.", show_alert=True)
 
-    # FIX #25: Notify success
-    notify_success(user_id, f"✅ Зміна {shift_pretty(cb.data)} запущена о {now.strftime('%H:%M')}")
+    # FIX: shift_pretty already contains emoji and "Зміна 2" - don't duplicate
+    notify_success(user_id, f"✅ {shift_pretty(cb.data)} запущена о {now.strftime('%H:%M')}")
 
     banner = f"✅ <b>{shift_pretty(cb.data)}</b> відкрито о {now.strftime('%H:%M')}\n👤 {operator_personnel}"
     await show_dash(cb.message, user[0], user[1], banner=banner)
@@ -261,10 +261,10 @@ async def gen_stop(cb: types.CallbackQuery):
     except Exception:
         canonical_fuel = 0.0
 
-    # FIX #25: Notify success
+    # FIX: shift_pretty already contains emoji and "Зміна 2" - don't duplicate
     notify_success(
         user_id, 
-        f"✅ Зміна {shift_pretty(expected_code)} закрита: {dur_hhmm}, використано {fuel_consumed:.1f} л"
+        f"✅ {shift_pretty(expected_code)} закрита: {dur_hhmm}, використано {fuel_consumed:.1f} л"
     )
 
     banner = (
