@@ -8,10 +8,11 @@ import config
 def main_dashboard(role, active_shift, completed_shifts):
     kb = []
 
+    # FIX: Correct emoji mappings
     def pretty(code: str) -> str:
         return {
             "m": "🟬 Зміна 1",
-            "d": "🟪 Зміна 2",
+            "d": "🟩 Зміна 2",
             "e": "🟪 Зміна 3",
             "x": "⚡ Екстра",
         }.get(code, code.upper())
