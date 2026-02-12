@@ -63,6 +63,16 @@ from database.api.messages import (
     clear_user_messages,
     get_message_count,
 )
+from database.api.generator import (
+    get_active_generator,
+    switch_generator,
+    get_generator_stats,
+    update_generator_hours,
+    set_generator_hours,
+    update_generator_maintenance,
+    is_emergency_active,
+    get_generator_name,
+)
 
 
 __all__ = [
@@ -130,4 +140,13 @@ __all__ = [
     "get_user_messages",
     "clear_user_messages",
     "get_message_count",
+    # generator (NEW: support for main/emergency generators)
+    "get_active_generator",
+    "switch_generator",
+    "get_generator_stats",
+    "update_generator_hours",
+    "set_generator_hours",
+    "update_generator_maintenance",
+    "is_emergency_active",
+    "get_generator_name",
 ]
