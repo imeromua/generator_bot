@@ -94,25 +94,29 @@ def admin_panel():
             InlineKeyboardButton(text="📅 Графік", callback_data="sched_select_date"),
             InlineKeyboardButton(text="🔄 Синхронізація", callback_data="sync_menu", style="primary"),
         ],
-        # Row 2: People management (2 in row) - FIXED: Drivers button now points to drivers_menu
+        # Row 2: Generator management (single button, important)
+        [
+            InlineKeyboardButton(text="🔄 Перемикання генераторів", callback_data="generator_switch"),
+        ],
+        # Row 3: People management (2 in row) - FIXED: Drivers button now points to drivers_menu
         [
             InlineKeyboardButton(text="👥 Персонал", callback_data="personnel_menu"),
             InlineKeyboardButton(text="🚛 Водії", callback_data="drivers_menu"),
         ],
-        # Row 3: Technical operations (2 in row)
+        # Row 4: Technical operations (2 in row)
         [
             InlineKeyboardButton(text="🧩 Корекція", callback_data="corr_menu"),
             InlineKeyboardButton(text="🛠 Меню ТО", callback_data="mnt_menu"),
         ],
-        # Row 4: User management (single, less frequent)
+        # Row 5: User management (single, less frequent)
         [
             InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list"),
         ],
-        # Row 5: Dangerous operation (isolated, red)
+        # Row 6: Dangerous operation (isolated, red)
         [
             InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm", style="danger"),
         ],
-        # Row 6: Navigation
+        # Row 7: Navigation
         [
             InlineKeyboardButton(text="🏠 На головну", callback_data="main_menu"),
         ]
