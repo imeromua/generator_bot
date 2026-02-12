@@ -116,8 +116,29 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     else:
         status_icon = "🟢 <b>ВИМКНЕНО</b>"
 
-    to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
-    to_service_hhmm = format_hours_hhmm(to_service)
+    # Перевірка ТО для активного генератора
+    try:
+        mnt_type, mnt_hours = db.get_next_maintenance_type(active_gen)
+        if mnt_type and mnt_hours is not None and mnt_hours <= 10:
+            mnt_names = {
+                "oil": "🛢 заміна мастила",
+                "spark": "🕯 заміна свічок",
+                "maintenance": "🔧 планове ТО",
+            }
+            mnt_name = mnt_names.get(mnt_type, "ТО")
+            
+            if mnt_hours <= 0:
+                to_service_str = f"⚠️ <b>ТЕРМІНОВЕ!</b> Потрібно {mnt_name}"
+            else:
+                to_service_str = f"⚠️ До ТО: <b>{format_hours_hhmm(mnt_hours)}</b> ({mnt_name})"
+        else:
+            # Старий розрахунок (тільки мастило)
+            to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
+            to_service_str = format_hours_hhmm(to_service)
+    except Exception:
+        # Fallback до старого розрахунку
+        to_service = config.MAINTENANCE_LIMIT - (st['total_hours'] - st['last_oil'])
+        to_service_str = format_hours_hhmm(to_service)
 
     # --- Паливо: відображення ---
     # DB зберігає "канонічне" current_fuel (події/корекції), а під час роботи показуємо оцінку "на льоту"
@@ -176,7 +197,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
         f"──────────────\n"
         f"⛽ Залишок палива{fuel_mark}: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: <b>~{hours_left_hhmm}</b>\n"
-        f"🛢 До ТО: <b>{to_service_hhmm}</b>\n"
+        f"🛢 До ТО: <b>{to_service_str}</b>\n"
         f"──────────────\n"
         f"👤 <b>Ви:</b> {user_name}\n"
         f"{sync_line}"
