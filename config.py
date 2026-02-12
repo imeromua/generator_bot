@@ -118,8 +118,25 @@ WORK_START_TIME = os.getenv("WORK_START", "07:30")
 WORK_END_TIME = os.getenv("WORK_END", "20:30")
 MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:30")
 
-# --- ТЕХНІКА ---
-MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", "100"))
+# --- ТЕХНІЧНЕ ОБСЛУГОВУВАННЯ (ТО) ---
+# Інтервали ТО в мотогодинах (однакові для обох генераторів)
+try:
+    OIL_CHANGE_INTERVAL = int(os.getenv("OIL_CHANGE_INTERVAL", "100"))
+except ValueError:
+    OIL_CHANGE_INTERVAL = 100
+
+try:
+    SPARK_CHANGE_INTERVAL = int(os.getenv("SPARK_CHANGE_INTERVAL", "100"))
+except ValueError:
+    SPARK_CHANGE_INTERVAL = 100
+
+try:
+    MAINTENANCE_INTERVAL = int(os.getenv("MAINTENANCE_INTERVAL", "300"))
+except ValueError:
+    MAINTENANCE_INTERVAL = 300
+
+# Зворотна сумісність з старим OIL_LIMIT
+MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", str(OIL_CHANGE_INTERVAL)))
 
 # --- ДОСТУП ---
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
@@ -196,6 +213,9 @@ if __name__ == "__main__":
     print(f"Адміни: {ADMIN_IDS}")
     print(f"Витрата палива (основний): {FUEL_CONSUMPTION} л/год")
     print(f"Витрата палива (аварійний): {EMERGENCY_FUEL_CONSUMPTION} л/год")
-    print(f"Ліміт ТО: {MAINTENANCE_LIMIT} год")
+    print(f"Інтервали ТО:")
+    print(f"  Мастило: {OIL_CHANGE_INTERVAL} год")
+    print(f"  Свічки: {SPARK_CHANGE_INTERVAL} год")
+    print(f"  Планове ТО: {MAINTENANCE_INTERVAL} год")
     print(f"Таймзона: {KYIV}")
     print("=" * 60 + "\n")
