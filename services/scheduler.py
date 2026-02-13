@@ -1,6 +1,18 @@
+"""Background task scheduler.
+
+Handles periodic tasks:
+- Morning briefings
+- Auto-close shifts at work end time
+- Stop reminders before shift end
+- Fuel level alerts
+- Maintenance alerts
+"""
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, time as time_type, date as date_type
+from typing import Any
+
+from aiogram import Bot
 
 import config
 from utils.time import now_kiev
@@ -12,14 +24,22 @@ from services.scheduler_parts.stop_reminder import maybe_send_stop_reminder
 from services.scheduler_parts.fuel_alert import check_fuel_alert
 from services.scheduler_parts.maintenance_alert import check_maintenance_alert  # FIX #25
 
-# Синхронізацію прибрали, бо вона тепер ручна
-# from services.google_sync_parts.sync_cycle import sync_cycle
-
 logger = logging.getLogger(__name__)
 
 
-async def scheduler_loop(bot):
-    """Головний цикл планувальника (без авто-синхронізації)."""
+async def scheduler_loop(bot: Bot) -> None:
+    """Головний цикл планувальника (без авто-синхронізації).
+
+    Runs periodic checks every minute:
+    - Morning brief (once per day)
+    - Auto-close shift at WORK_END_TIME
+    - Stop reminders (N minutes before end)
+    - Fuel alerts (low level)
+    - Maintenance alerts (upcoming service)
+
+    Args:
+        bot: Telegram bot instance
+    """
     logger.info("⏰ Scheduler запущено")
 
     # Стани для одноразового виконання задач на добу
@@ -35,7 +55,7 @@ async def scheduler_loop(bot):
     while True:
         try:
             now = now_kiev()
-            current_date = now.date()
+            current_date: date_type = now.date()
             current_today_str = current_date.strftime("%Y-%m-%d")
 
             # Скидання прапорців на новий день
@@ -47,7 +67,7 @@ async def scheduler_loop(bot):
 
             # Парсинг часу з конфігу (щоб підхоплювати зміни без рестарту)
             try:
-                close_time = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
+                close_time: time_type = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
             except Exception:
                 logger.warning(
                     f"⚠️ Некоректний WORK_END_TIME='{getattr(config, 'WORK_END_TIME', '')}'. "
@@ -73,7 +93,7 @@ async def scheduler_loop(bot):
             # (щоб не смикати БД в кожній функції окремо)
             try:
                 import database.db_api as db
-                state = db.get_state()
+                state: dict[str, Any] = db.get_state()
             except Exception:
                 state = {}
 
