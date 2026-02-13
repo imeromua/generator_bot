@@ -1,3 +1,8 @@
+"""Schedule viewer handler.
+
+Display today's power outage schedule for users.
+"""
+
 from aiogram import Router, F, types
 
 import database.db_api as db
@@ -10,6 +15,14 @@ router = Router()
 
 
 def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
+    """Convert hourly schedule dict to time ranges.
+
+    Args:
+        schedule: Dict with hour -> outage flag (1=outage, 0=power)
+
+    Returns:
+        List of (start_hour, end_hour) tuples
+    """
     ranges: list[tuple[int, int]] = []
     start = None
     for h in range(24):
@@ -27,13 +40,27 @@ def _schedule_to_ranges(schedule: dict) -> list[tuple[int, int]]:
 
 
 def _fmt_range(start_h: int, end_h: int) -> str:
+    """Format hour range as time string.
+
+    Args:
+        start_h: Start hour (0-23)
+        end_h: End hour (1-24)
+
+    Returns:
+        Formatted string like "08:00 - 12:00"
+    """
     s = f"{start_h:02d}:00"
     e = "24:00" if end_h == 24 else f"{end_h:02d}:00"
     return f"{s} - {e}"
 
 
 @router.callback_query(F.data == "schedule_today")
-async def schedule_today(cb: types.CallbackQuery):
+async def schedule_today(cb: types.CallbackQuery) -> None:
+    """Display today's power outage schedule.
+
+    Args:
+        cb: Callback query
+    """
     now = now_kiev()
     today_str = now.strftime("%Y-%m-%d")
     schedule = db.get_schedule(today_str)

@@ -1,3 +1,8 @@
+"""User home handler.
+
+Navigate back to user dashboard.
+"""
+
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 
@@ -9,7 +14,13 @@ router = Router()
 
 
 @router.callback_query(F.data == "home")
-async def go_home(cb: types.CallbackQuery, state: FSMContext):
+async def go_home(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Navigate to user dashboard.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     await state.clear()
 
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
