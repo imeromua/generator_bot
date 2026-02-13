@@ -69,6 +69,7 @@ def setup_logging():
 logger = logging.getLogger(__name__)
 
 import database.models as db_models
+from database.models import close_postgres_pool
 from middlewares.auth import WhitelistMiddleware
 from middlewares.error_handler import ErrorHandlerMiddleware, global_error_handler
 
@@ -185,6 +186,17 @@ async def _run_background_forever(name: str, coro_func, *args):
             await _sleep_with_jitter(delay, jitter_seconds=5)
 
 
+async def on_shutdown():
+    """Graceful shutdown handler: close PostgreSQL connection pool."""
+    logger.info("🛑 Shutting down bot...")
+    try:
+        # Close PostgreSQL connection pool if using postgres backend
+        await _run_blocking(close_postgres_pool)
+    except Exception as e:
+        logger.warning(f"⚠️ Error during shutdown: {e}")
+    logger.info("✅ Shutdown complete")
+
+
 def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     """Побудова Dispatcher з усіма middlewares та routers."""
 
@@ -221,6 +233,10 @@ def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     dp.include_router(user.router)
     # Підключаємо винесений роутер
     dp.include_router(dtek_parser.router)
+
+    # Register shutdown handler for graceful cleanup
+    dp.shutdown.register(on_shutdown)
+    logger.info("🔧 Registered shutdown handler for connection pool cleanup")
 
     return dp, redis_client
 
