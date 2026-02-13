@@ -1,5 +1,11 @@
+"""Authorization middleware.
+
+Whitelist-based access control for bot users.
+"""
+from typing import Any, Callable, Awaitable, Optional
+
 from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, TelegramObject
 import logging
 import config
 
@@ -7,7 +13,31 @@ logger = logging.getLogger(__name__)
 
 
 class WhitelistMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
+    """Middleware for whitelist-based authorization.
+
+    Access rules:
+    1. Admins always have access
+    2. /start command with REGISTRATION_OPEN
+    3. Users in WHITELIST
+    4. Others are blocked
+    """
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any]
+    ) -> Optional[Any]:
+        """Process authorization.
+
+        Args:
+            handler: Next handler in chain
+            event: Telegram event (Message or CallbackQuery)
+            data: Handler data
+
+        Returns:
+            Handler result or None if blocked
+        """
         # Отримуємо ID користувача (з повідомлення або кліку)
         if isinstance(event, Message):
             user_id = event.from_user.id
