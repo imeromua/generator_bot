@@ -1,12 +1,12 @@
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 
 import database.db_api as db
 from handlers.user_parts.sheets_shift import shift_pretty
 from handlers.user_parts.utils import ensure_user
-from keyboards.builders import back_to_main
 
 router = Router()
 
@@ -110,26 +110,89 @@ def _fmt_log_line(
     return f"• {ts_pretty} — <b>{event_type}</b>{tail}{who_tail}"
 
 
-@router.callback_query(F.data == "events_last")
+@router.callback_query(F.data.startswith("events_last"))
 async def events_last(cb: types.CallbackQuery, state: FSMContext):
+    """Показує системний журнал з пагінацією по 15 записів.
+
+    Формат callback_data:
+    - "events_last"         → сторінка 1
+    - "events_last:2"       → сторінка 2 і т.д.
+    """
     await state.clear()
 
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         return await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
 
-    rows = db.get_last_logs(15)
+    # Парсинг сторінки
+    data = cb.data or "events_last"
+    parts = data.split(":")
+    try:
+        page = int(parts[1]) if len(parts) == 2 else 1
+    except Exception:
+        page = 1
+
+    if page < 1:
+        page = 1
+
+    PAGE_SIZE = 15
+    offset = (page - 1) * PAGE_SIZE
+
+    # Беремо на 1 запис більше, щоб зрозуміти, чи є наступна сторінка
+    rows = db.get_logs_page(PAGE_SIZE + 1, offset)
+
+    has_next = len(rows) > PAGE_SIZE
+    rows = rows[:PAGE_SIZE]
 
     if not rows:
-        txt = "🕘 <b>Останні події</b>\n\nПоки немає записів."
+        if page == 1:
+            txt = "🕘 <b>Останні події</b>\n\nПоки немає записів."
+        else:
+            txt = (
+                "🕘 <b>Останні події</b>\n\n"
+                f"Для сторінки <b>{page}</b> подій більше немає."
+            )
     else:
         lines = []
         for event_type, ts, u_name, value, driver_name, receipt_number, generator_id in rows:
             lines.append(_fmt_log_line(event_type, ts, u_name, value, driver_name, receipt_number, generator_id))
 
-        txt = "🕘 <b>Останні події</b> (15)\n\n" + "\n".join(lines)
+        start_idx = offset + 1
+        end_idx = offset + len(rows)
+        txt = (
+            "🕘 <b>Останні події</b>\n"
+            f"Показано записи <b>{start_idx}–{end_idx}</b>.\n\n" + "\n".join(lines)
+        )
 
-    kb = back_to_main()
+    # Побудова inline‑клавіатури з пагінацією
+    kb_rows: list[list[InlineKeyboardButton]] = []
+    nav_row: list[InlineKeyboardButton] = []
+
+    if page > 1:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="◀️ Попередні",
+                callback_data=f"events_last:{page - 1}",
+            )
+        )
+
+    if has_next:
+        nav_row.append(
+            InlineKeyboardButton(
+                text="▶️ Наступні",
+                callback_data=f"events_last:{page + 1}",
+            )
+        )
+
+    if nav_row:
+        kb_rows.append(nav_row)
+
+    # Кнопка повернення на дашборд
+    kb_rows.append(
+        [InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]
+    )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 
     try:
         await cb.message.edit_text(txt, reply_markup=kb)
