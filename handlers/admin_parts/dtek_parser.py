@@ -1,3 +1,9 @@
+"""DTEK schedule parser.
+
+Auto-detects DTEK power outage schedules in admin messages
+and provides interactive application to database.
+"""
+
 import logging
 from datetime import datetime
 
@@ -14,8 +20,15 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 @router.message(F.text & ~F.text.startswith("/"), StateFilter(None))
-async def check_dtek_post(msg: types.Message):
-    """Перевіряє кожен текст: чи це графік? (тільки для адмінів)"""
+async def check_dtek_post(msg: types.Message) -> None:
+    """Перевіряє кожен текст: чи це графік? (тільки для адмінів)
+
+    Parses admin messages for DTEK schedule format (e.g., "14:00-18:00").
+    If found, suggests applying to today's schedule.
+
+    Args:
+        msg: Incoming message
+    """
     if msg.from_user.id not in config.ADMIN_IDS:
         return
 
@@ -33,8 +46,14 @@ async def check_dtek_post(msg: types.Message):
 
 
 @router.callback_query(F.data.startswith("apply_"))
-async def apply_schedule_range(cb: types.CallbackQuery):
-    """Записує знайдений графік у БД (тільки для адмінів)"""
+async def apply_schedule_range(cb: types.CallbackQuery) -> None:
+    """Записує знайдений графік у БД (тільки для адмінів)
+
+    Applies parsed DTEK schedule range to today's database entry.
+
+    Args:
+        cb: Callback query with format "apply_HH:MM_HH:MM"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 

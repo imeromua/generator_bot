@@ -1,3 +1,8 @@
+"""Fuel order handler.
+
+Admin handler for confirming fuel order and disabling alerts.
+"""
+
 import logging
 from datetime import datetime
 
@@ -14,7 +19,15 @@ logger = logging.getLogger(__name__)
 
 # --- ПАЛИВО: замовлено ---
 @router.callback_query(F.data == "fuel_ordered")
-async def fuel_ordered(cb: types.CallbackQuery):
+async def fuel_ordered(cb: types.CallbackQuery) -> None:
+    """Handle fuel order confirmation.
+
+    Marks fuel as ordered and disables alerts until next refill.
+    Updates state and logs the action.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
