@@ -34,6 +34,7 @@ def yesterday_shifts_summary(now: datetime) -> str:
     """Генерує зведення по змінах за вчора.
     
     FIX #20: Додано receipt_number (6-те поле) в розпакуванні логів.
+    FIX (Postgres): Повернення generator_id як 7-го поля, ігноруємо зайві колонки через зріз.
     """
     y = (now - timedelta(days=1)).date()
     y_str = y.strftime("%Y-%m-%d")
@@ -42,8 +43,15 @@ def yesterday_shifts_summary(now: datetime) -> str:
 
     shifts = {"m": {}, "d": {}, "e": {}, "x": {}}
 
-    # FIX #20: Тепер в БД 6 полів (додали receipt_number)
-    for event_type, ts, user_name, value, driver_name, receipt_number in logs:
+    # Підтримуємо як старий формат (6 полів), так і новий (7+ полів)
+    for row in logs:
+        # Беремо тільки перші 6 полів: event_type, ts, user_name, value, driver_name, receipt_number
+        try:
+            event_type, ts, user_name, value, driver_name, receipt_number = row[:6]
+        except Exception:
+            # Якщо раптом менше полів — пропускаємо запис, щоб не падати планувальником
+            continue
+
         if event_type in ("m_start", "m_end", "d_start", "d_end", "e_start", "e_end", "x_start", "x_end"):
             code = event_type.split("_")[0]
             act = event_type.split("_")[1]
