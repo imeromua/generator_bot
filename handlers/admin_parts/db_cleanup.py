@@ -1,3 +1,9 @@
+"""Database cleanup handler.
+
+DANGEROUS admin tool that wipes all database content.
+Requires explicit confirmation.
+"""
+
 import logging
 
 from aiogram import Router, F, types
@@ -11,7 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.callback_query(F.data == "db_cleanup_confirm")
-async def db_cleanup_confirm(cb: types.CallbackQuery):
+async def db_cleanup_confirm(cb: types.CallbackQuery) -> None:
+    """Show database cleanup confirmation.
+
+    Displays warning about data loss and requires explicit confirmation.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -38,7 +51,15 @@ async def db_cleanup_confirm(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "db_cleanup_execute")
-async def db_cleanup_execute(cb: types.CallbackQuery):
+async def db_cleanup_execute(cb: types.CallbackQuery) -> None:
+    """Execute database cleanup.
+
+    DANGEROUS: Wipes all tables and resets generator_state to defaults.
+    Cannot be undone.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 

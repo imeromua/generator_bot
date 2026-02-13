@@ -1,3 +1,9 @@
+"""Admin panel home handler.
+
+Displays admin panel with generator status, fuel, maintenance info,
+and last sync details. Manages single-window UI.
+"""
+
 import logging
 from datetime import datetime, timedelta
 
@@ -14,7 +20,20 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        """Fallback shift formatter.
+
+        Args:
+            code: Shift code
+
+        Returns:
+            Formatted shift name with emoji
+        """
+        mapping = {
+            'м': '🌅 Зміна 1',
+            'd': '☀️ Зміна 2',
+            'e': '🌙 Зміна 3',
+            'x': '⚡ Екстра'
+        }
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -23,7 +42,14 @@ logger = logging.getLogger(__name__)
 
 
 def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
-    """Повертає True, якщо callback прийшов зі старого повідомлення (не з відстежуваного single-window UI)."""
+    """Повертає True, якщо callback прийшов зі старого повідомлення (не з відстежуваного single-window UI).
+
+    Args:
+        cb: Callback query
+
+    Returns:
+        True if callback is from outdated message
+    """
     try:
         ui = db.get_ui_message(int(cb.from_user.id))
     except Exception:
@@ -40,19 +66,26 @@ def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
 
 
 def _format_sync_time(ts_str: str | None) -> str:
-    """Форматує час синхронізації у зручному вигляді."""
+    """Форматує час синхронізації у зручному вигляді.
+
+    Args:
+        ts_str: Timestamp string in format YYYY-MM-DD HH:MM:SS
+
+    Returns:
+        Human-readable relative time
+    """
     if not ts_str:
         return "ніколи"
-    
+
     try:
         # Парсимо час із бази
         dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
         dt = dt.replace(tzinfo=config.KYIV)
         now = datetime.now(config.KYIV)
-        
+
         # Обчислюємо різницю
         diff = now - dt
-        
+
         if diff.total_seconds() < 60:
             return "щойно"
         elif diff.total_seconds() < 3600:
@@ -71,7 +104,23 @@ def _format_sync_time(ts_str: str | None) -> str:
 
 # --- ВХІД В АДМІНКУ ---
 @router.callback_query(F.data == "admin_home")
-async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
+async def adm_menu(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Display admin panel.
+
+    Shows:
+    - Generator status (ON/OFF with shift name)
+    - Active generator name
+    - Fuel level with alert if low
+    - Maintenance countdown
+    - Total motor hours
+    - Last sync info
+
+    Manages single-window UI concept.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -92,7 +141,7 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     # Отримуємо активний генератор
     active_gen = db.get_active_generator()
     gen_name = db.get_generator_name(active_gen)
-    
+
     # Іконка генератора
     if active_gen == "emergency":
         gen_icon = "⚠️"
