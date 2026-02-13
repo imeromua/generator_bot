@@ -14,7 +14,9 @@
 """
 
 import logging
+import sqlite3
 from datetime import datetime
+from typing import Optional
 
 import config
 from database.models import get_connection
@@ -24,13 +26,26 @@ logger = logging.getLogger(__name__)
 
 
 def _fuel_rate() -> float:
+    """Отримує витрати палива з config.
+
+    Returns:
+        Fuel consumption rate in liters per hour
+    """
     try:
         return float(getattr(config, "FUEL_CONSUMPTION", 0.0) or 0.0)
     except Exception:
         return 0.0
 
 
-def _parse_date(date_str: str) -> str | None:
+def _parse_date(date_str: str) -> Optional[str]:
+    """Парсить дату з різних форматів.
+
+    Args:
+        date_str: Date string
+
+    Returns:
+        Normalized date YYYY-MM-DD or None
+    """
     if not date_str or not str(date_str).strip():
         return None
 
@@ -51,7 +66,15 @@ def _parse_date(date_str: str) -> str | None:
     return None
 
 
-def _parse_time(time_str: str) -> str | None:
+def _parse_time(time_str: str) -> Optional[str]:
+    """Парсить час з різних форматів.
+
+    Args:
+        time_str: Time string
+
+    Returns:
+        Normalized time HH:MM:SS or None
+    """
     if not time_str or not str(time_str).strip():
         return None
     try:
@@ -67,10 +90,26 @@ def _parse_time(time_str: str) -> str | None:
 
 
 def _norm(s: str) -> str:
+    """Нормалізує рядок для порівняння.
+
+    Args:
+        s: Input string
+
+    Returns:
+        Normalized lowercase string
+    """
     return (s or "").strip().lower().replace("\n", " ")
 
 
 def _is_service_col_header(label_norm: str) -> bool:
+    """Перевіряє чи це службовий заголовок.
+
+    Args:
+        label_norm: Normalized label
+
+    Returns:
+        True if service column
+    """
     if not label_norm:
         return True
     if label_norm in {"t", "u"}:
@@ -81,7 +120,14 @@ def _is_service_col_header(label_norm: str) -> bool:
 
 
 def _build_header_map_1row(header: list[str]) -> dict[str, list[int]]:
-    """Map normalized header label -> list of column indices (to support duplicates)."""
+    """Map normalized header label -> list of column indices (to support duplicates).
+
+    Args:
+        header: Header row from spreadsheet
+
+    Returns:
+        Dict mapping normalized label to list of column indices
+    """
     m: dict[str, list[int]] = {}
     for i, col in enumerate(header):
         n = _norm(col)
@@ -93,14 +139,24 @@ def _build_header_map_1row(header: list[str]) -> dict[str, list[int]]:
     return m
 
 
-def _get(row: list[str], idx: int | None) -> str:
+def _get(row: list[str], idx: Optional[int]) -> str:
+    """Безпечне отримання значення з рядка.
+
+    Args:
+        row: Row from spreadsheet
+        idx: Column index
+
+    Returns:
+        Cell value or empty string
+    """
     if idx is None or idx < 0:
         return ""
     return (row[idx] if idx < len(row) else "") or ""
 
 
-def _clear_db():
-    logger.info("🧹 Очищаємо БД перед імпортом...")
+def _clear_db() -> None:
+    """Очищує БД перед імпортом."""
+    logger.info("🧹 Очищуємо БД перед імпортом...")
     with get_connection() as conn:
         conn.execute("DELETE FROM logs")
         conn.execute("DELETE FROM schedule")
@@ -112,7 +168,8 @@ def _clear_db():
     logger.info("✅ БД очищено")
 
 
-def _restore_generator_state():
+def _restore_generator_state() -> None:
+    """Відновлює стан генератора з логів."""
     logger.info("🔧 Відновлюємо стан генератора з логів...")
 
     conn = get_connection()
@@ -131,7 +188,7 @@ def _restore_generator_state():
 
     running_fuel = 0.0
     running_hours = 0.0
-    active_shifts = {}
+    active_shifts: dict[str, str] = {}
 
     for event, ts_str, value in rows:
         if event == "refill":
@@ -190,7 +247,12 @@ def _restore_generator_state():
         conn.close()
 
 
-def _import_main_sheet_data(all_values: list[list[str]]):
+def _import_main_sheet_data(all_values: list[list[str]]) -> None:
+    """Імпортує дані з основної вкладки.
+
+    Args:
+        all_values: All rows from main worksheet
+    """
     if len(all_values) < 2:
         logger.warning("⚠️ Таблиця виглядає порожньою (менше 2 рядків).")
         return
@@ -200,11 +262,11 @@ def _import_main_sheet_data(all_values: list[list[str]]):
 
     hmap = _build_header_map_1row(header)
 
-    def idx_first(name: str) -> int | None:
+    def idx_first(name: str) -> Optional[int]:
         arr = hmap.get(_norm(name))
         return arr[0] if arr else None
 
-    def idx_n(name: str, n: int) -> int | None:
+    def idx_n(name: str, n: int) -> Optional[int]:
         arr = hmap.get(_norm(name))
         return arr[n] if arr and len(arr) > n else None
 
@@ -240,8 +302,8 @@ def _import_main_sheet_data(all_values: list[list[str]]):
         return
 
     conn = get_connection()
-    all_drivers = set()
-    all_personnel = set()
+    all_drivers: set[str] = set()
+    all_personnel: set[str] = set()
 
     for row in data_rows:
         driver_ref = _get(row, idx_drivers_dict).strip()
@@ -343,7 +405,11 @@ def _import_main_sheet_data(all_values: list[list[str]]):
     logger.info(f"👥 Імпортовано персонал (довідник): {len(all_personnel)}")
 
 
-def full_import():
+def full_import() -> None:
+    """Виконує повний імпорт з Sheets в БД.
+
+    IMPORTANT: Clears database before import!
+    """
     logger.info("📥 Починаємо імпорт з Sheets в БД (безпечний режим)...")
 
     try:

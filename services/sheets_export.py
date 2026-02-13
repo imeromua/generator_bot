@@ -22,6 +22,9 @@
 import logging
 from collections import defaultdict
 from datetime import datetime
+from typing import Any, Optional
+
+import gspread
 
 import config
 from database.models import get_connection
@@ -33,8 +36,15 @@ logger = logging.getLogger(__name__)
 _MAX_COL = 27  # A..AA (використовуємо тільки частину колонок)
 
 
-def _parse_ts(ts_str: str) -> datetime | None:
-    """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)."""
+def _parse_ts(ts_str: str) -> Optional[datetime]:
+    """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS).
+
+    Args:
+        ts_str: Timestamp string from database
+
+    Returns:
+        Parsed datetime or None
+    """
     if not ts_str:
         return None
     try:
@@ -43,16 +53,30 @@ def _parse_ts(ts_str: str) -> datetime | None:
         return None
 
 
-def _time_to_hhmm(dt: datetime | None) -> str:
+def _time_to_hhmm(dt: Optional[datetime]) -> str:
+    """Конвертує datetime в HH:MM рядок.
+
+    Args:
+        dt: Datetime object
+
+    Returns:
+        Time string HH:MM or empty string
+    """
     if not dt:
         return ""
     return dt.strftime("%H:%M")
 
 
-def _aggregate_logs_by_date(from_date: str | None = None):
+def _aggregate_logs_by_date(from_date: Optional[str] = None) -> dict[str, dict[str, Any]]:
     """Групує логи по датах для експорту в основну вкладку.
 
     Якщо from_date задано, залишаються тільки дні >= from_date.
+
+    Args:
+        from_date: Optional date filter (YYYY-MM-DD)
+
+    Returns:
+        Dict with date keys, each containing shifts and refills data
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -67,7 +91,7 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     rows = cur.fetchall()
     conn.close()
 
-    days = defaultdict(
+    days: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
             "refills": [],  # [(amount, driver, receipt), ...]
@@ -102,13 +126,20 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     if from_date:
         days = {d: data for d, data in days.items() if d >= from_date}
 
-    return days
+    return dict(days)
 
 
 def _unique_join(items: list[str]) -> str:
-    """Join unique non-empty strings, preserving order."""
-    out = []
-    seen = set()
+    """Join unique non-empty strings, preserving order.
+
+    Args:
+        items: List of strings
+
+    Returns:
+        Comma-separated unique strings
+    """
+    out: list[str] = []
+    seen: set[str] = set()
     for x in items:
         x = (x or "").strip()
         if not x or x in seen:
@@ -118,8 +149,16 @@ def _unique_join(items: list[str]) -> str:
     return ", ".join(out)
 
 
-def _build_export_rows(days_data):
-    rows = []
+def _build_export_rows(days_data: dict[str, dict[str, Any]]) -> list[list[Any]]:
+    """Будує рядки для експорту.
+
+    Args:
+        days_data: Aggregated days data
+
+    Returns:
+        List of rows, each row is a list of values
+    """
+    rows: list[list[Any]] = []
 
     for date_str in sorted(days_data.keys()):
         day = days_data[date_str]
@@ -128,7 +167,7 @@ def _build_export_rows(days_data):
         date_fmt = dt.strftime("%d.%m.%Y")
 
         # Prepare empty row A..AA
-        row = [""] * _MAX_COL
+        row: list[Any] = [""] * _MAX_COL
 
         # A: дата
         row[0] = date_fmt
@@ -168,14 +207,15 @@ def _build_export_rows(days_data):
     return rows
 
 
-def full_export():
+def full_export() -> dict[str, list[str]]:
     """Експорт з БД в Google Sheets по днях.
 
     Для кожної дати з логів:
     - якщо в Sheets по цій даті вже є дані в B..I,N,P,Q — день пропускається;
     - інакше дані за день записуються (або дописуються) в основну вкладку.
 
-    Повертає словник з переліком оновлених і пропущених дат.
+    Returns:
+        Dict with 'updated' and 'skipped' date lists
     """
     logger.info("📤 Починаємо експорт з БД в Sheets (only fill missing days)...")
 
