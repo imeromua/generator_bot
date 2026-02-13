@@ -1,13 +1,23 @@
+"""Maintenance tracking API.
+
+Manages generator maintenance records and schedules.
+"""
 import logging
 from datetime import datetime
+from typing import Optional, Literal
 
 import config
 from database.models import get_connection, begin_transaction
 from database.api.state import _conn_get_state_float, _conn_set_state_value, _conn_get_state_value
 
 
-def update_hours(h, generator_id: str = "main"):
-    """Оновити мотогодини генератора з транзакцією."""
+def update_hours(h: float, generator_id: str = "main") -> None:
+    """Оновити мотогодини генератора з транзакцією.
+
+    Args:
+        h: Кількість годин для додавання
+        generator_id: ID генератора ('main' або 'emergency')
+    """
     try:
         with get_connection() as conn:
             begin_transaction(conn)
@@ -26,8 +36,13 @@ def update_hours(h, generator_id: str = "main"):
         logging.error(f"Помилка update_hours: {e}")
 
 
-def set_total_hours(new_val, generator_id: str = "main"):
-    """Встановити загальні мотогодини генератора з транзакцією."""
+def set_total_hours(new_val: float, generator_id: str = "main") -> None:
+    """Встановити загальні мотогодини генератора з транзакцією.
+
+    Args:
+        new_val: Нове значення мотогодин
+        generator_id: ID генератора ('main' або 'emergency')
+    """
     try:
         with get_connection() as conn:
             begin_transaction(conn)
@@ -44,35 +59,39 @@ def set_total_hours(new_val, generator_id: str = "main"):
         logging.error(f"Помилка set_total_hours: {e}")
 
 
-def record_maintenance(action: str, admin: str, generator_id: str | None = None):
+def record_maintenance(
+    action: Literal["oil", "spark", "maintenance"],
+    admin: str,
+    generator_id: str | None = None
+) -> None:
     """Записати виконання ТО та оновити лічильники з транзакцією.
-    
+
     Args:
         action: Тип ТО - 'oil', 'spark', 'maintenance'
         admin: Ім'я адміністратора
         generator_id: ID генератора ('main', 'emergency' або None для активного)
     """
     date_s = datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
-    
+
     with get_connection() as conn:
         begin_transaction(conn)
         try:
             # Якщо generator_id не вказаний - беремо активний
             if generator_id is None:
                 generator_id = _conn_get_state_value(conn, "active_generator", "main")
-            
+
             # Отримуємо поточні мотогодини відповідного генератора
             if generator_id == "emergency":
                 cur = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
             else:
                 cur = _conn_get_state_float(conn, "total_hours", 0.0)
-            
+
             # Записуємо в таблицю maintenance
             conn.execute(
                 "INSERT INTO maintenance (date, type, hours, admin, generator_id) VALUES (?,?,?,?,?)",
                 (date_s, action, cur, admin, generator_id),
             )
-            
+
             # Оновлюємо лічильники відповідного генератора
             if generator_id == "emergency":
                 if action == "oil":
@@ -92,7 +111,7 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
                     # Планове ТО - скидаємо все
                     _conn_set_state_value(conn, "last_oil_change", "0.0")
                     _conn_set_state_value(conn, "last_spark_change", "0.0")
-            
+
             conn.commit()
         except Exception as e:
             conn.rollback()
@@ -100,15 +119,18 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
             raise
 
 
-def get_maintenance_history(generator_id: str | None = None, limit: int = 20):
+def get_maintenance_history(
+    generator_id: str | None = None,
+    limit: int = 20
+) -> list[tuple]:
     """Отримати історію ТО.
-    
+
     Args:
         generator_id: Фільтр по генератору ('main', 'emergency' або None для всіх)
         limit: Максимальна кількість записів
-    
+
     Returns:
-        list: Список кортежів (id, date, type, hours, admin, generator_id)
+        Список кортежів (id, date, type, hours, admin, generator_id)
     """
     with get_connection() as conn:
         if generator_id:
@@ -130,11 +152,14 @@ def get_maintenance_history(generator_id: str | None = None, limit: int = 20):
             return conn.execute(query, (limit,)).fetchall()
 
 
-def get_maintenance_stats(generator_id: str = "main"):
+def get_maintenance_stats(generator_id: str = "main") -> dict[str, float]:
     """Отримати статистику ТО для генератора.
-    
+
+    Args:
+        generator_id: ID генератора ('main' або 'emergency')
+
     Returns:
-        dict: {
+        {
             'oil_needed': Скільки год до заміни мастила,
             'spark_needed': Скільки год до заміни свічок,
             'maintenance_needed': Скільки год до планового ТО,
@@ -152,14 +177,14 @@ def get_maintenance_stats(generator_id: str = "main"):
             total_hours = _conn_get_state_float(conn, "total_hours", 0.0)
             last_oil = _conn_get_state_float(conn, "last_oil_change", 0.0)
             last_spark = _conn_get_state_float(conn, "last_spark_change", 0.0)
-        
+
         # Розраховуємо скільки залишилось до кожного виду ТО
         oil_needed = config.OIL_CHANGE_INTERVAL - last_oil
         spark_needed = config.SPARK_CHANGE_INTERVAL - last_spark
-        
+
         # Планове ТО - рахуємо від загальних мотогодин
         maintenance_needed = config.MAINTENANCE_INTERVAL - (total_hours % config.MAINTENANCE_INTERVAL)
-        
+
         return {
             'oil_needed': max(0.0, oil_needed),
             'spark_needed': max(0.0, spark_needed),
@@ -170,36 +195,36 @@ def get_maintenance_stats(generator_id: str = "main"):
         }
 
 
-def get_next_maintenance_type(generator_id: str = "main"):
+def get_next_maintenance_type(generator_id: str = "main") -> tuple[Optional[str], Optional[float]]:
     """Визначає який вид ТО потрібен найближчим часом.
-    
+
+    Args:
+        generator_id: ID генератора ('main' або 'emergency')
+
     Returns:
-        tuple: (type, hours_left) або (None, None) якщо ТО не потрібно
+        (type, hours_left) або (None, None) якщо ТО не потрібно
     """
     stats = get_maintenance_stats(generator_id)
-    
+
     # Знаходимо найближче ТО
-    min_hours = None
-    min_type = None
-    
     if stats['oil_needed'] <= 0:
-        return ('oil', 0)
+        return ('oil', 0.0)
     if stats['spark_needed'] <= 0:
-        return ('spark', 0)
+        return ('spark', 0.0)
     if stats['maintenance_needed'] <= 0:
-        return ('maintenance', 0)
-    
+        return ('maintenance', 0.0)
+
     # Порівнюємо що ближче
     candidates = [
         ('oil', stats['oil_needed']),
         ('spark', stats['spark_needed']),
         ('maintenance', stats['maintenance_needed']),
     ]
-    
+
     min_type, min_hours = min(candidates, key=lambda x: x[1])
-    
+
     # Якщо до ТО залишилось менше 10 годин - попереджаємо
     if min_hours <= 10:
         return (min_type, min_hours)
-    
+
     return (None, None)
