@@ -1,5 +1,10 @@
+"""Single-window notification helper.
+
+Sends messages in single-window mode with edit/delete fallback.
+"""
+
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from aiogram.exceptions import TelegramBadRequest
 
@@ -12,12 +17,18 @@ async def send_single_window(
     bot: Any,
     user_id: int,
     text: str,
-    reply_markup=None,
+    reply_markup: Optional[Any] = None,
 ) -> None:
     """Send a message in "single-window" mode.
 
     If we have a tracked UI message for the user, try to edit it.
     If edit fails, try to delete the old message and send a new one, then update tracking.
+
+    Args:
+        bot: Telegram bot instance
+        user_id: Target user ID
+        text: Message text
+        reply_markup: Optional keyboard markup
 
     Note: We keep per-user tracking in user_ui table.
     """

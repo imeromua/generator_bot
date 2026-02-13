@@ -1,5 +1,13 @@
+"""Auto-close shift at work end time.
+
+FIX #22: Atomic fuel calculation in try_stop_shift
+FIX #23: Grace period to prevent race condition
+FIX #24: Forced close event logging
+"""
+
 import logging
 from datetime import datetime, timedelta, time as dt_time
+from typing import Any
 
 import config
 import database.db_api as db
@@ -13,7 +21,7 @@ AUTO_CLOSE_GRACE_PERIOD_SECONDS = 60  # Wait 60s before auto-closing
 
 
 async def maybe_auto_close_shift(
-    bot,
+    bot: Any,
     now: datetime,
     close_time: dt_time,
     auto_close_done_today: bool,
@@ -24,7 +32,14 @@ async def maybe_auto_close_shift(
     FIX #22: Removed duplicate fuel calculation (now in try_stop_shift).
     FIX #24: Log forced_close events for audit trail.
 
-    Returns: (auto_close_done_today, skip_rest_of_loop)
+    Args:
+        bot: Telegram bot instance
+        now: Current datetime
+        close_time: Time to auto-close
+        auto_close_done_today: Already closed today flag
+
+    Returns:
+        Tuple of (auto_close_done_today, skip_rest_of_loop)
     """
     if now.time() < close_time or auto_close_done_today:
         return auto_close_done_today, False
