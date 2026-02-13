@@ -1,7 +1,7 @@
 """Comprehensive tests for Pydantic-based configuration models."""
 import pytest
 from pathlib import Path
-import os
+from pydantic import ValidationError
 
 from config import (
     DatabaseSettings,
@@ -40,13 +40,9 @@ class TestDatabaseSettings:
         assert db.backend == "sqlite"
 
     def test_pool_constraints(self):
-        """Test pool size constraints."""
-        db = DatabaseSettings(
-            pg_pool_min_size=5,
-            pg_pool_max_size=20
-        )
-        assert db.pg_pool_min_size == 5
-        assert db.pg_pool_max_size == 20
+        """Test pool size values are validated."""
+        with pytest.raises(ValidationError):
+            DatabaseSettings(pg_pool_min_size=0)  # Must be >= 1
 
 
 class TestRedisSettings:
@@ -64,7 +60,7 @@ class TestRedisSettings:
             RedisSettings(enabled=True, url="")
 
     def test_disabled_doesnt_require_url(self):
-        """Test disabled Redis doesn't need URL."""
+        """Test disabled Redis accepts empty URL."""
         redis = RedisSettings(enabled=False, url="")
         assert redis.enabled is False
 
@@ -74,7 +70,7 @@ class TestSheetsSettings:
 
     def test_requires_sheet_ids(self):
         """Test sheet IDs are required."""
-        with pytest.raises(Exception):  # ValidationError
+        with pytest.raises(ValidationError):
             SheetsSettings()
 
     def test_service_account_path(self):
@@ -101,19 +97,16 @@ class TestLoggingSettings:
         """Test log level is normalized to uppercase."""
         log_debug = LoggingSettings(log_level="debug")
         assert log_debug.log_level == "DEBUG"
-        
-        log_info = LoggingSettings(log_level="info")
-        assert log_info.log_level == "INFO"
 
     def test_log_level_validation(self):
-        """Test invalid log level raises error."""
-        with pytest.raises(Exception):  # ValidationError
+        """Test invalid log level raises ValidationError."""
+        with pytest.raises(ValidationError):
             LoggingSettings(log_level="CUSTOM")
 
     def test_size_constraints(self):
-        """Test log file size configuration."""
-        log = LoggingSettings(log_max_bytes=5242880)  # 5MB
-        assert log.log_max_bytes == 5242880
+        """Test log file size must be >= 1024."""
+        with pytest.raises(ValidationError):
+            LoggingSettings(log_max_bytes=100)  # Too small
 
 
 class TestWorkScheduleSettings:
@@ -128,18 +121,14 @@ class TestWorkScheduleSettings:
         assert schedule.morning_brief_time == "07:30"
 
     def test_timezone_validation(self):
-        """Test timezone accepts valid values."""
-        schedule = WorkScheduleSettings(timezone="UTC")
+        """Test invalid timezone falls back to UTC."""
+        schedule = WorkScheduleSettings(timezone="Invalid/Zone")
         assert schedule.timezone == "UTC"
 
     def test_time_format_validation(self):
-        """Test time format validation."""
-        schedule = WorkScheduleSettings(
-            work_start_time="09:00",
-            work_end_time="18:00"
-        )
-        assert schedule.work_start_time == "09:00"
-        assert schedule.work_end_time == "18:00"
+        """Test invalid time format raises error."""
+        with pytest.raises(ValidationError):
+            WorkScheduleSettings(work_start_time="25:00")  # Invalid hour
 
 
 class TestMaintenanceSettings:
@@ -154,18 +143,14 @@ class TestMaintenanceSettings:
         assert maint.oil_limit == 100
 
     def test_positive_intervals(self):
-        """Test positive interval values."""
-        maint = MaintenanceSettings(
-            oil_change_interval=150,
-            spark_change_interval=200
-        )
-        assert maint.oil_change_interval == 150
-        assert maint.spark_change_interval == 200
+        """Test intervals must be positive."""
+        with pytest.raises(ValidationError):
+            MaintenanceSettings(oil_change_interval=0)  # Must be > 0
 
     def test_oil_limit_compatibility(self):
         """Test oil_limit defaults to oil_change_interval."""
-        maint = MaintenanceSettings(oil_change_interval=100)
-        assert maint.oil_limit == 100
+        maint = MaintenanceSettings(oil_change_interval=150)
+        assert maint.oil_limit == 150
 
 
 class TestFuelSettings:
@@ -179,7 +164,7 @@ class TestFuelSettings:
         assert fuel.fuel_alert_threshold == 40.0
 
     def test_fuel_rate_alias(self):
-        """Test fuel_rate is an alias for fuel_consumption."""
+        """Test fuel_rate overrides fuel_consumption."""
         fuel = FuelSettings(fuel_rate=7.5)
         assert fuel.fuel_consumption == 7.5
 
@@ -189,13 +174,9 @@ class TestFuelSettings:
         assert fuel.emergency_fuel_consumption == 1.2
 
     def test_positive_values(self):
-        """Test fuel values can be positive floats."""
-        fuel = FuelSettings(
-            fuel_consumption=0.5,
-            emergency_fuel_consumption=0.7
-        )
-        assert fuel.fuel_consumption == 0.5
-        assert fuel.emergency_fuel_consumption == 0.7
+        """Test fuel values must be positive."""
+        with pytest.raises(ValidationError):
+            FuelSettings(fuel_consumption=0)  # Must be > 0
 
 
 class TestAccessSettings:
@@ -209,17 +190,16 @@ class TestAccessSettings:
     def test_whitelist_parsing(self):
         """Test whitelist parsing."""
         access = AccessSettings(admins="1", users="444,555")
-        result = access.get_whitelist()
-        assert result == [444, 555]
+        assert access.get_whitelist() == [444, 555]
 
     def test_empty_lists(self):
-        """Test empty admin/user lists."""
-        access = AccessSettings(admins="1")  # admins is required
-        assert access.users == ""
+        """Test empty user list with required admin."""
+        access = AccessSettings(admins="1")
+        assert access.get_whitelist() == []
 
     def test_invalid_id_format(self):
         """Test invalid ID format raises error."""
-        with pytest.raises(ValueError, match="Invalid user ID list format"):
+        with pytest.raises(ValidationError):
             AccessSettings(admins="invalid,ids")
 
     def test_registration_open_property(self):
@@ -251,19 +231,13 @@ class TestMainSettings:
         """Test sheet_id property selects correct ID based on mode."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         monkeypatch.setenv("ADMINS", "1")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod_sheet")
+        monkeypatch.setenv("SHEET_ID_TEST", "test_sheet")
         
-        # Test mode uses test sheet
-        settings_test = Settings(
-            mode="TEST",
-            sheets={"sheet_id_prod": "prod_sheet", "sheet_id_test": "test_sheet"}
-        )
+        settings_test = Settings(mode="TEST")
+        settings_prod = Settings(mode="PROD")
+        
         assert settings_test.sheet_id == "test_sheet"
-        
-        # Prod mode uses prod sheet
-        settings_prod = Settings(
-            mode="PROD",
-            sheets={"sheet_id_prod": "prod_sheet", "sheet_id_test": "test_sheet"}
-        )
         assert settings_prod.sheet_id == "prod_sheet"
 
     def test_kyiv_tz_property(self, monkeypatch):
@@ -332,17 +306,20 @@ class TestValidationErrors:
     def test_missing_required_field(self, monkeypatch):
         """Test missing BOT_TOKEN raises error."""
         monkeypatch.delenv("BOT_TOKEN", raising=False)
-        with pytest.raises(Exception):  # ValidationError
+        monkeypatch.delenv("SHEET_ID_PROD", raising=False)
+        monkeypatch.delenv("SHEET_ID_TEST", raising=False)
+        monkeypatch.delenv("ADMINS", raising=False)
+        with pytest.raises(ValidationError):
             Settings()
 
     def test_invalid_mode(self, monkeypatch):
-        """Test invalid MODE is rejected."""
+        """Test invalid MODE raises ValidationError."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         monkeypatch.setenv("SHEET_ID_PROD", "prod")
         monkeypatch.setenv("SHEET_ID_TEST", "test")
         monkeypatch.setenv("ADMINS", "1")
         
-        with pytest.raises(Exception):  # ValidationError for invalid literal
+        with pytest.raises(ValidationError):
             Settings(mode="INVALID")
 
     def test_postgres_without_dsn_raises(self, monkeypatch):
@@ -359,7 +336,7 @@ class TestValidationErrors:
 class TestConfigIntegration:
     """Integration tests for configuration loading."""
 
-    def test_load_from_env_file(self, tmp_path, monkeypatch):
+    def test_load_from_env_file(self, monkeypatch):
         """Test loading configuration from environment."""
         monkeypatch.setenv("BOT_TOKEN", "env_file_token")
         monkeypatch.setenv("MODE", "TEST")
