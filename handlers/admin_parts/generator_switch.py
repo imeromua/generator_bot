@@ -76,7 +76,13 @@ def _document_keyboard():
 
 @router.callback_query(F.data == "generator_switch")
 async def gen_switch_menu(cb: types.CallbackQuery, state: FSMContext):
-    """Головне меню перемикання генераторів."""
+    """Головне меню перемикання генераторів.
+    
+    Важливо: підтримує концепцію "єдиного вікна" так само, як адмін-панель.
+    Якщо меню відкривається з документа (звіт Excel), повідомлення-документ
+    видаляється і створюється нове текстове повідомлення, яке стає новим
+    tracked UI (db.set_ui_message).
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
     
@@ -120,12 +126,21 @@ async def gen_switch_menu(cb: types.CallbackQuery, state: FSMContext):
     
     # Перевіряємо, чи це текстове повідомлення
     if cb.message.text:
-        # Якщо текстове - редагуємо
+        # Якщо текстове - редагуємо в рамках single-window
         await cb.message.edit_text(info_text, reply_markup=_generator_keyboard())
+        msg_to_track = cb.message
     else:
-        # Якщо документ - видаляємо і створюємо нове
+        # Якщо документ - видаляємо і створюємо нове текстове повідомлення
         await cb.message.delete()
-        await cb.message.answer(info_text, reply_markup=_generator_keyboard())
+        msg_to_track = await cb.message.answer(info_text, reply_markup=_generator_keyboard())
+    
+    # Оновлюємо tracked UI, щоб _is_outdated_ui() в адмін-панелі не вважав
+    # це старим повідомленням. Таким чином генератор-меню вписується в
+    # концепцію "єдиного вікна" разом з admin_home.
+    try:
+        db.set_ui_message(int(cb.from_user.id), int(msg_to_track.chat.id), int(msg_to_track.message_id))
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data.startswith("gen_switch_"))
