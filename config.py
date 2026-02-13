@@ -1,243 +1,411 @@
-import os
+"""Configuration module using Pydantic for type-safe settings.
+
+This module loads configuration from environment variables (.env file)
+and provides type-safe access to all bot settings.
+"""
 import sys
+from pathlib import Path
+from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
-from dotenv import load_dotenv
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
+
+class DatabaseSettings(BaseSettings):
+    """Database configuration."""
+
+    backend: Literal["sqlite", "postgres"] = Field(default="sqlite", alias="DB_BACKEND")
+    sqlite_path: str = Field(default="generator.db", alias="SQLITE_PATH")
+    postgres_dsn: str = Field(default="", alias="POSTGRES_DSN")
+    postgres_admin_dsn: str = Field(default="", alias="POSTGRES_ADMIN_DSN")
+
+    # PostgreSQL Connection Pool
+    pg_pool_min_size: int = Field(default=2, ge=1, alias="PG_POOL_MIN_SIZE")
+    pg_pool_max_size: int = Field(default=10, ge=1, alias="PG_POOL_MAX_SIZE")
+    pg_pool_timeout: int = Field(default=30, ge=1, alias="PG_POOL_TIMEOUT")
+    pg_pool_max_idle: int = Field(default=300, ge=1, alias="PG_POOL_MAX_IDLE")
+
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, v: str) -> str:
+        """Normalize backend to lowercase."""
+        return v.strip().lower()
+
+    @model_validator(mode="after")
+    def validate_postgres_config(self):
+        """Check psycopg is installed when using postgres."""
+        if self.backend == "postgres":
+            if not self.postgres_dsn:
+                raise ValueError("POSTGRES_DSN is required when DB_BACKEND=postgres")
+            try:
+                import psycopg  # noqa: F401
+            except ImportError as e:
+                raise ImportError(
+                    "DB_BACKEND=postgres requires 'psycopg' module. "
+                    "Install with: pip install psycopg[binary]"
+                ) from e
+        return self
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+class RedisSettings(BaseSettings):
+    """Redis configuration."""
+
+    enabled: bool = Field(default=False, alias="REDIS_ENABLED")
+    url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+
+    @model_validator(mode="after")
+    def validate_redis_url(self):
+        """Ensure REDIS_URL is set when enabled."""
+        if self.enabled and not self.url:
+            raise ValueError("REDIS_URL is required when REDIS_ENABLED=true")
+        return self
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class SheetsSettings(BaseSettings):
+    """Google Sheets configuration."""
+
+    runtime_enabled: bool = Field(default=True, alias="SHEETS_RUNTIME_ENABLED")
+    service_account_path: Path = Field(default=Path("service_account.json"), alias="SERVICE_ACCOUNT_PATH")
+    sheet_id_prod: str = Field(alias="SHEET_ID_PROD")
+    sheet_id_test: str = Field(alias="SHEET_ID_TEST")
+    sheet_name: str = Field(default="ЛЮТИЙ", alias="SHEET_NAME")
+    logs_sheet_name: str = Field(default="ПОДІЇ", alias="LOGS_SHEET_NAME")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class LoggingSettings(BaseSettings):
+    """Logging configuration."""
+
+    log_file: str = Field(default="bot.log", alias="LOG_FILE")
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(default="INFO", alias="LOG_LEVEL")
+    log_max_bytes: int = Field(default=10485760, ge=1024, alias="LOG_MAX_BYTES")  # 10MB
+    log_backup_count: int = Field(default=5, ge=0, alias="LOG_BACKUP_COUNT")
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, v: str) -> str:
+        """Normalize log level to uppercase."""
+        return v.upper()
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class WorkScheduleSettings(BaseSettings):
+    """Work schedule configuration."""
+
+    timezone: str = Field(default="Europe/Kyiv", alias="TIMEZONE")
+    work_start_time: str = Field(default="07:30", alias="WORK_START")
+    work_end_time: str = Field(default="20:30", alias="WORK_END")
+    morning_brief_time: str = Field(default="07:30", alias="BRIEF_TIME")
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        """Validate timezone string."""
+        try:
+            ZoneInfo(v)
+        except Exception as e:
+            print(f"⚠️ Invalid timezone '{v}', falling back to UTC")
+            return "UTC"
+        return v
+
+    @field_validator("work_start_time", "work_end_time", "morning_brief_time")
+    @classmethod
+    def validate_time_format(cls, v: str) -> str:
+        """Validate HH:MM time format."""
+        if ":" not in v:
+            raise ValueError(f"Time must be in HH:MM format, got: {v}")
+        parts = v.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Time must be in HH:MM format, got: {v}")
+        try:
+            hours, minutes = int(parts[0]), int(parts[1])
+            if not (0 <= hours < 24 and 0 <= minutes < 60):
+                raise ValueError(f"Invalid time: {v}")
+        except ValueError as e:
+            raise ValueError(f"Invalid time format: {v}") from e
+        return v
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class MaintenanceSettings(BaseSettings):
+    """Maintenance intervals configuration."""
+
+    oil_change_interval: int = Field(default=100, gt=0, alias="OIL_CHANGE_INTERVAL")
+    spark_change_interval: int = Field(default=100, gt=0, alias="SPARK_CHANGE_INTERVAL")
+    maintenance_interval: int = Field(default=300, gt=0, alias="MAINTENANCE_INTERVAL")
+    # Backward compatibility
+    oil_limit: Optional[int] = Field(default=None, gt=0, alias="OIL_LIMIT")
+
+    @model_validator(mode="after")
+    def set_oil_limit_compat(self):
+        """Set MAINTENANCE_LIMIT for backward compatibility."""
+        if self.oil_limit is None:
+            self.oil_limit = self.oil_change_interval
+        return self
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class FuelSettings(BaseSettings):
+    """Fuel consumption and alerts configuration."""
+
+    # Main generator
+    fuel_consumption: float = Field(default=5.3, gt=0, alias="FUEL_CONSUMPTION")
+    fuel_rate: Optional[float] = Field(default=None, gt=0, alias="FUEL_RATE")  # Alias for backward compat
+
+    # Emergency generator
+    emergency_fuel_consumption: Optional[float] = Field(default=None, gt=0, alias="EMERGENCY_FUEL_CONSUMPTION")
+
+    # Alerts
+    fuel_alert_threshold: float = Field(default=40.0, gt=0, alias="FUEL_ALERT_THRESHOLD")
+    fuel_alert_cooldown_min: int = Field(default=60, gt=0, alias="FUEL_ALERT_COOLDOWN_MIN")
+    stop_reminder_min: int = Field(default=15, gt=0, alias="STOP_REMINDER_MIN")
+
+    @model_validator(mode="after")
+    def handle_fuel_aliases(self):
+        """Handle FUEL_RATE alias and set emergency defaults."""
+        # FUEL_RATE is alias for FUEL_CONSUMPTION
+        if self.fuel_rate is not None:
+            self.fuel_consumption = self.fuel_rate
+
+        # If emergency not set, use main consumption
+        if self.emergency_fuel_consumption is None:
+            self.emergency_fuel_consumption = self.fuel_consumption
+
+        return self
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class AccessSettings(BaseSettings):
+    """Access control configuration."""
+
+    admins: str = Field(alias="ADMINS")  # Comma-separated list
+    bot_status: Literal["ON", "OFF"] = Field(default="ON", alias="BOT_STATUS")
+    users: str = Field(default="", alias="USERS")  # Comma-separated whitelist
+
+    @field_validator("admins", "users")
+    @classmethod
+    def validate_id_list(cls, v: str) -> str:
+        """Validate comma-separated ID list."""
+        if not v.strip():
+            return ""
+        # Try parsing to validate format
+        try:
+            [int(x.strip()) for x in v.split(",") if x.strip()]
+        except ValueError as e:
+            raise ValueError(f"Invalid user ID list format: {v}") from e
+        return v
+
+    def get_admin_ids(self) -> list[int]:
+        """Parse admin IDs from string."""
+        if not self.admins.strip():
+            return []
+        return [int(x.strip()) for x in self.admins.split(",") if x.strip()]
+
+    def get_whitelist(self) -> list[int]:
+        """Parse whitelist IDs from string."""
+        if not self.users.strip():
+            return []
+        return [int(x.strip()) for x in self.users.split(",") if x.strip()]
+
+    @property
+    def registration_open(self) -> bool:
+        """Check if registration is open."""
+        return self.bot_status == "ON"
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class Settings(BaseSettings):
+    """Main application settings."""
+
+    # Core
+    bot_token: str = Field(alias="BOT_TOKEN")
+    mode: Literal["TEST", "PROD"] = Field(default="TEST", alias="MODE")
+
+    # Nested settings
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
+    redis: RedisSettings = Field(default_factory=RedisSettings)
+    sheets: SheetsSettings = Field(default_factory=lambda: SheetsSettings())
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    schedule: WorkScheduleSettings = Field(default_factory=WorkScheduleSettings)
+    maintenance: MaintenanceSettings = Field(default_factory=MaintenanceSettings)
+    fuel: FuelSettings = Field(default_factory=FuelSettings)
+    access: AccessSettings = Field(default_factory=lambda: AccessSettings())
+
+    @property
+    def is_test_mode(self) -> bool:
+        """Check if running in test mode."""
+        return self.mode == "TEST"
+
+    @property
+    def sheet_id(self) -> str:
+        """Get current sheet ID based on mode."""
+        return self.sheets.sheet_id_test if self.is_test_mode else self.sheets.sheet_id_prod
+
+    @property
+    def kyiv_tz(self) -> ZoneInfo:
+        """Get configured timezone as ZoneInfo."""
+        return ZoneInfo(self.schedule.timezone)
+
+    def validate_all(self) -> None:
+        """Validate all configuration (for backward compatibility with validate_env())."""
+        # Pydantic already validates on init, but we keep this for compatibility
+        if self.is_test_mode:
+            print("⚠️  УВАГА: Бот запущено в ТЕСТОВОМУ режимі (SHEET_ID_TEST)")
+
+    def print_config(self) -> None:
+        """Print current configuration (for debugging)."""
+        print("\n" + "=" * 60)
+        print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
+        print("=" * 60)
+        print(f"Режим: {'TEST' if self.is_test_mode else 'PROD'}")
+        print(f"Log Level: {self.logging.log_level}")
+        print(
+            f"Log File: {self.logging.log_file} "
+            f"(Max: {self.logging.log_max_bytes/1024/1024:.1f} MB, "
+            f"Backups: {self.logging.log_backup_count})"
+        )
+        print(f"DB backend: {self.database.backend}")
+        if self.database.backend == "sqlite":
+            print(f"SQLite path: {self.database.sqlite_path}")
+        if self.database.backend == "postgres":
+            print(f"Postgres DSN: {'(set)' if self.database.postgres_dsn else '(missing)'}")
+            print(
+                f"Connection pool: min={self.database.pg_pool_min_size}, "
+                f"max={self.database.pg_pool_max_size}, "
+                f"timeout={self.database.pg_pool_timeout}s, "
+                f"max_idle={self.database.pg_pool_max_idle}s"
+            )
+        print(f"Redis enabled: {self.redis.enabled}")
+        print(f"Sheets runtime enabled: {self.sheets.runtime_enabled}")
+        print(f"Service account path: {self.sheets.service_account_path}")
+        print(f"Таблиця: {self.sheets.sheet_name}")
+        print(f"ID таблиці: {self.sheet_id}")
+        print(f"Вкладка логів: {self.sheets.logs_sheet_name}")
+        print(f"Адміни: {self.access.get_admin_ids()}")
+        print(f"Витрата палива (основний): {self.fuel.fuel_consumption} л/год")
+        print(f"Витрата палива (аварійний): {self.fuel.emergency_fuel_consumption} л/год")
+        print("Інтервали ТО:")
+        print(f"  Мастило: {self.maintenance.oil_change_interval} год")
+        print(f"  Свічки: {self.maintenance.spark_change_interval} год")
+        print(f"  Планове ТО: {self.maintenance.maintenance_interval} год")
+        print(f"Таймзона: {self.kyiv_tz}")
+        print("=" * 60 + "\n")
+
+    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
+
+
+# ==========================================
+# Global settings instance (singleton)
+# ==========================================
+try:
+    settings = Settings()
+except Exception as e:
+    print("=" * 60)
+    print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
+    print("")
+    print(f"Деталі: {e}")
+    print("")
+    print("Перевірте файл .env та переконайтесь, що всі обов'язкові параметри вказані.")
+    print("Скопіюйте .env.example → .env і заповніть необхідні значення.")
+    print("=" * 60)
+    sys.exit(1)
+
+
+# ==========================================
+# Backward compatibility exports
+# ==========================================
+# These allow existing code to work without changes
+
+# Core
+BOT_TOKEN = settings.bot_token
+MODE = settings.mode
+IS_TEST_MODE = settings.is_test_mode
+
+# Database
+DB_BACKEND = settings.database.backend
+SQLITE_PATH = settings.database.sqlite_path
+POSTGRES_DSN = settings.database.postgres_dsn
+POSTGRES_ADMIN_DSN = settings.database.postgres_admin_dsn
+PG_POOL_MIN_SIZE = settings.database.pg_pool_min_size
+PG_POOL_MAX_SIZE = settings.database.pg_pool_max_size
+PG_POOL_TIMEOUT = settings.database.pg_pool_timeout
+PG_POOL_MAX_IDLE = settings.database.pg_pool_max_idle
+
+# Redis
+REDIS_ENABLED = settings.redis.enabled
+REDIS_URL = settings.redis.url
+
+# Sheets
+SHEETS_RUNTIME_ENABLED = settings.sheets.runtime_enabled
+SERVICE_ACCOUNT_PATH = str(settings.sheets.service_account_path)
+SHEET_ID = settings.sheet_id
+SHEET_NAME = settings.sheets.sheet_name
+LOGS_SHEET_NAME = settings.sheets.logs_sheet_name
+
+# Logging
+LOG_FILE = settings.logging.log_file
+LOG_LEVEL = settings.logging.log_level
+LOG_MAX_BYTES = settings.logging.log_max_bytes
+LOG_BACKUP_COUNT = settings.logging.log_backup_count
+
+# Schedule
+TIMEZONE = settings.schedule.timezone
+KYIV = settings.kyiv_tz
+WORK_START_TIME = settings.schedule.work_start_time
+WORK_END_TIME = settings.schedule.work_end_time
+MORNING_BRIEF_TIME = settings.schedule.morning_brief_time
+
+# Maintenance
+OIL_CHANGE_INTERVAL = settings.maintenance.oil_change_interval
+SPARK_CHANGE_INTERVAL = settings.maintenance.spark_change_interval
+MAINTENANCE_INTERVAL = settings.maintenance.maintenance_interval
+MAINTENANCE_LIMIT = settings.maintenance.oil_limit or settings.maintenance.oil_change_interval
+
+# Fuel
+FUEL_CONSUMPTION = settings.fuel.fuel_consumption
+EMERGENCY_FUEL_CONSUMPTION = settings.fuel.emergency_fuel_consumption or settings.fuel.fuel_consumption
+FUEL_ALERT_THRESHOLD_L = settings.fuel.fuel_alert_threshold
+FUEL_ALERT_COOLDOWN_MIN = settings.fuel.fuel_alert_cooldown_min
+STOP_REMINDER_MIN_BEFORE_END = settings.fuel.stop_reminder_min
+
+# Access
+ADMIN_IDS = settings.access.get_admin_ids()
+BOT_STATUS = settings.access.bot_status
+REGISTRATION_OPEN = settings.access.registration_open
+WHITELIST = settings.access.get_whitelist()
+
+
+# Backward compatibility function
+def validate_env() -> None:
+    """Validate environment configuration (backward compatibility).
+
+    Note: With Pydantic, validation happens automatically on Settings init.
+    This function is kept for compatibility with existing code.
+    """
+    settings.validate_all()
+
+
+# Helper to avoid breaking existing utility usage
 def _env_bool(name: str, default: bool = False) -> bool:
+    """Legacy helper for boolean env vars (kept for compatibility)."""
+    import os
+
     v = os.getenv(name)
     if v is None:
         return default
     return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-# --- ВАЛІДАЦІЯ КРИТИЧНИХ ПАРАМЕТРІВ ---
-def validate_env():
-    """Перевіряє наявність обов'язкових змінних.
-
-    Важливо: НЕ викликається автоматично при імпорті config.
-    Викликайте з точки входу (main.py) перед запуском бота.
-    """
-
-    required = ["BOT_TOKEN", "SHEET_ID_PROD", "SHEET_ID_TEST", "ADMINS"]
-
-    db_backend = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
-    if db_backend == "postgres":
-        required.append("POSTGRES_DSN")
-        # Додаткова перевірка наявності psycopg при використанні Postgres
-        try:
-            import psycopg  # type: ignore
-        except Exception:
-            print("=" * 60)
-            print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
-            print("")
-            print("DB_BACKEND=postgres, але модуль 'psycopg' не встановлено.")
-            print("Встановіть psycopg (наприклад, 'pip install psycopg[binary]') або змініть DB_BACKEND.")
-            print("=" * 60)
-            sys.exit(1)
-
-    if _env_bool("REDIS_ENABLED", False):
-        required.append("REDIS_URL")
-
-    missing = [key for key in required if not os.getenv(key)]
-
-    if missing:
-        print("=" * 60)
-        print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
-        print("")
-        print("Відсутні обов'язкові параметри в .env:")
-        for key in missing:
-            print(f"  - {key}")
-        print("")
-        print("Створіть .env файл з усіма необхідними параметрами.")
-        print("=" * 60)
-        sys.exit(1)
-
-
-# --- КЛЮЧІ ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# --- DB BACKEND ---
-DB_BACKEND = (os.getenv("DB_BACKEND", "sqlite") or "sqlite").strip().lower()
-SQLITE_PATH = (os.getenv("SQLITE_PATH", "generator.db") or "generator.db").strip()
-POSTGRES_DSN = (os.getenv("POSTGRES_DSN", "") or "").strip()
-POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
-
-# --- PostgreSQL Connection Pool ---
-try:
-    PG_POOL_MIN_SIZE = int(os.getenv("PG_POOL_MIN_SIZE", "2"))
-except ValueError:
-    PG_POOL_MIN_SIZE = 2
-
-try:
-    PG_POOL_MAX_SIZE = int(os.getenv("PG_POOL_MAX_SIZE", "10"))
-except ValueError:
-    PG_POOL_MAX_SIZE = 10
-
-try:
-    PG_POOL_TIMEOUT = int(os.getenv("PG_POOL_TIMEOUT", "30"))
-except ValueError:
-    PG_POOL_TIMEOUT = 30
-
-try:
-    PG_POOL_MAX_IDLE = int(os.getenv("PG_POOL_MAX_IDLE", "300"))
-except ValueError:
-    PG_POOL_MAX_IDLE = 300
-
-# --- REDIS ---
-REDIS_ENABLED = _env_bool("REDIS_ENABLED", False)
-REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
-
-# --- Google Sheets runtime integration ---
-# If False: bot works DB-only at runtime; import/export can be kept manual.
-SHEETS_RUNTIME_ENABLED = _env_bool("SHEETS_RUNTIME_ENABLED", True)
-
-# FIX #26: Configurable service account path for Google Sheets authentication
-SERVICE_ACCOUNT_PATH = (os.getenv("SERVICE_ACCOUNT_PATH", "service_account.json") or "service_account.json").strip()
-
-# --- ЛОГУВАННЯ ---
-LOG_FILE = os.getenv("LOG_FILE", "bot.log")
-try:
-    LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", 10485760))
-except ValueError:
-    LOG_MAX_BYTES = 10485760
-
-try:
-    LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", 5))
-except ValueError:
-    LOG_BACKUP_COUNT = 5
-
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-
-
-# --- НАЛАШТУВАННЯ ТАБЛИЦІ ---
-MODE = os.getenv("MODE", "TEST")
-IS_TEST_MODE = (MODE == "TEST")
-
-if IS_TEST_MODE:
-    print("⚠️  УВАГА: Бот запущено в ТЕСТОВОМУ режимі (SHEET_ID_TEST)")
-    SHEET_ID = os.getenv("SHEET_ID_TEST")
-else:
-    SHEET_ID = os.getenv("SHEET_ID_PROD")
-
-SHEET_NAME = os.getenv("SHEET_NAME", "ЛЮТИЙ")
-LOGS_SHEET_NAME = os.getenv("LOGS_SHEET_NAME", "ПОДІЇ")
-
-# --- ЧАС ТА МІСЦЕ ---
-TIMEZONE = os.getenv("TIMEZONE", "Europe/Kyiv")
-try:
-    KYIV = ZoneInfo(TIMEZONE)
-except Exception:
-    print(f"⚠️ Невідома таймзона {TIMEZONE}, використовується UTC")
-    KYIV = ZoneInfo("UTC")
-
-# --- ГРАФІК РОБОТИ ---
-WORK_START_TIME = os.getenv("WORK_START", "07:30")
-WORK_END_TIME = os.getenv("WORK_END", "20:30")
-MORNING_BRIEF_TIME = os.getenv("BRIEF_TIME", "07:30")
-
-# --- ТЕХНІЧНЕ ОБСЛУГОВУВАННЯ (ТО) ---
-# Інтервали ТО в мотогодинах (однакові для обох генераторів)
-try:
-    OIL_CHANGE_INTERVAL = int(os.getenv("OIL_CHANGE_INTERVAL", "100"))
-except ValueError:
-    OIL_CHANGE_INTERVAL = 100
-
-try:
-    SPARK_CHANGE_INTERVAL = int(os.getenv("SPARK_CHANGE_INTERVAL", "100"))
-except ValueError:
-    SPARK_CHANGE_INTERVAL = 100
-
-try:
-    MAINTENANCE_INTERVAL = int(os.getenv("MAINTENANCE_INTERVAL", "300"))
-except ValueError:
-    MAINTENANCE_INTERVAL = 300
-
-# Зворотна сумісність з старим OIL_LIMIT
-MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", str(OIL_CHANGE_INTERVAL)))
-
-# --- ДОСТУП ---
-ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
-BOT_STATUS = os.getenv("BOT_STATUS", "ON")
-REGISTRATION_OPEN = (BOT_STATUS == "ON")
-WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
-
-# --- ПАЛИВО (ОСНОВНИЙ ГЕНЕРАТОР) ---
-FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")
-
-if FUEL_RATE_STR:
-    try:
-        FUEL_CONSUMPTION = float(FUEL_RATE_STR)
-    except ValueError:
-        print(
-            f"⚠️  УВАГА: FUEL_RATE/FUEL_CONSUMPTION='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням"
-        )
-        FUEL_CONSUMPTION = 5.3
-else:
-    print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
-    FUEL_CONSUMPTION = 5.3
-
-# --- ПАЛИВО (АВАРІЙНИЙ ГЕНЕРАТОР) ---
-# Якщо не вказано - використовує FUEL_CONSUMPTION як дефолт
-EMERGENCY_FUEL_STR = os.getenv("EMERGENCY_FUEL_CONSUMPTION")
-
-if EMERGENCY_FUEL_STR:
-    try:
-        EMERGENCY_FUEL_CONSUMPTION = float(EMERGENCY_FUEL_STR)
-    except ValueError:
-        print(
-            f"⚠️  УВАГА: EMERGENCY_FUEL_CONSUMPTION='{EMERGENCY_FUEL_STR}' не є числом, "
-            f"використано {FUEL_CONSUMPTION} л/год (як для основного)"
-        )
-        EMERGENCY_FUEL_CONSUMPTION = FUEL_CONSUMPTION
-else:
-    # Якщо не вказано - використовуємо таку ж витрату як у основного
-    EMERGENCY_FUEL_CONSUMPTION = FUEL_CONSUMPTION
-
-# --- СПОВІЩЕННЯ ПРО ПАЛИВО ---
-try:
-    FUEL_ALERT_THRESHOLD_L = float(os.getenv("FUEL_ALERT_THRESHOLD", "40"))
-except Exception:
-    FUEL_ALERT_THRESHOLD_L = 40.0
-
-try:
-    FUEL_ALERT_COOLDOWN_MIN = int(os.getenv("FUEL_ALERT_COOLDOWN_MIN", "60"))
-except Exception:
-    FUEL_ALERT_COOLDOWN_MIN = 60
-
-try:
-    STOP_REMINDER_MIN_BEFORE_END = int(os.getenv("STOP_REMINDER_MIN", "15"))
-except Exception:
-    STOP_REMINDER_MIN_BEFORE_END = 15
-
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("📋 ПОТОЧНА КОНФІГУРАЦІЯ")
-    print("=" * 60)
-    print(f"Режим: {'TEST' if IS_TEST_MODE else 'PROD'}")
-    print(f"Log Level: {LOG_LEVEL}")
-    print(f"Log File: {LOG_FILE} (Max: {LOG_MAX_BYTES/1024/1024:.1f} MB, Backups: {LOG_BACKUP_COUNT})")
-    print(f"DB backend: {DB_BACKEND}")
-    if DB_BACKEND == "sqlite":
-        print(f"SQLite path: {SQLITE_PATH}")
-    if DB_BACKEND == "postgres":
-        print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
-        print(f"Connection pool: min={PG_POOL_MIN_SIZE}, max={PG_POOL_MAX_SIZE}, timeout={PG_POOL_TIMEOUT}s, max_idle={PG_POOL_MAX_IDLE}s")
-    print(f"Redis enabled: {REDIS_ENABLED}")
-    print(f"Sheets runtime enabled: {SHEETS_RUNTIME_ENABLED}")
-    print(f"Service account path: {SERVICE_ACCOUNT_PATH}")
-    print(f"Таблиця: {SHEET_NAME}")
-    print(f"ID таблиці: {SHEET_ID}")
-    print(f"Вкладка логів: {LOGS_SHEET_NAME}")
-    print(f"Адміни: {ADMIN_IDS}")
-    print(f"Витрата палива (основний): {FUEL_CONSUMPTION} л/год")
-    print(f"Витрата палива (аварійний): {EMERGENCY_FUEL_CONSUMPTION} л/год")
-    print(f"Інтервали ТО:")
-    print(f"  Мастило: {OIL_CHANGE_INTERVAL} год")
-    print(f"  Свічки: {SPARK_CHANGE_INTERVAL} год")
-    print(f"  Планове ТО: {MAINTENANCE_INTERVAL} год")
-    print(f"Таймзона: {KYIV}")
-    print("=" * 60 + "\n")
+    settings.print_config()
