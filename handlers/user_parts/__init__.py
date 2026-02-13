@@ -1,4 +1,12 @@
-"""User handlers shared utilities.
+"""User handlers package.
 
-NOTE: placed under user_parts to keep handlers/user.py thinner and to avoid cyclic imports.
+User-facing handlers for generator operations:
+- Shift management (start/stop)
+- Fuel refills
+- Schedule viewing
+- Event log
+- Home navigation
+
+NOTE: Placed under user_parts to keep handlers/user.py thinner 
+and to avoid cyclic imports.
 """
