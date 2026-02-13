@@ -104,7 +104,7 @@ async def _run_blocking(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-async def _close_redis(redis: Redis) -> None:
+async def _close_redis(redis: Redis) -> None:  # type: ignore[type-arg]
     """Best-effort close of redis client + pool (supports sync/async methods).
 
     Args:
@@ -246,14 +246,14 @@ async def on_shutdown() -> None:
     logger.info("✅ Shutdown complete")
 
 
-def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
+def build_dispatcher() -> tuple[Dispatcher, Redis | None]:  # type: ignore[type-arg]
     """Побудова Dispatcher з усіма middlewares та routers.
 
     Returns:
         Tuple of (Dispatcher, optional Redis client)
     """
     storage: MemoryStorage | RedisStorage = MemoryStorage()
-    redis_client: Redis | None = None
+    redis_client: Redis | None = None  # type: ignore[type-arg]
 
     if getattr(config, "REDIS_ENABLED", False):
         target = _safe_redis_target(getattr(config, "REDIS_URL", ""))

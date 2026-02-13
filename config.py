@@ -2,6 +2,13 @@
 
 This module loads configuration from environment variables (.env file)
 and provides type-safe access to all bot settings.
+
+All settings are validated at startup with Pydantic, providing:
+- Type safety
+- Validation
+- Clear error messages
+- Nested configuration
+- Backward compatibility
 """
 import sys
 from pathlib import Path
@@ -33,7 +40,7 @@ class DatabaseSettings(BaseSettings):
         return v.strip().lower()
 
     @model_validator(mode="after")
-    def validate_postgres_config(self):
+    def validate_postgres_config(self) -> "DatabaseSettings":
         """Check psycopg is installed when using postgres."""
         if self.backend == "postgres":
             if not self.postgres_dsn:
@@ -57,7 +64,7 @@ class RedisSettings(BaseSettings):
     url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
 
     @model_validator(mode="after")
-    def validate_redis_url(self):
+    def validate_redis_url(self) -> "RedisSettings":
         """Ensure REDIS_URL is set when enabled."""
         if self.enabled and not self.url:
             raise ValueError("REDIS_URL is required when REDIS_ENABLED=true")
@@ -110,7 +117,7 @@ class WorkScheduleSettings(BaseSettings):
         """Validate timezone string."""
         try:
             ZoneInfo(v)
-        except Exception as e:
+        except Exception:
             print(f"⚠️ Invalid timezone '{v}', falling back to UTC")
             return "UTC"
         return v
@@ -145,7 +152,7 @@ class MaintenanceSettings(BaseSettings):
     oil_limit: Optional[int] = Field(default=None, gt=0, alias="OIL_LIMIT")
 
     @model_validator(mode="after")
-    def set_oil_limit_compat(self):
+    def set_oil_limit_compat(self) -> "MaintenanceSettings":
         """Set MAINTENANCE_LIMIT for backward compatibility."""
         if self.oil_limit is None:
             self.oil_limit = self.oil_change_interval
@@ -170,7 +177,7 @@ class FuelSettings(BaseSettings):
     stop_reminder_min: int = Field(default=15, gt=0, alias="STOP_REMINDER_MIN")
 
     @model_validator(mode="after")
-    def handle_fuel_aliases(self):
+    def handle_fuel_aliases(self) -> "FuelSettings":
         """Handle FUEL_RATE alias and set emergency defaults."""
         # FUEL_RATE is alias for FUEL_CONSUMPTION
         if self.fuel_rate is not None:
