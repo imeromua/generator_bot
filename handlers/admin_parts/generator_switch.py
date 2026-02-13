@@ -208,7 +208,12 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "gen_archive")
 async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext):
-    """Показ архіву звітів."""
+    """Показ архіву звітів.
+    
+    ВАЖЛИВО: callback_data для кнопок архіву повинна бути короткою (<64 байт),
+    тому НЕ можна зашивати туди file_id (вони довгі). Замість цього
+    використовуємо індекс у списку archive.
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
     
@@ -232,8 +237,10 @@ async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext):
     
     builder = InlineKeyboardBuilder()
     
-    for idx, report in enumerate(reversed(archive), 1):
-        file_id = report.get('file_id')
+    # Йдемо від найновішого до найстарішого, але в callback_data кладемо
+    # реальний індекс у списку archive (короткий int, валідний для Telegram).
+    indexed_archive = list(enumerate(archive))
+    for shown_idx, (real_index, report) in enumerate(reversed(indexed_archive), 1):
         timestamp = report.get('timestamp', '')
         
         # Форматуємо дату
@@ -243,8 +250,8 @@ async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext):
         except Exception:
             date_str = timestamp
         
-        text += f"{idx}. 📊 {date_str}\n"
-        builder.button(text=f"📥 Звіт #{idx}", callback_data=f"gen_get_report_{file_id}")
+        text += f"{shown_idx}. 📊 {date_str}\n"
+        builder.button(text=f"📥 Звіт #{shown_idx}", callback_data=f"gen_get_report_{real_index}")
     
     builder.button(text="🔙 Назад", callback_data="generator_switch")
     builder.adjust(1)
@@ -254,11 +261,32 @@ async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("gen_get_report_"))
 async def gen_get_report(cb: types.CallbackQuery, state: FSMContext):
-    """Отримати звіт з архіву."""
+    """Отримати звіт з архіву по індексу (щоб callback_data була короткою)."""
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
     
-    file_id = cb.data.replace("gen_get_report_", "")
+    index_str = cb.data.replace("gen_get_report_", "")
+    try:
+        idx = int(index_str)
+    except ValueError:
+        return await cb.answer("❌ Невірний індекс звіту", show_alert=True)
+    
+    # Читаємо актуальний архів з БД
+    archive_json = db.get_state_value('reports_archive', '[]')
+    try:
+        import json
+        archive = json.loads(archive_json)
+    except Exception:
+        archive = []
+    
+    if not archive or idx < 0 or idx >= len(archive):
+        return await cb.answer("❌ Звіт не знайдено в архіві", show_alert=True)
+    
+    report = archive[idx]
+    file_id = report.get('file_id')
+    
+    if not file_id:
+        return await cb.answer("❌ У записі відсутній file_id", show_alert=True)
     
     await cb.answer("📤 Відправляю звіт...")
     
