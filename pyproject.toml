@@ -9,7 +9,6 @@ description = "Telegram bot for generator management with Google Sheets sync"
 authors = [{name = "imeromua", email = "imerom25@gmail.com"}]
 requires-python = ">=3.11"
 readme = "README.md"
-# ВИПРАВЛЕННЯ 1: Ліцензія як рядок
 license = "MIT"
 
 dependencies = [
@@ -43,40 +42,163 @@ dev = [
     "pre-commit>=3.6",
     "types-redis",
     "types-aiofiles",
+    "bandit[toml]>=1.7",
+    "safety>=3.0",
 ]
 
-# ВИПРАВЛЕННЯ 2: Використовуємо find directive, це надійніше для setuptools
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["database*", "handlers*", "keyboards*", "middlewares*", "services*", "utils*"]
+include = ["bot*", "database*", "handlers*", "keyboards*", "middlewares*", "services*", "utils*"]
 namespaces = false
 
-# Додатково: включаємо кореневі модулі, якщо вони потрібні (config.py)
 [tool.setuptools]
 py-modules = ["config", "main"]
 
+# ==================== RUFF ====================
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "C90", "N", "UP", "B", "A", "COM", "C4", "DTZ", "PIE", "PT", "Q", "RSE", "RET", "SIM", "TID", "ARG", "PTH", "ERA", "PL", "TRY", "RUF"]
-ignore = ["E501", "PLR0913", "TRY003", "COM812", "ISC001"]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "C90", # mccabe complexity
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "A",   # flake8-builtins
+    "COM", # flake8-commas
+    "C4",  # flake8-comprehensions
+    "DTZ", # flake8-datetimez
+    "PIE", # flake8-pie
+    "PT",  # flake8-pytest-style
+    "Q",   # flake8-quotes
+    "RSE", # flake8-raise
+    "RET", # flake8-return
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+    "ARG", # flake8-unused-arguments
+    "PTH", # flake8-use-pathlib
+    "ERA", # eradicate
+    "PL",  # pylint
+    "TRY", # tryceratops
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",    # line too long (handled by black)
+    "PLR0913", # too many arguments
+    "TRY003",  # raise-vanilla-args
+    "COM812",  # missing-trailing-comma (conflicts with formatter)
+    "ISC001",  # single-line-implicit-string-concatenation (conflicts with formatter)
+]
 
+# ==================== BLACK ====================
 [tool.black]
 line-length = 120
 target-version = ['py311']
+skip-string-normalization = false
 
+# ==================== ISORT ====================
 [tool.isort]
 profile = "black"
 line_length = 120
+known_first_party = ["bot", "database", "handlers", "keyboards", "middlewares", "services", "utils", "config"]
 
+# ==================== MYPY ====================
 [tool.mypy]
 python_version = "3.11"
+
+# Strict mode components
 warn_return_any = true
 warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+strict_equality = true
+check_untyped_defs = true
+
+# Incremental type checking
+disallow_untyped_defs = true
+disallow_any_unimported = false
+disallow_incomplete_defs = true
+disallow_untyped_decorators = false  # aiogram decorators
+
+# Import handling
+ignore_missing_imports = true
+follow_imports = "normal"
+
+# Output
+show_error_codes = true
+show_error_context = true
+pretty = true
+
+# Platform
+platform = "linux"
+
+# Per-module overrides for gradual typing
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "gspread.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "google.*"
+ignore_missing_imports = true
+
+# ==================== PYTEST ====================
 [tool.pytest.ini_options]
+minversion = "8.0"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m "not slow"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+# ==================== COVERAGE ====================
+[tool.coverage.run]
+source = ["bot", "database", "handlers", "keyboards", "middlewares", "services", "utils", "config", "main"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+    "admin_bot.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]
+
+# ==================== BANDIT ====================
+[tool.bandit]
+targets = ["bot", "database", "handlers", "keyboards", "middlewares", "services", "utils", "config.py", "main.py"]
+exclude_dirs = ["tests", ".venv", "venv"]
+skips = ["B101", "B601"]  # assert_used, paramiko_calls
