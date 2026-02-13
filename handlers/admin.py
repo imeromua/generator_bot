@@ -1,3 +1,25 @@
+"""Admin router aggregator.
+
+Composites all admin-facing handlers from handlers.admin_parts.
+
+Includes:
+- Home/dashboard
+- Personnel management
+- Schedule editor
+- Maintenance (TO)
+- Generator switching
+- Reports/statistics
+- Drivers
+- Fuel reception
+- Users management
+- Sync (Google Sheets)
+- DB cleanup
+
+Note: Correction menu deprecated - functionality moved to:
+  - Hours: Maintenance menu (mnt_set_hours)
+  - Fuel/Consumption: Generator-specific settings
+"""
+
 from aiogram import Router
 
 # DEPRECATED: Correction functionality moved to other menus
@@ -32,3 +54,5 @@ router.include_router(users_router)
 # router.include_router(correction_router)
 router.include_router(sync_router)
 router.include_router(db_cleanup_router)
+
+__all__ = ["router"]

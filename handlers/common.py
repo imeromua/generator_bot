@@ -1,6 +1,7 @@
 """Common router aggregator.
 
 This module composes common (user-neutral) handlers and re-exports show_dash.
+Includes registration, help, dashboard, and message history routers.
 """
 
 from aiogram import Router

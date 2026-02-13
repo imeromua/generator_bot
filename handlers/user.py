@@ -1,6 +1,13 @@
 """User router aggregator.
 
 This module only composes user-facing routers from handlers.user_parts.
+
+Includes:
+- Home/dashboard
+- Refuel logging
+- Events history
+- Schedule viewing
+- Shift operations (start/stop)
 """
 
 from aiogram import Router
@@ -18,3 +25,5 @@ router.include_router(refill_router)
 router.include_router(events_router)
 router.include_router(schedule_router)
 router.include_router(shifts_router)
+
+__all__ = ["router"]
