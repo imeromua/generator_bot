@@ -26,7 +26,10 @@
 import logging
 from collections import defaultdict
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional, Any
+import sqlite3
+
+import gspread
 
 import config
 import database.db_api as db
@@ -43,7 +46,7 @@ _COL_S_INDEX = 18  # Колонка S - персонал (0-based: S = 18)
 class SyncReport:
     """Звіт про результати синхронізації."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.db_to_sheets: list[str] = []  # дати експортовані з БД в Sheets
         self.sheets_to_db: list[str] = []  # дати імпортовані з Sheets в БД
         self.conflicts: list[str] = []  # дати з конфліктами (вирішені)
@@ -128,8 +131,15 @@ class SyncReport:
         return "; ".join(parts)
 
 
-def _parse_date(date_str: str) -> str | None:
-    """Парсить дату з різних форматів в YYYY-MM-DD."""
+def _parse_date(date_str: str) -> Optional[str]:
+    """Парсить дату з різних форматів в YYYY-MM-DD.
+
+    Args:
+        date_str: Date string in various formats
+
+    Returns:
+        Normalized date string or None
+    """
     if not date_str or not str(date_str).strip():
         return None
 
@@ -150,8 +160,15 @@ def _parse_date(date_str: str) -> str | None:
     return None
 
 
-def _parse_time(time_str: str) -> str | None:
-    """Парсить час з формату HH:MM або HH":"MM."""
+def _parse_time(time_str: str) -> Optional[str]:
+    """Парсить час з формату HH:MM або HH":"MM.
+
+    Args:
+        time_str: Time string
+
+    Returns:
+        Normalized time string HH:MM:SS or None
+    """
     if not time_str or not str(time_str).strip():
         return None
     try:
@@ -166,10 +183,11 @@ def _parse_time(time_str: str) -> str | None:
         return None
 
 
-def _get_db_data_by_date() -> dict[str, dict]:
+def _get_db_data_by_date() -> dict[str, dict[str, Any]]:
     """Отримує всі логи з БД згруповані по датах.
 
-    Повертає: {"YYYY-MM-DD": {"shifts": {"m": {start, end}, ...}, "refills": [...]}}
+    Returns:
+        Dict with date keys, each containing shifts and refills data
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -184,7 +202,7 @@ def _get_db_data_by_date() -> dict[str, dict]:
     rows = cur.fetchall()
     conn.close()
 
-    days = defaultdict(
+    days: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
             "refills": [],
@@ -220,17 +238,21 @@ def _get_db_data_by_date() -> dict[str, dict]:
     return dict(days)
 
 
-def _get_sheets_data_by_date(worksheet) -> dict[str, dict]:
+def _get_sheets_data_by_date(worksheet: gspread.Worksheet) -> dict[str, dict[str, Any]]:
     """Читає дані з Sheets згруповані по датах.
 
-    Повертає: {"YYYY-MM-DD": {"row_idx": int, "shifts": {...}, "refills": [...], "fuel_rate": float|None, ...}}
+    Args:
+        worksheet: Google Sheets worksheet
+
+    Returns:
+        Dict with date keys, each containing row_idx, shifts, refills, fuel_rate, references
     """
     all_values = worksheet.get_all_values()
     if len(all_values) < 2:
         return {}
 
     header = all_values[0]
-    days = {}
+    days: dict[str, dict[str, Any]] = {}
 
     # Індекси колонок (0-based)
     # A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, K=10, N=13, P=15, Q=16, R=17, S=18, U=20
@@ -255,7 +277,7 @@ def _get_sheets_data_by_date(worksheet) -> dict[str, dict]:
         }
 
         # Читаємо refills
-        refills = []
+        refills: list[dict[str, Any]] = []
         refill_amount_str = _get(13).strip()  # N
         if refill_amount_str:
             try:
@@ -267,7 +289,7 @@ def _get_sheets_data_by_date(worksheet) -> dict[str, dict]:
                 pass
 
         # Читаємо витрати палива (колонка U)
-        fuel_rate = None
+        fuel_rate: Optional[float] = None
         fuel_rate_str = _get(_COL_U_INDEX).strip()
         if fuel_rate_str:
             try:
@@ -291,8 +313,15 @@ def _get_sheets_data_by_date(worksheet) -> dict[str, dict]:
     return days
 
 
-def _count_data_points(data: dict) -> int:
-    """Рахує кількість непорожніх даних (для вирішення конфліктів)."""
+def _count_data_points(data: dict[str, Any]) -> int:
+    """Рахує кількість непорожніх даних (для вирішення конфліктів).
+
+    Args:
+        data: Data dict with shifts and refills
+
+    Returns:
+        Count of non-empty data points
+    """
     count = 0
 
     # Рахуємо заповнені часи змін
@@ -309,11 +338,18 @@ def _count_data_points(data: dict) -> int:
 
 
 def _resolve_conflict(
-    date: str, db_data: dict, sheets_data: dict, report: SyncReport
+    date: str, db_data: dict[str, Any], sheets_data: dict[str, Any], report: SyncReport
 ) -> Literal["db", "sheets", "skip"]:
     """Вирішує конфлікт коли дата є в обох джерелах.
 
-    Повертає: "db" (приоритет БД), "sheets" (приоритет Sheets), "skip" (однакові)
+    Args:
+        date: Date string
+        db_data: Data from database
+        sheets_data: Data from sheets
+        report: Sync report
+
+    Returns:
+        Decision: "db" (use DB), "sheets" (use Sheets), "skip" (same data)
     """
     db_points = _count_data_points(db_data)
     sheets_points = _count_data_points(sheets_data)
@@ -334,8 +370,15 @@ def _resolve_conflict(
         return "skip"
 
 
-def _write_db_to_sheets(date: str, db_data: dict, worksheet, row_idx: int | None):
-    """Записує дані з БД в Sheets для конкретної дати."""
+def _write_db_to_sheets(date: str, db_data: dict[str, Any], worksheet: gspread.Worksheet, row_idx: Optional[int]) -> None:
+    """Записує дані з БД в Sheets для конкретної дати.
+
+    Args:
+        date: Date string
+        db_data: Data from database
+        worksheet: Google Sheets worksheet
+        row_idx: Target row index or None to append
+    """
     # Форматуємо дату
     dt = datetime.strptime(date, "%Y-%m-%d")
     date_fmt = dt.strftime("%d.%m.%Y")
@@ -361,7 +404,7 @@ def _write_db_to_sheets(date: str, db_data: dict, worksheet, row_idx: int | None
     total_refill = sum(r["amount"] for r in db_data["refills"]) if db_data["refills"] else 0.0
     if total_refill:
         if abs(total_refill - round(total_refill)) < 1e-6:
-            refill_value = int(round(total_refill))
+            refill_value: int | float | str = int(round(total_refill))
         else:
             refill_value = round(total_refill, 1)
     else:
@@ -379,8 +422,14 @@ def _write_db_to_sheets(date: str, db_data: dict, worksheet, row_idx: int | None
     worksheet.update(f"Q{row_idx}", [[driver_str]], value_input_option="USER_ENTERED")
 
 
-def _write_sheets_to_db(date: str, sheets_data: dict, conn):
-    """Записує дані з Sheets в БД для конкретної дати."""
+def _write_sheets_to_db(date: str, sheets_data: dict[str, Any], conn: sqlite3.Connection) -> None:
+    """Записує дані з Sheets в БД для конкретної дати.
+
+    Args:
+        date: Date string
+        sheets_data: Data from sheets
+        conn: Database connection
+    """
     # Записуємо події змін
     for shift, shift_data in sheets_data["shifts"].items():
         if shift_data.get("start"):
@@ -413,16 +462,20 @@ def _write_sheets_to_db(date: str, sheets_data: dict, conn):
         )
 
 
-def _sync_references_from_sheets_to_db(sheets_data: dict, report: SyncReport):
+def _sync_references_from_sheets_to_db(sheets_data: dict[str, dict[str, Any]], report: SyncReport) -> None:
     """Синхронізує довідники водіїв та персоналу: Sheets → БД.
     
     Додає нових водіїв/персонал з Sheets що відсутні в БД.
+
+    Args:
+        sheets_data: All sheets data by date
+        report: Sync report
     """
     conn = get_connection()
 
     # Збираємо всіх водіїв та персонал з Sheets
-    all_drivers = set()
-    all_personnel = set()
+    all_drivers: set[str] = set()
+    all_personnel: set[str] = set()
 
     for day_data in sheets_data.values():
         all_drivers.update(day_data.get("drivers", []))
@@ -457,11 +510,15 @@ def _sync_references_from_sheets_to_db(sheets_data: dict, report: SyncReport):
     conn.close()
 
 
-def _write_references_to_sheets(worksheet, report: SyncReport):
+def _write_references_to_sheets(worksheet: gspread.Worksheet, report: SyncReport) -> None:
     """Записує довідники водіїв та персоналу: БД → Sheets.
     
     Записує всіх водіїв з БД в колонку R (28) та персонал в S (29) рядка 2.
     Формат: через кому, без дублікатів.
+
+    Args:
+        worksheet: Google Sheets worksheet
+        report: Sync report
     """
     try:
         # Отримуємо водіїв та персонал з БД
@@ -509,7 +566,8 @@ def bidirectional_sync(user_name: str = "system") -> SyncReport:
     Args:
         user_name: Ім'я користувача що виконав синхронізацію (для логування)
 
-    Повертає: SyncReport з детальним звітом
+    Returns:
+        SyncReport з детальним звітом
     """
     report = SyncReport()
     logger.info("🔄 Починаємо двонаправлену синхронізацію...")
