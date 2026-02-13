@@ -1,8 +1,14 @@
+"""Event log viewer.
+
+Display system events with pagination.
+"""
+
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
+from typing import Optional
 
 import database.db_api as db
 from handlers.user_parts.sheets_shift import shift_pretty
@@ -14,12 +20,26 @@ router = Router()
 def _fmt_log_line(
     event_type: str,
     ts: str,
-    user_name: str | None,
-    value: str | None,
-    driver: str | None,
-    receipt: str | None,
-    generator_id: str | None,
+    user_name: Optional[str],
+    value: Optional[str],
+    driver: Optional[str],
+    receipt: Optional[str],
+    generator_id: Optional[str],
 ) -> str:
+    """Format log entry as human-readable line.
+
+    Args:
+        event_type: Event type code
+        ts: Timestamp string 'YYYY-mm-dd HH:MM:SS'
+        user_name: User who triggered event
+        value: Event value (liters, hours, etc.)
+        driver: Driver name for refill events
+        receipt: Receipt number for refill events
+        generator_id: Generator ID ('main' or 'emergency')
+
+    Returns:
+        Formatted string with icon and description
+    """
     # ts: 'YYYY-mm-dd HH:MM:SS'
     try:
         dt = datetime.strptime((ts or "").strip(), "%Y-%m-%d %H:%M:%S")
@@ -111,12 +131,16 @@ def _fmt_log_line(
 
 
 @router.callback_query(F.data.startswith("events_last"))
-async def events_last(cb: types.CallbackQuery, state: FSMContext):
+async def events_last(cb: types.CallbackQuery, state: FSMContext) -> None:
     """Показує системний журнал з пагінацією по 15 записів.
 
     Формат callback_data:
     - "events_last"         → сторінка 1
     - "events_last:2"       → сторінка 2 і т.д.
+
+    Args:
+        cb: Callback query
+        state: FSM context
     """
     await state.clear()
 

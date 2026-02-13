@@ -1,7 +1,13 @@
+"""Google Sheets shift synchronization.
+
+Bidirectional sync with Google Sheets for shift tracking.
+"""
+
 from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
+from typing import Optional
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -52,14 +58,27 @@ def shift_pretty(code_or_event: str) -> str:
     }.get(code, code_or_event)
 
 
-def shift_prev_required(code: str) -> str | None:
+def shift_prev_required(code: str) -> Optional[str]:
+    """Get required previous shift code.
+
+    Args:
+        code: Shift code (m/d/e/x)
+
+    Returns:
+        Previous shift code or None
+    """
     return {
         "d": "m",
         "e": "d",
     }.get(code)
 
 
-def open_ws_sync():
+def open_ws_sync() -> Optional[gspread.Worksheet]:
+    """Open Google Sheets worksheet for sync.
+
+    Returns:
+        Worksheet object or None if unavailable
+    """
     if sheets_forced_offline():
         return None
 
@@ -81,8 +100,16 @@ def open_ws_sync():
     return ss.worksheet(config.SHEET_NAME)
 
 
-def get_sheet_shift_info_sync():
-    """Повертає (sheet_ok, open_shift_code|None, completed_set, start_time_by_shift)."""
+def get_sheet_shift_info_sync() -> tuple[bool, Optional[str], set, dict]:
+    """Повертає (sheet_ok, open_shift_code|None, completed_set, start_time_by_shift).
+
+    Returns:
+        Tuple of:
+        - sheet_ok: Whether sheet access succeeded
+        - open_shift_code: Currently open shift or None
+        - completed_set: Set of completed shift codes
+        - start_time_by_shift: Dict of shift code -> start time
+    """
     ws = open_ws_sync()
     if not ws:
         return False, None, set(), {}
@@ -123,10 +150,14 @@ def get_sheet_shift_info_sync():
     return True, open_shift, completed, start_times
 
 
-def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
+def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict) -> None:
     """Якщо таблиця показує відкриту зміну — синхронізуємо мінімальний стан в БД для блокування.
     
     FIX #25: Now uses transaction to ensure atomicity of all state updates.
+
+    Args:
+        open_shift_code: Shift code that is open
+        start_times: Dict of shift code -> start time string
     """
     conn = None
     try:
