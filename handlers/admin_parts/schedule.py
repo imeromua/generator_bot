@@ -1,3 +1,12 @@
+"""Power outage schedule handler.
+
+Admin interface for editing daily power outage schedule with:
+- Date selector (today/tomorrow)
+- Hour-by-hour grid toggle
+- Broadcast notifications to all users
+- Single-window UI management
+"""
+
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -15,7 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
-    """Returns True if callback came from an outdated message (not the tracked single-window UI)."""
+    """Returns True if callback came from an outdated message (not the tracked single-window UI).
+
+    Args:
+        cb: Callback query
+
+    Returns:
+        True if message is outdated
+    """
     try:
         ui = db.get_ui_message(int(cb.from_user.id))
     except Exception:
@@ -32,6 +48,11 @@ def _is_outdated_ui(cb: types.CallbackQuery) -> bool:
 
 
 def _track_ui(cb: types.CallbackQuery) -> None:
+    """Track UI message for single-window concept.
+
+    Args:
+        cb: Callback query
+    """
     try:
         db.set_ui_message(int(cb.from_user.id), int(cb.message.chat.id), int(cb.message.message_id))
     except Exception:
@@ -40,7 +61,14 @@ def _track_ui(cb: types.CallbackQuery) -> None:
 
 # --- 1. ГРАФІК: ВИБІР ДАТИ ---
 @router.callback_query(F.data == "sched_select_date")
-async def sched_select(cb: types.CallbackQuery):
+async def sched_select(cb: types.CallbackQuery) -> None:
+    """Display date selector for schedule editing.
+
+    Shows today/tomorrow options with contextual hint based on time of day.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -75,7 +103,15 @@ async def sched_select(cb: types.CallbackQuery):
 
 # --- 2. ГРАФІК: СІТКА ---
 @router.callback_query(F.data.startswith("sched_edit_"))
-async def sched_edit(cb: types.CallbackQuery):
+async def sched_edit(cb: types.CallbackQuery) -> None:
+    """Display schedule grid for editing.
+
+    Shows hour-by-hour toggle grid for selected date.
+    Displays warning if editing current day schedule.
+
+    Args:
+        cb: Callback query with format "sched_edit_YYYY-MM-DD"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -122,7 +158,14 @@ async def sched_edit(cb: types.CallbackQuery):
 
 # --- 3. ГРАФІК: КЛІКЕР ---
 @router.callback_query(F.data.startswith("tog_"))
-async def tog_hour(cb: types.CallbackQuery):
+async def tog_hour(cb: types.CallbackQuery) -> None:
+    """Toggle hour in schedule grid.
+
+    Switches between outage (red) and power (green) state.
+
+    Args:
+        cb: Callback query with format "tog_YYYY-MM-DD_HH"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -158,7 +201,14 @@ async def tog_hour(cb: types.CallbackQuery):
 
 # --- 4. ГРАФІК: СПОВІЩЕННЯ ---
 @router.callback_query(F.data.startswith("sched_notify_"))
-async def sched_notify(cb: types.CallbackQuery):
+async def sched_notify(cb: types.CallbackQuery) -> None:
+    """Broadcast schedule change to all users.
+
+    Sends notification with schedule grid to all registered users.
+
+    Args:
+        cb: Callback query with format "sched_notify_YYYY-MM-DD"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 

@@ -1,3 +1,12 @@
+"""Drivers management handler.
+
+Complete CRUD interface for fuel delivery drivers:
+- List all drivers
+- Add new driver
+- Edit driver name
+- Delete driver with confirmation
+"""
+
 import logging
 
 from aiogram import Router, F, types
@@ -14,17 +23,24 @@ logger = logging.getLogger(__name__)
 
 
 class AddDriverForm(StatesGroup):
+    """FSM states for adding new driver."""
     name = State()
 
 
 class EditDriverForm(StatesGroup):
+    """FSM states for editing driver."""
     old_name = State()
     new_name = State()
 
 
 # --- ВОДІЇ: МЕНЮ ---
 @router.callback_query(F.data == "drivers_menu")
-async def drivers_menu(cb: types.CallbackQuery):
+async def drivers_menu(cb: types.CallbackQuery) -> None:
+    """Display drivers management menu.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -41,12 +57,19 @@ async def drivers_menu(cb: types.CallbackQuery):
 
 # --- ПЕРЕЛІК ВОДІЇВ ---
 @router.callback_query(F.data == "drivers_list")
-async def drivers_list(cb: types.CallbackQuery):
+async def drivers_list(cb: types.CallbackQuery) -> None:
+    """Display list of all drivers.
+
+    Shows up to 40 drivers with option to manage each.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
     drivers = db.get_drivers()
-    
+
     if not drivers:
         txt = "🚛 <b>Список водіїв</b>\n\n⚠️ Список пустий.\n\n<i>Додайте водіїв або запустіть синхронізацію.</i>"
         kb = [
@@ -72,7 +95,12 @@ async def drivers_list(cb: types.CallbackQuery):
 
 # --- УПРАВЛІННЯ ВОДІЄМ ---
 @router.callback_query(F.data.startswith("driver_manage_"))
-async def driver_manage(cb: types.CallbackQuery):
+async def driver_manage(cb: types.CallbackQuery) -> None:
+    """Display management options for specific driver.
+
+    Args:
+        cb: Callback query with format "driver_manage_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -101,7 +129,13 @@ async def driver_manage(cb: types.CallbackQuery):
 
 # --- ДОДАТИ ВОДІЯ ---
 @router.callback_query(F.data == "add_driver_start")
-async def drv_add(cb: types.CallbackQuery, state: FSMContext):
+async def drv_add(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Start driver addition process.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -110,7 +144,13 @@ async def drv_add(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(AddDriverForm.name)
-async def drv_save(msg: types.Message, state: FSMContext):
+async def drv_save(msg: types.Message, state: FSMContext) -> None:
+    """Save new driver.
+
+    Args:
+        msg: Message with driver name
+        state: FSM context
+    """
     if msg.from_user.id not in config.ADMIN_IDS:
         await state.clear()
         return await msg.answer("⛔ Тільки для адмінів")
@@ -138,7 +178,13 @@ async def drv_save(msg: types.Message, state: FSMContext):
 
 # --- РЕДАГУВАТИ ВОДІЯ ---
 @router.callback_query(F.data.startswith("driver_edit_"))
-async def driver_edit_start(cb: types.CallbackQuery, state: FSMContext):
+async def driver_edit_start(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Start driver edit process.
+
+    Args:
+        cb: Callback query with format "driver_edit_INDEX"
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -153,24 +199,30 @@ async def driver_edit_start(cb: types.CallbackQuery, state: FSMContext):
         return await drivers_list(cb)
 
     old_name = drivers[idx]
-    
+
     await state.update_data(old_name=old_name)
     await state.set_state(EditDriverForm.new_name)
-    
+
     txt = f"✏️ <b>Редагування водія</b>\n\nПоточне ім'я: <b>{old_name}</b>\n\nВведіть нове ім'я:"
-    
+
     await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
 
 @router.message(EditDriverForm.new_name)
-async def driver_edit_save(msg: types.Message, state: FSMContext):
+async def driver_edit_save(msg: types.Message, state: FSMContext) -> None:
+    """Save edited driver name.
+
+    Args:
+        msg: Message with new driver name
+        state: FSM context
+    """
     if msg.from_user.id not in config.ADMIN_IDS:
         await state.clear()
         return await msg.answer("⛔ Тільки для адмінів")
 
     data = await state.get_data()
     old_name = data.get("old_name")
-    
+
     if not old_name:
         await state.clear()
         return await msg.answer("❌ Помилка: втрачено стан", reply_markup=back_to_admin())
@@ -198,7 +250,12 @@ async def driver_edit_save(msg: types.Message, state: FSMContext):
 
 # --- ВИДАЛИТИ ВОДІЯ ---
 @router.callback_query(F.data.startswith("driver_delete_"))
-async def driver_delete_confirm(cb: types.CallbackQuery):
+async def driver_delete_confirm(cb: types.CallbackQuery) -> None:
+    """Show driver deletion confirmation.
+
+    Args:
+        cb: Callback query with format "driver_delete_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -225,7 +282,12 @@ async def driver_delete_confirm(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("driver_delete_yes_"))
-async def driver_delete_execute(cb: types.CallbackQuery):
+async def driver_delete_execute(cb: types.CallbackQuery) -> None:
+    """Execute driver deletion.
+
+    Args:
+        cb: Callback query with format "driver_delete_yes_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
