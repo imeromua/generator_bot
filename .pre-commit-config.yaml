@@ -28,7 +28,7 @@ repos:
     rev: 24.1.1
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3.10
         args: ['--config=pyproject.toml']
 
   # Import sorting with isort
@@ -89,7 +89,7 @@ repos:
 
 # Configuration
 default_language_version:
-  python: python3.11
+  python: python3.10
 
 default_stages: [commit, push]
 
