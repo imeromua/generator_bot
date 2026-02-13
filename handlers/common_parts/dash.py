@@ -1,5 +1,12 @@
+"""Main dashboard handler.
+
+Builds and displays the main user dashboard with generator status,
+fuel levels, maintenance info, and sync status.
+"""
+
 import asyncio
 from datetime import datetime, timedelta
+from typing import Any
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -16,7 +23,20 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        """Fallback shift formatter.
+
+        Args:
+            code: Shift code (m, d, e, x, or with _start/_end)
+
+        Returns:
+            Formatted shift name with emoji
+        """
+        mapping = {
+            'м': '🌅 Зміна 1',
+            'd': '☀️ Зміна 2',
+            'e': '🌙 Зміна 3',
+            'x': '⚡ Екстра'
+        }
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -24,6 +44,14 @@ router = Router()
 
 
 def _fmt_state_ts(ts_raw: str | None) -> str:
+    """Format state timestamp to readable date-time.
+
+    Args:
+        ts_raw: Unix timestamp as string
+
+    Returns:
+        Formatted date-time or empty string
+    """
     s = (ts_raw or "").strip()
     if not s:
         return ""
@@ -35,19 +63,26 @@ def _fmt_state_ts(ts_raw: str | None) -> str:
 
 
 def _format_sync_time(ts_str: str | None) -> str:
-    """Форматує час синхронізації у зручному вигляді."""
+    """Форматує час синхронізації у зручному вигляді.
+
+    Args:
+        ts_str: Timestamp string in format YYYY-MM-DD HH:MM:SS
+
+    Returns:
+        Human-readable relative time or formatted date
+    """
     if not ts_str:
         return "ніколи"
-    
+
     try:
         # Парсимо час із бази
         dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
         dt = dt.replace(tzinfo=config.KYIV)
         now = datetime.now(config.KYIV)
-        
+
         # Обчислюємо різницю
         diff = now - dt
-        
+
         if diff.total_seconds() < 60:
             return "щойно"
         elif diff.total_seconds() < 3600:
@@ -64,10 +99,17 @@ def _format_sync_time(ts_str: str | None) -> str:
         return ts_str
 
 
-def _calc_run_hours(st: dict, now: datetime) -> float:
+def _calc_run_hours(st: dict[str, Any], now: datetime) -> float:
     """Best-effort runtime hours from state start_date/start_time.
 
     Returns duration in hours clamped to [0, 24].
+
+    Args:
+        st: State dictionary with start_date and start_time
+        now: Current datetime
+
+    Returns:
+        Runtime hours (0.0 if error or invalid)
     """
     try:
         start_date_str = (st.get("start_date", "") or "").strip()
@@ -92,7 +134,21 @@ def _calc_run_hours(st: dict, now: datetime) -> float:
         return 0.0
 
 
-def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) -> tuple[str, types.InlineKeyboardMarkup]:
+def _build_dash_text(
+    user_id: int,
+    user_name: str,
+    banner: str | None = None
+) -> tuple[str, types.InlineKeyboardMarkup]:
+    """Build dashboard text and keyboard markup.
+
+    Args:
+        user_id: Telegram user ID
+        user_name: User display name
+        banner: Optional banner message to prepend
+
+    Returns:
+        Tuple of (formatted_text, keyboard_markup)
+    """
     st = db.get_state()
     role = 'admin' if user_id in config.ADMIN_IDS else 'manager'
 
@@ -101,7 +157,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     # Отримуємо активний генератор
     active_gen = db.get_active_generator()
     gen_name = db.get_generator_name(active_gen)
-    
+
     # Іконка генератора
     if active_gen == "emergency":
         gen_icon = "⚠️"
@@ -126,7 +182,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
                 "maintenance": "🔧 планове ТО",
             }
             mnt_name = mnt_names.get(mnt_type, "ТО")
-            
+
             if mnt_hours <= 0:
                 to_service_str = f"⚠️ <b>ТЕРМІНОВЕ!</b> Потрібно {mnt_name}"
             else:
@@ -171,7 +227,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
         fuel_rate_for_calc = db.get_fuel_consumption_rate()
     except Exception:
         fuel_rate_for_calc = config.FUEL_CONSUMPTION
-    
+
     hours_left = current_fuel / fuel_rate_for_calc if fuel_rate_for_calc > 0 else 0
     hours_left_hhmm = format_hours_hhmm(hours_left)
 
@@ -214,7 +270,20 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     return txt, markup
 
 
-async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: str | None = None):
+async def show_dash(
+    msg: types.Message,
+    user_id: int,
+    user_name: str,
+    banner: str | None = None
+) -> None:
+    """Show or update main dashboard.
+
+    Args:
+        msg: Message to edit or answer to
+        user_id: User's Telegram ID
+        user_name: User's display name
+        banner: Optional banner message to show above dashboard
+    """
     # Раніше тут була runtime-синхронізація з Sheets; зараз модуль services.google_sync — no-op.
     try:
         from services.google_sync import sync_canonical_state_once
@@ -259,22 +328,27 @@ async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: st
 
 # FIX #25: Add main_menu callback handler for single-window navigation
 @router.callback_query(F.data == "main_menu")
-async def main_menu_callback(cb: types.CallbackQuery, state: FSMContext):
-    """Повертає користувача на головну сторінку."""
+async def main_menu_callback(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Повертає користувача на головну сторінку.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     await state.clear()
-    
+
     user_id = cb.from_user.id
     user_info = db.get_user(user_id)
     user_name = user_info[1] if user_info else cb.from_user.full_name
-    
+
     txt, markup = _build_dash_text(user_id, user_name)
-    
+
     await cb.message.edit_text(txt, reply_markup=markup)
-    
+
     # Зберігаємо UI message ID
     try:
         db.set_ui_message(user_id, cb.message.chat.id, cb.message.message_id)
     except Exception:
         pass
-    
+
     await cb.answer()
