@@ -66,6 +66,27 @@ SQLITE_PATH = (os.getenv("SQLITE_PATH", "generator.db") or "generator.db").strip
 POSTGRES_DSN = (os.getenv("POSTGRES_DSN", "") or "").strip()
 POSTGRES_ADMIN_DSN = (os.getenv("POSTGRES_ADMIN_DSN", "") or "").strip()
 
+# --- PostgreSQL Connection Pool ---
+try:
+    PG_POOL_MIN_SIZE = int(os.getenv("PG_POOL_MIN_SIZE", "2"))
+except ValueError:
+    PG_POOL_MIN_SIZE = 2
+
+try:
+    PG_POOL_MAX_SIZE = int(os.getenv("PG_POOL_MAX_SIZE", "10"))
+except ValueError:
+    PG_POOL_MAX_SIZE = 10
+
+try:
+    PG_POOL_TIMEOUT = int(os.getenv("PG_POOL_TIMEOUT", "30"))
+except ValueError:
+    PG_POOL_TIMEOUT = 30
+
+try:
+    PG_POOL_MAX_IDLE = int(os.getenv("PG_POOL_MAX_IDLE", "300"))
+except ValueError:
+    PG_POOL_MAX_IDLE = 300
+
 # --- REDIS ---
 REDIS_ENABLED = _env_bool("REDIS_ENABLED", False)
 REDIS_URL = (os.getenv("REDIS_URL", "redis://localhost:6379/0") or "").strip()
@@ -204,6 +225,7 @@ if __name__ == "__main__":
         print(f"SQLite path: {SQLITE_PATH}")
     if DB_BACKEND == "postgres":
         print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
+        print(f"Connection pool: min={PG_POOL_MIN_SIZE}, max={PG_POOL_MAX_SIZE}, timeout={PG_POOL_TIMEOUT}s, max_idle={PG_POOL_MAX_IDLE}s")
     print(f"Redis enabled: {REDIS_ENABLED}")
     print(f"Sheets runtime enabled: {SHEETS_RUNTIME_ENABLED}")
     print(f"Service account path: {SERVICE_ACCOUNT_PATH}")
