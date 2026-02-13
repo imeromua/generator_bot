@@ -1,3 +1,8 @@
+"""User registration handler.
+
+Handles /start command and user registration flow.
+"""
+
 from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -12,11 +17,20 @@ router = Router()
 
 
 class RegForm(StatesGroup):
+    """Registration form states."""
     name = State()
 
 
 @router.message(Command("start"))
-async def cmd_start(msg: types.Message, state: FSMContext):
+async def cmd_start(msg: types.Message, state: FSMContext) -> None:
+    """Handle /start command.
+
+    Auto-registers admins, asks for name if user not registered.
+
+    Args:
+        msg: Incoming message
+        state: FSM context
+    """
     user_id = msg.from_user.id
     await state.clear()
 
@@ -40,7 +54,13 @@ async def cmd_start(msg: types.Message, state: FSMContext):
 
 
 @router.message(RegForm.name)
-async def process_name(msg: types.Message, state: FSMContext):
+async def process_name(msg: types.Message, state: FSMContext) -> None:
+    """Process user name and complete registration.
+
+    Args:
+        msg: Message with user's name
+        state: FSM context
+    """
     db.register_user(msg.from_user.id, msg.text)
     await state.clear()
     await msg.answer(f"✅ Приємно познайомитись, {msg.text}!")
