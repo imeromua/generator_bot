@@ -67,6 +67,51 @@ def get_last_logs(limit: int = 15, generator_id: str | None = None):
             return conn.execute(query, (lim,)).fetchall()
 
 
+def get_logs_page(limit: int = 15, offset: int = 0, generator_id: str | None = None):
+    """Повертає події сторінками для пагінації.
+
+    Сортування таке саме, як у get_last_logs: ORDER BY timestamp DESC, id DESC.
+
+    Args:
+        limit: розмір сторінки (кількість подій)
+        offset: зміщення (скільки записів пропустити від початку)
+        generator_id: фільтр по генератору ('main', 'emergency' або None для всіх)
+    """
+    try:
+        lim = int(limit)
+    except Exception:
+        lim = 15
+
+    try:
+        off = int(offset)
+    except Exception:
+        off = 0
+
+    if lim <= 0:
+        lim = 15
+    if off < 0:
+        off = 0
+
+    with get_connection() as conn:
+        if generator_id:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                WHERE generator_id = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ? OFFSET ?
+            """
+            return conn.execute(query, (generator_id, lim, off)).fetchall()
+        else:
+            query = """
+                SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
+                FROM logs
+                ORDER BY timestamp DESC, id DESC
+                LIMIT ? OFFSET ?
+            """
+            return conn.execute(query, (lim, off)).fetchall()
+
+
 def get_last_sync():
     """FIX #23: Повертає час останньої синхронізації та ім'я користувача.
     
