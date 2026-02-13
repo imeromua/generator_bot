@@ -1,10 +1,21 @@
+"""Driver management API.
+
+Provides CRUD operations for fuel drivers.
+"""
 import logging
 
 from database.models import get_connection
 
 
-def add_driver(name):
-    """Adds driver; returns True if inserted, False if already existed or error."""
+def add_driver(name: str) -> bool:
+    """Add a new driver.
+
+    Args:
+        name: Driver name
+
+    Returns:
+        True if inserted, False if already existed or error
+    """
     try:
         with get_connection() as conn:
             cur = conn.execute(
@@ -28,49 +39,62 @@ def add_driver(name):
         return False
 
 
-def get_drivers():
-    """Get all drivers as list of names."""
+def get_drivers() -> list[str]:
+    """Get all drivers.
+
+    Returns:
+        List of driver names sorted alphabetically (case-insensitive)
+    """
     with get_connection() as conn:
         return [r[0] for r in conn.execute("SELECT name FROM drivers ORDER BY LOWER(name)").fetchall()]
 
 
-def update_driver(old_name, new_name):
-    """Update driver name. Returns True if successful, False if new_name already exists."""
+def update_driver(old_name: str, new_name: str) -> bool:
+    """Update driver name.
+
+    Args:
+        old_name: Current driver name
+        new_name: New driver name
+
+    Returns:
+        True if successful, False if new_name already exists or error
+    """
     if not old_name or not new_name:
         return False
-    
+
     old_name = old_name.strip()
     new_name = new_name.strip()
-    
+
     if old_name == new_name:
         return True
-    
+
     try:
         with get_connection() as conn:
             # Check if new name already exists
-            exists = conn.execute(
-                "SELECT 1 FROM drivers WHERE name = ?",
-                (new_name,)
-            ).fetchone()
-            
+            exists = conn.execute("SELECT 1 FROM drivers WHERE name = ?", (new_name,)).fetchone()
+
             if exists:
                 logging.warning(f"Водій {new_name} вже існує")
                 return False
-            
+
             # Update driver name
-            cur = conn.execute(
-                "UPDATE drivers SET name = ? WHERE name = ?",
-                (new_name, old_name)
-            )
-            
+            cur = conn.execute("UPDATE drivers SET name = ? WHERE name = ?", (new_name, old_name))
+
             return bool(cur.rowcount and cur.rowcount > 0)
     except Exception as e:
         logging.error(f"Помилка оновлення водія: {e}")
         return False
 
 
-def delete_driver(name):
-    """Delete driver by name. Returns True if deleted, False if not found."""
+def delete_driver(name: str) -> bool:
+    """Delete driver by name.
+
+    Args:
+        name: Driver name to delete
+
+    Returns:
+        True if deleted, False if not found or error
+    """
     try:
         with get_connection() as conn:
             cur = conn.execute("DELETE FROM drivers WHERE name = ?", (name,))
@@ -80,8 +104,12 @@ def delete_driver(name):
         return False
 
 
-def sync_drivers_from_sheet(driver_list):
-    """Повністю оновлює список водіїв у базі на основі списку з Таблиці."""
+def sync_drivers_from_sheet(driver_list: list[str]) -> None:
+    """Повністю оновлює список водіїв у базі на основі списку з Таблиці.
+
+    Args:
+        driver_list: List of driver names from Google Sheets
+    """
     if not driver_list:
         return
 
