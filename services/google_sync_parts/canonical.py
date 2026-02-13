@@ -1,7 +1,16 @@
+"""Canonical state sync (Sheet -> DB).
+
+Еталонна синхронізація - таблиця є джерелом правди.
+Використовується для оновлення дашборду без частих запитів до Sheets.
+"""
+
 import logging
 import threading
 import time
 from datetime import datetime
+from typing import Optional
+
+import gspread
 
 import database.db_api as db
 import config
@@ -16,8 +25,16 @@ _LAST_CANONICAL_SYNC_TS = 0.0
 _CANONICAL_SYNC_TTL_SECONDS = 30
 
 
-def read_canonical_fuel_for_row(sheet, row: int) -> float | None:
-    """Таблиця = еталон. Беремо паливо з найактуальнішої колонки: O(15) -> M(13) -> K(11)."""
+def read_canonical_fuel_for_row(sheet: gspread.Worksheet, row: int) -> Optional[float]:
+    """Таблиця = еталон. Беремо паливо з найактуальнішої колонки: O(15) -> M(13) -> K(11).
+
+    Args:
+        sheet: Worksheet
+        row: Row number
+
+    Returns:
+        Fuel level or None
+    """
     try:
         evening = parse_float(sheet.cell(row, 15).value)  # O
         if evening is not None:
@@ -42,8 +59,12 @@ def read_canonical_fuel_for_row(sheet, row: int) -> float | None:
     return None
 
 
-def sync_canonical_state_from_sheet(sheet):
-    """Підтягуємо еталонні значення з таблиці в БД."""
+def sync_canonical_state_from_sheet(sheet: gspread.Worksheet) -> None:
+    """Підтягуємо еталонні значення з таблиці в БД.
+
+    Args:
+        sheet: Main worksheet
+    """
     try:
         today = datetime.now(config.KYIV).date()
         today_str = today.strftime("%Y-%m-%d")
@@ -66,8 +87,12 @@ def sync_canonical_state_from_sheet(sheet):
         logging.error(f"❌ Помилка canonical sync: {e}", exc_info=True)
 
 
-def sync_canonical_state_once():
-    """Разове оновлення еталонного стану (Sheet -> БД). Викликається з /start для актуального дашборду."""
+def sync_canonical_state_once() -> None:
+    """Разове оновлення еталонного стану (Sheet -> БД).
+
+    Викликається з /start для актуального дашборду.
+    TTL cache prevents excessive Sheets API calls.
+    """
     try:
         if db.sheet_is_offline():
             return

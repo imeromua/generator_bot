@@ -1,3 +1,8 @@
+"""Offline detection and request throttling.
+
+Запобігає частим запитам до Sheets коли сервіс недоступний.
+"""
+
 import threading
 import time
 
@@ -10,7 +15,11 @@ _OFFLINE_PROBE_INTERVAL_SECONDS = 5 * 60
 
 
 def should_skip_offline_probe() -> bool:
-    """True якщо зараз треба пропустити спробу звернення до Sheets через частий OFFLINE."""
+    """True якщо зараз треба пропустити спробу звернення до Sheets через частий OFFLINE.
+
+    Returns:
+        True if should skip probing (too soon since last offline probe)
+    """
     global _LAST_OFFLINE_PROBE_TS
 
     try:

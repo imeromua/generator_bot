@@ -1,5 +1,12 @@
+"""Initial state import from Google Sheets.
+
+Одноразовий імпорт стартових значень (fallback).
+"""
+
 import logging
 from datetime import datetime
+
+import gspread
 
 import database.db_api as db
 import database.models as db_models
@@ -10,6 +17,14 @@ from services.google_sync_parts.parsers import parse_float, parse_motohours_to_h
 
 
 def db_has_logs_for_date(date_str: str) -> bool:
+    """Перевіряє наявність логів за дату.
+
+    Args:
+        date_str: Date in YYYY-MM-DD format
+
+    Returns:
+        True if logs exist for this date
+    """
     try:
         with db_models.get_connection() as conn:
             row = conn.execute(
@@ -22,8 +37,12 @@ def db_has_logs_for_date(date_str: str) -> bool:
         return False
 
 
-def import_initial_state_from_sheet(sheet):
-    """Одноразовий імпорт (fallback) стартових значень на сьогодні."""
+def import_initial_state_from_sheet(sheet: gspread.Worksheet) -> None:
+    """Одноразовий імпорт (fallback) стартових значень на сьогодні.
+
+    Args:
+        sheet: Main worksheet
+    """
     try:
         today = datetime.now(config.KYIV).date()
         today_str = today.strftime("%Y-%m-%d")

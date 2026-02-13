@@ -1,7 +1,18 @@
+"""Data parsing utilities for Google Sheets."""
+
 import re
+from typing import Any, Optional
 
 
-def parse_float(val):
+def parse_float(val: Any) -> Optional[float]:
+    """Парсить float з різних форматів.
+
+    Args:
+        val: Value from spreadsheet cell
+
+    Returns:
+        Parsed float or None
+    """
     if val is None:
         return None
     s = str(val).strip()
@@ -17,8 +28,17 @@ def parse_float(val):
         return None
 
 
-def parse_motohours_to_hours(val):
-    """Парсить мотогодини з Sheet у float годин. Підтримує 'HH:MM(:SS)' та числа."""
+def parse_motohours_to_hours(val: Any) -> Optional[float]:
+    """Парсить мотогодини з Sheet у float годин.
+
+    Підтримує 'HH:MM(:SS)' та числа.
+
+    Args:
+        val: Value from spreadsheet cell
+
+    Returns:
+        Hours as float or None
+    """
     if val is None:
         return None
 
