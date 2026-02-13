@@ -2,38 +2,50 @@ import logging
 from datetime import datetime
 
 import config
-from database.models import get_connection
+from database.models import get_connection, begin_transaction
 from database.api.state import _conn_get_state_float, _conn_set_state_value, _conn_get_state_value
 
 
 def update_hours(h, generator_id: str = "main"):
-    """Оновити мотогодини генератора."""
+    """Оновити мотогодини генератора з транзакцією."""
     try:
         with get_connection() as conn:
-            if generator_id == "emergency":
-                cur = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
-                _conn_set_state_value(conn, "emergency_total_hours", str(cur + float(h or 0.0)))
-            else:
-                cur = _conn_get_state_float(conn, "total_hours", 0.0)
-                _conn_set_state_value(conn, "total_hours", str(cur + float(h or 0.0)))
+            begin_transaction(conn)
+            try:
+                if generator_id == "emergency":
+                    cur = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
+                    _conn_set_state_value(conn, "emergency_total_hours", str(cur + float(h or 0.0)))
+                else:
+                    cur = _conn_get_state_float(conn, "total_hours", 0.0)
+                    _conn_set_state_value(conn, "total_hours", str(cur + float(h or 0.0)))
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise
     except Exception as e:
         logging.error(f"Помилка update_hours: {e}")
 
 
 def set_total_hours(new_val, generator_id: str = "main"):
-    """Встановити загальні мотогодини генератора."""
+    """Встановити загальні мотогодини генератора з транзакцією."""
     try:
         with get_connection() as conn:
-            if generator_id == "emergency":
-                _conn_set_state_value(conn, "emergency_total_hours", str(float(new_val or 0.0)))
-            else:
-                _conn_set_state_value(conn, "total_hours", str(float(new_val or 0.0)))
+            begin_transaction(conn)
+            try:
+                if generator_id == "emergency":
+                    _conn_set_state_value(conn, "emergency_total_hours", str(float(new_val or 0.0)))
+                else:
+                    _conn_set_state_value(conn, "total_hours", str(float(new_val or 0.0)))
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                raise
     except Exception as e:
         logging.error(f"Помилка set_total_hours: {e}")
 
 
 def record_maintenance(action: str, admin: str, generator_id: str | None = None):
-    """Записати виконання ТО та оновити лічильники.
+    """Записати виконання ТО та оновити лічильники з транзакцією.
     
     Args:
         action: Тип ТО - 'oil', 'spark', 'maintenance'
@@ -43,41 +55,49 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
     date_s = datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
     
     with get_connection() as conn:
-        # Якщо generator_id не вказаний - беремо активний
-        if generator_id is None:
-            generator_id = _conn_get_state_value(conn, "active_generator", "main")
-        
-        # Отримуємо поточні мотогодини відповідного генератора
-        if generator_id == "emergency":
-            cur = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
-        else:
-            cur = _conn_get_state_float(conn, "total_hours", 0.0)
-        
-        # Записуємо в таблицю maintenance
-        conn.execute(
-            "INSERT INTO maintenance (date, type, hours, admin, generator_id) VALUES (?,?,?,?,?)",
-            (date_s, action, cur, admin, generator_id),
-        )
-        
-        # Оновлюємо лічильники відповідного генератора
-        if generator_id == "emergency":
-            if action == "oil":
-                _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
-            elif action == "spark":
-                _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
-            elif action == "maintenance":
-                # Планове ТО - скидаємо все
-                _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
-                _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
-        else:
-            if action == "oil":
-                _conn_set_state_value(conn, "last_oil_change", "0.0")
-            elif action == "spark":
-                _conn_set_state_value(conn, "last_spark_change", "0.0")
-            elif action == "maintenance":
-                # Планове ТО - скидаємо все
-                _conn_set_state_value(conn, "last_oil_change", "0.0")
-                _conn_set_state_value(conn, "last_spark_change", "0.0")
+        begin_transaction(conn)
+        try:
+            # Якщо generator_id не вказаний - беремо активний
+            if generator_id is None:
+                generator_id = _conn_get_state_value(conn, "active_generator", "main")
+            
+            # Отримуємо поточні мотогодини відповідного генератора
+            if generator_id == "emergency":
+                cur = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
+            else:
+                cur = _conn_get_state_float(conn, "total_hours", 0.0)
+            
+            # Записуємо в таблицю maintenance
+            conn.execute(
+                "INSERT INTO maintenance (date, type, hours, admin, generator_id) VALUES (?,?,?,?,?)",
+                (date_s, action, cur, admin, generator_id),
+            )
+            
+            # Оновлюємо лічильники відповідного генератора
+            if generator_id == "emergency":
+                if action == "oil":
+                    _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
+                elif action == "spark":
+                    _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
+                elif action == "maintenance":
+                    # Планове ТО - скидаємо все
+                    _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
+                    _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
+            else:
+                if action == "oil":
+                    _conn_set_state_value(conn, "last_oil_change", "0.0")
+                elif action == "spark":
+                    _conn_set_state_value(conn, "last_spark_change", "0.0")
+                elif action == "maintenance":
+                    # Планове ТО - скидаємо все
+                    _conn_set_state_value(conn, "last_oil_change", "0.0")
+                    _conn_set_state_value(conn, "last_spark_change", "0.0")
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"Помилка record_maintenance: {e}", exc_info=True)
+            raise
 
 
 def get_maintenance_history(generator_id: str | None = None, limit: int = 20):
