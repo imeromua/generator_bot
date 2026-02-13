@@ -1,10 +1,26 @@
+"""Logs worksheet management.
+
+Idempotent log row updates for event tracking.
+"""
+
+from typing import Optional
+
+import gspread
+
 import config
 
 from .refill import parse_refill_value
 
 
-def ensure_logs_worksheet(ss):
-    """Повертає worksheet для журналу подій. Якщо не існує — створює."""
+def ensure_logs_worksheet(ss: gspread.Spreadsheet) -> Optional[gspread.Worksheet]:
+    """Повертає worksheet для журналу подій. Якщо не існує — створює.
+
+    Args:
+        ss: Spreadsheet object
+
+    Returns:
+        Logs worksheet or None if creation failed
+    """
     title = (getattr(config, "LOGS_SHEET_NAME", None) or "ПОДІЇ").strip()
     try:
         return ss.worksheet(title)
@@ -16,8 +32,12 @@ def ensure_logs_worksheet(ss):
             return None
 
 
-def _format_logs_header(ws):
-    """Оформлення заголовка вкладки логів так само як в основних вкладках."""
+def _format_logs_header(ws: Optional[gspread.Worksheet]) -> None:
+    """Оформлення заголовка вкладки логів так само як в основних вкладках.
+
+    Args:
+        ws: Worksheet to format
+    """
     if not ws:
         return
 
@@ -66,7 +86,12 @@ def _format_logs_header(ws):
         pass
 
 
-def ensure_logs_header(ws):
+def ensure_logs_header(ws: Optional[gspread.Worksheet]) -> None:
+    """Забезпечує наявність заголовка в logs worksheet.
+
+    Args:
+        ws: Worksheet to update
+    """
     if not ws:
         return
 
@@ -106,8 +131,13 @@ def ensure_logs_header(ws):
     _format_logs_header(ws)
 
 
-def ensure_logs_rows(ws, needed_row: int):
-    """Гарантує, що worksheet має мінімум needed_row рядків."""
+def ensure_logs_rows(ws: Optional[gspread.Worksheet], needed_row: int) -> None:
+    """Гарантує, що worksheet має мінімум needed_row рядків.
+
+    Args:
+        ws: Worksheet to resize
+        needed_row: Minimum row count required
+    """
     if not ws:
         return
 
@@ -127,7 +157,14 @@ def ensure_logs_rows(ws, needed_row: int):
 
 
 def logs_row_for_id(log_id: int) -> int:
-    """1-й рядок = заголовок, дані починаються з 2-го. log_id=1 -> row=2."""
+    """1-й рядок = заголовок, дані починаються з 2-го. log_id=1 -> row=2.
+
+    Args:
+        log_id: Log entry ID
+
+    Returns:
+        Corresponding row number in worksheet
+    """
     try:
         lid = int(log_id)
     except Exception:
@@ -136,7 +173,14 @@ def logs_row_for_id(log_id: int) -> int:
 
 
 def _event_type_human(ltype: str) -> str:
-    """Повертає зрозумілу назву події (UA) + код у дужках."""
+    """Повертає зрозумілу назву події (UA) + код у дужках.
+
+    Args:
+        ltype: Event type code
+
+    Returns:
+        Human-readable event description
+    """
     code = (ltype or "").strip()
 
     mapping = {
@@ -163,8 +207,26 @@ def _event_type_human(ltype: str) -> str:
     return code
 
 
-def upsert_log_row(ws, lid: int, ltime: str, ltype: str, luser: str, lval: str, ldriver: str):
-    """Idempotent write у вкладку логів: один log_id = один рядок."""
+def upsert_log_row(
+    ws: Optional[gspread.Worksheet],
+    lid: int,
+    ltime: str,
+    ltype: str,
+    luser: str,
+    lval: str,
+    ldriver: str,
+) -> None:
+    """Idempotent write у вкладку логів: один log_id = один рядок.
+
+    Args:
+        ws: Worksheet to update
+        lid: Log entry ID
+        ltime: Timestamp
+        ltype: Event type
+        luser: User name
+        lval: Event value
+        ldriver: Driver name
+    """
     if not ws:
         return
 

@@ -7,6 +7,7 @@ All functions below are no-ops and should not be used in new code.
 """
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,11 @@ __all__ = [
 
 
 def _log_disabled(name: str) -> None:
+    """Log warning about disabled sync helper.
+
+    Args:
+        name: Function name being called
+    """
     logger.info(
         "Sheets runtime sync helper '%s' is disabled. "
         "Use DB + manual import/export instead.",
@@ -24,9 +30,11 @@ def _log_disabled(name: str) -> None:
     )
 
 
-def push_logs_to_sheet(*args, **kwargs) -> None:  # type: ignore[override]
+def push_logs_to_sheet(*args: Any, **kwargs: Any) -> None:
+    """No-op stub for legacy compatibility."""
     _log_disabled("push_logs_to_sheet")
 
 
-def pull_refill_from_sheet(*args, **kwargs) -> None:  # type: ignore[override]
+def pull_refill_from_sheet(*args: Any, **kwargs: Any) -> None:
+    """No-op stub for legacy compatibility."""
     _log_disabled("pull_refill_from_sheet")

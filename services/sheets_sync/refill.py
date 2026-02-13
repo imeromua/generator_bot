@@ -1,11 +1,26 @@
-import logging
+"""Refill aggregation and parsing.
 
+Idempotent updates for daily fuel refill data.
+"""
+
+import logging
+from typing import Optional
+
+import gspread
 from gspread.utils import rowcol_to_a1
 
 import database.db_api as db
 
 
-def parse_refill_value(value_raw: str | None) -> tuple[float, str]:
+def parse_refill_value(value_raw: Optional[str]) -> tuple[float, str]:
+    """Парсить значення refill: 'літри|чек'.
+
+    Args:
+        value_raw: Raw refill value string
+
+    Returns:
+        Tuple of (liters, receipt_number)
+    """
     liters = 0.0
     receipt = ""
 
@@ -31,13 +46,21 @@ def parse_refill_value(value_raw: str | None) -> tuple[float, str]:
     return liters, receipt
 
 
-def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
-    """Idempotent update: агрегуємо заправки з БД, а не додаємо до поточного значення в Sheet."""
+def update_refill_aggregates_for_date(
+    sheet: gspread.Worksheet, row: int, date_str: str
+) -> None:
+    """Idempotent update: агрегуємо заправки з БД, а не додаємо до поточного значення в Sheet.
+
+    Args:
+        sheet: Target worksheet
+        row: Row number for date
+        date_str: Date in YYYY-MM-DD format
+    """
     refills = db.get_refills_for_date(date_str)
 
     total_liters = 0.0
-    receipts = []
-    drivers = []
+    receipts: list[str] = []
+    drivers: list[str] = []
 
     for ts, user_name, value, driver_name in refills:
         l, r = parse_refill_value(value)
@@ -54,7 +77,7 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
         sheet.update(
             range_name=rowcol_to_a1(row, 14),
             values=[[str(round(total_liters, 2)).replace(".", ",")]],
-            value_input_option='USER_ENTERED'
+            value_input_option="USER_ENTERED",
         )
     except Exception as e:
         logging.error(f"❌ Refill total update error date={date_str}: {e}")
@@ -64,7 +87,7 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
         sheet.update(
             range_name=rowcol_to_a1(row, 16),
             values=[[", ".join(receipts)]],
-            value_input_option='USER_ENTERED'
+            value_input_option="USER_ENTERED",
         )
     except Exception as e:
         logging.error(f"❌ Refill receipt update error date={date_str}: {e}")
@@ -74,7 +97,7 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
         sheet.update(
             range_name=rowcol_to_a1(row, 27),
             values=[[", ".join(drivers)]],
-            value_input_option='USER_ENTERED'
+            value_input_option="USER_ENTERED",
         )
     except Exception as e:
         logging.error(f"❌ Refill drivers update error date={date_str}: {e}")
