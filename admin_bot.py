@@ -39,6 +39,7 @@ except ValueError as e:
 
 ENV_FILE = os.path.join(PROJECT_PATH, ".env")
 REQ_FILE = os.path.join(PROJECT_PATH, "requirements.txt")
+LOG_FILE = os.path.join(PROJECT_PATH, "bot.log")  # Основний файл логів бота
 
 # Security: Maximum output size to prevent message overflow
 MAX_OUTPUT_SIZE = 4000
@@ -144,6 +145,29 @@ def safe_html(text):
     return html.escape(text)
 
 
+def clear_all_logs() -> str:
+    """Очистити локальний bot.log та максимально стиснути журнали systemd.
+
+    УВАГА: journalctl --rotate/--vacuum-* застосовуються до всієї системи, але
+    саме так можна реально вичистити історію логів сервісу з сервера.
+    """
+    commands = []
+
+    # Видаляємо локальний файл логів проєкту (bot.log)
+    if os.path.exists(LOG_FILE):
+        commands.append(f"rm -f {LOG_FILE}")
+
+    # Ротація та вакуум для systemd-журналу (глобально)
+    commands.append("sudo journalctl --rotate")
+    commands.append("sudo journalctl --vacuum-time=1s")
+
+    outputs = []
+    for cmd in commands:
+        outputs.append(f"$ {cmd}\n{run_command(cmd, timeout=60)}")
+
+    return "\n\n".join(outputs)
+
+
 # --- ГОЛОВНЕ МЕНЮ ---
 kb_main = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="📊 Статус"), KeyboardButton(text="📜 Логи")],
@@ -202,12 +226,15 @@ async def logs_menu(message: types.Message):
         ],
         [
             InlineKeyboardButton(text="💾 Завантажити файл", callback_data="logs:download")
-        ]
+        ],
+        [
+            InlineKeyboardButton(text="🧹 Очистити логи", callback_data="logs:clear")
+        ],
     ])
 
     await message.answer(
         "📜 <b>Перегляд логів</b>\n\n"
-        "Оберіть кількість записів або рівень фільтрації:",
+        "Оберіть кількість записів або рівень фільтрації, або очистіть логи:",
         reply_markup=kb,
         parse_mode="HTML"
     )
@@ -217,9 +244,34 @@ async def logs_menu(message: types.Message):
 async def logs_view(cb: CallbackQuery):
     parts = cb.data.split(":")
 
+    # Окремо обробляємо очистку, щоб не ламати існуючу логіку
+    if cb.data == "logs:clear":
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Так, очистити",
+                    callback_data="logs:clear_confirm",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Скасувати",
+                    callback_data="logs:clear_cancel",
+                ),
+            ]
+        ])
+
+        await cb.message.answer(
+            "⚠️ <b>Очистити логи</b>\n\n"
+            "Буде видалено локальний файл <code>bot.log</code> у проєкті та максимально стиснуто "
+            "журнали systemd (journalctl) для всієї системи.\n\n"
+            "Цю операцію слід виконувати лише усвідомлено.",
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+        await cb.answer()
+        return
+
     if len(parts) == 2:
         _, option = parts
-        filter_level = None
 
         if option == "today":
             cmd = f"journalctl -u {SERVICE_NAME} --since today --no-pager"
@@ -253,6 +305,13 @@ async def logs_view(cb: CallbackQuery):
                 f"grep -i 'warning' | tail -n {n}"
             )
             title = f"⚠️ Останні {n} попереджень"
+        else:
+            await cb.answer("❌ Невідомий фільтр", show_alert=True)
+            return
+
+    else:
+        await cb.answer("❌ Невідомий формат команди", show_alert=True)
+        return
 
     msg = await cb.message.answer("⏳ <i>Завантажую логи...</i>", parse_mode="HTML")
 
@@ -290,6 +349,29 @@ async def logs_view(cb: CallbackQuery):
                 parse_mode="HTML"
             )
 
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "logs:clear_confirm")
+async def logs_clear_confirm(cb: CallbackQuery):
+    msg = await cb.message.edit_text(
+        "⏳ <i>Очищаю логи на сервері...</i>",
+        parse_mode="HTML",
+    )
+
+    result = clear_all_logs()
+
+    await msg.edit_text(
+        "✅ <b>Очищення логів виконано</b>\n\n"
+        "<blockquote expandable>" + safe_html(result) + "</blockquote>",
+        parse_mode="HTML",
+    )
+    await cb.answer("✅ Готово")
+
+
+@dp.callback_query(F.data == "logs:clear_cancel")
+async def logs_clear_cancel(cb: CallbackQuery):
+    await cb.message.edit_text("❌ Очищення логів скасовано")
     await cb.answer()
 
 
