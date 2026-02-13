@@ -1,1 +1,1 @@
-"""Test suite for generator_bot."""
+"""Tests package for generator_bot."""
