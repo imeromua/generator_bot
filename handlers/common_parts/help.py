@@ -1,4 +1,9 @@
-from aiogram import Router, types
+"""Help and privacy policy handlers.
+
+Provides /help, /privacy commands and navigation keyboard.
+"""
+
+from aiogram import Bot, Router, types
 from aiogram.filters import Command
 
 import config
@@ -9,14 +14,27 @@ router = Router()
 
 
 def _nav_kb(user_id: int) -> types.InlineKeyboardMarkup:
+    """Build navigation keyboard for help/privacy screens.
+
+    Args:
+        user_id: User's Telegram ID
+
+    Returns:
+        InlineKeyboardMarkup with dashboard and optional admin panel buttons
+    """
     kb = [[types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]]
     if user_id in config.ADMIN_IDS:
         kb.insert(0, [types.InlineKeyboardButton(text="⚙️ Адмін панель", callback_data="admin_home")])
     return types.InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-async def _delete_old_ui_message(user_id: int, bot):
-    """Видаляє старе UI повідомлення для збереження single-window концепції."""
+async def _delete_old_ui_message(user_id: int, bot: Bot) -> None:
+    """Видаляє старе UI повідомлення для збереження single-window концепції.
+
+    Args:
+        user_id: User's Telegram ID
+        bot: Bot instance
+    """
     try:
         prev = db.get_ui_message(user_id)
         if prev:
@@ -30,8 +48,19 @@ async def _delete_old_ui_message(user_id: int, bot):
 
 
 @router.message(Command("help"))
-async def cmd_help(msg: types.Message):
-    """Вбудована довідка."""
+async def cmd_help(msg: types.Message) -> None:
+    """Вбудована довідка.
+
+    Comprehensive bot guide covering:
+    - Main menu features (shifts, fuel, events, schedule, messages)
+    - Fuel display and consumption
+    - Working hours restrictions
+    - Two-generator support
+    - Admin features (sync, switching, maintenance, personnel, etc.)
+
+    Args:
+        msg: Incoming message
+    """
     txt = (
         "ℹ️ <b>Довідка</b>\n\n"
         "Цей бот веде облік роботи генераторів: зміни, паливо, ТО, графік відключень та синхронізацію з Google Sheets.\n\n"
@@ -71,7 +100,7 @@ async def cmd_help(msg: types.Message):
     await _delete_old_ui_message(msg.from_user.id, msg.bot)
 
     sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
-    
+
     # FIX: Зберігаємо нове UI message ID
     try:
         db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
@@ -80,8 +109,18 @@ async def cmd_help(msg: types.Message):
 
 
 @router.message(Command("privacy"))
-async def cmd_privacy(msg: types.Message):
-    """Коротка політика приватності."""
+async def cmd_privacy(msg: types.Message) -> None:
+    """Коротка політика приватності.
+
+    Covers:
+    - What data is stored (ID, name, personnel link, event log)
+    - How data is used (accounting, sync, reports, reminders)
+    - Security measures (local DB, service account, admin-only access, locks)
+    - User rights (contact admin to edit/delete)
+
+    Args:
+        msg: Incoming message
+    """
     txt = (
         "🔒 <b>Політика приватності</b>\n\n"
         "<b>Які дані зберігаються:</b>\n"
@@ -115,7 +154,7 @@ async def cmd_privacy(msg: types.Message):
     await _delete_old_ui_message(msg.from_user.id, msg.bot)
 
     sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
-    
+
     # FIX: Зберігаємо нове UI message ID
     try:
         db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
@@ -125,13 +164,17 @@ async def cmd_privacy(msg: types.Message):
 
 # FIX: Add callback handler for "home" button to return to dashboard
 @router.callback_query(lambda cb: cb.data == "home")
-async def cb_home(cb: types.CallbackQuery):
-    """Повернення на головну сторінку (дашборд)."""
+async def cb_home(cb: types.CallbackQuery) -> None:
+    """Повернення на головну сторінку (дашборд).
+
+    Args:
+        cb: Callback query
+    """
     from handlers.common_parts.dash import show_dash
-    
+
     user_id = cb.from_user.id
     user_info = db.get_user(user_id)
     user_name = user_info[1] if user_info else cb.from_user.full_name
-    
+
     await show_dash(cb.message, user_id, user_name)
     await cb.answer()
