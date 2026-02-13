@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - feature/modernization
+  pull_request:
+    branches:
+      - feature/modernization
+      - main
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black isort mypy bandit[toml]
+
+      - name: Run ruff
+        run: ruff check .
+        continue-on-error: true
+
+      - name: Run black
+        run: black --check .
+        continue-on-error: true
+
+      - name: Run isort
+        run: isort --check-only .
+        continue-on-error: true
+
+      - name: Run mypy
+        run: mypy .
+        continue-on-error: true
+
+      - name: Run bandit
+        run: bandit -r . -f json -o bandit-report.json
+        continue-on-error: true
+
+      - name: Upload bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: generator_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_DSN: postgresql://postgres:postgres@localhost:5432/generator_test
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Create test .env file
+        run: |
+          cat > .env << 'EOF'
+          BOT_TOKEN=test_token_12345
+          SHEET_ID_PROD=test_sheet_id
+          SHEET_ID_TEST=test_sheet_id
+          ADMINS=123456789
+          MODE=TEST
+          DB_BACKEND=sqlite
+          SQLITE_PATH=:memory:
+          REDIS_ENABLED=0
+          SHEETS_RUNTIME_ENABLED=0
+          EOF
+
+      - name: Run tests with coverage
+        run: |
+          echo "::group::Running Tests on Python ${{ matrix.python-version }}"
+          pytest -v --cov --cov-report=xml --cov-report=html --cov-report=term
+          echo "::endgroup"
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports-py${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            htmlcov/
+
+      - name: Coverage comment
+        if: matrix.python-version == '3.12'
+        run: |
+          COVERAGE=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); print(tree.getroot().attrib['line-rate'])" 2>/dev/null || echo "0")
+          COVERAGE_PCT=$(python -c "print(f'{float('$COVERAGE') * 100:.1f}%')" 2>/dev/null || echo "N/A")
+          echo "### Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage: **$COVERAGE_PCT**" >> $GITHUB_STEP_SUMMARY
+
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety
+
+      - name: Run safety check
+        run: safety check --json --output safety-report.json
+        continue-on-error: true
+
+      - name: Upload safety report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safety-report
+          path: safety-report.json
