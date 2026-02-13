@@ -146,10 +146,10 @@ def safe_html(text):
 
 
 def clear_all_logs() -> str:
-    """Очистити локальний bot.log та максимально стиснути журнали systemd.
+    """Очистити локальний bot.log та повністю вичистити журнали systemd.
 
-    УВАГА: journalctl --rotate/--vacuum-* застосовуються до всієї системи, але
-    саме так можна реально вичистити історію логів сервісу з сервера.
+    УВАГА: journalctl --rotate/--vacuum-* застосовуються до всієї системи, тому
+    це повне очищення історії журналів на сервері. Робіть тільки усвідомлено.
     """
     commands = []
 
@@ -157,7 +157,7 @@ def clear_all_logs() -> str:
     if os.path.exists(LOG_FILE):
         commands.append(f"rm -f {LOG_FILE}")
 
-    # Ротація та вакуум для systemd-журналу (глобально)
+    # Ротація та "вакуум" для systemd-журналу (глобально, повне видалення історії)
     commands.append("sudo journalctl --rotate")
     commands.append("sudo journalctl --vacuum-time=1s")
 
@@ -166,6 +166,55 @@ def clear_all_logs() -> str:
         outputs.append(f"$ {cmd}\n{run_command(cmd, timeout=60)}")
 
     return "\n\n".join(outputs)
+
+
+def get_db_status() -> str:
+    """Перевірка доступності PostgreSQL за POSTGRES_DSN з .env."""
+    env = read_env()
+    dsn = env.get("POSTGRES_DSN", "")
+
+    if not dsn:
+        return "❌ POSTGRES_DSN не знайдено в .env"
+
+    m = re.match(r"postgresql://(.*?):(.*?)@(.*?):(.*?)/(.*)", dsn)
+    if not m:
+        return "❌ Неправильний формат POSTGRES_DSN"
+
+    user, _password, host, port, dbname = m.groups()
+
+    # Використовуємо pg_isready без пароля (достатньо для healthcheck)
+    cmd = f"pg_isready -h {host} -p {port} -U {user} -d {dbname}"
+    output = run_command(cmd, timeout=10)
+    healthy = "accepting connections" in output
+    icon = "🟢" if healthy else "🔴"
+
+    return (
+        f"{icon} <b>PostgreSQL</b>\n"
+        f"DSN: <code>{host}:{port}/{dbname}</code>\n\n"
+        f"<blockquote expandable>{safe_html(output)}</blockquote>"
+    )
+
+
+def get_redis_status() -> str:
+    """Перевірка статусу Redis на основі REDIS_ENABLED/REDIS_URL з .env."""
+    env = read_env()
+    redis_enabled = env.get("REDIS_ENABLED", "0").strip() in ("1", "true", "True", "yes", "on")
+    redis_url = env.get("REDIS_URL", "redis://localhost:6379/0")
+
+    if not redis_enabled:
+        return "ℹ️ Redis вимкнено (REDIS_ENABLED=0)"
+
+    # Використовуємо redis-cli, якщо доступний
+    cmd = f"redis-cli -u '{redis_url}' PING"
+    output = run_command(cmd, timeout=5)
+    healthy = "PONG" in output
+    icon = "🟢" if healthy else "🔴"
+
+    return (
+        f"{icon} <b>Redis</b>\n"
+        f"URL: <code>{redis_url}</code>\n\n"
+        f"<blockquote expandable>{safe_html(output)}</blockquote>"
+    )
 
 
 # --- ГОЛОВНЕ МЕНЮ ---
@@ -194,7 +243,7 @@ async def admin_check_cb_middleware(handler, event, data):
     return await handler(event, data)
 
 
-# --- START ---
+# --- START / HELP ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -208,7 +257,32 @@ async def cmd_start(message: types.Message):
     )
 
 
-# --- LOGS VIEWER (NEW!) ---
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    text = (
+        "ℹ️ <b>Admin Bot — довідка</b>\n\n"
+        "Цей бот керує сервісом <code>" + SERVICE_NAME + "</code> і допомагає з обслуговуванням.\n\n"
+        "<b>Кнопки головного меню:</b>\n"
+        "• <b>📊 Статус</b> — перевірка стану сервісу, БД (PostgreSQL) та Redis.\n"
+        "• <b>📜 Логи</b> — перегляд журналів systemd по сервісу, фільтрація помилок, завантаження у файл,"
+        " а також <b>🧹 Очистити логи</b> (повне видалення історії журналів: bot.log + journald).\n"
+        "• <b>📦 PIP</b> — перегляд/редагування requirements.txt, встановлення пакетів, freeze, перевірка оновлень.\n"
+        "• <b>🔧 ENV</b> — перегляд та зміна .env (ключі конфігурації бота).\n"
+        "• <b>💾 Бекап БД</b> — створення та скачування SQL-бекапу PostgreSQL.\n"
+        "• <b>🚀 GIT PULL</b> — оновлення коду з репозиторію та пропозиція перезапуску сервісу.\n"
+        "• <b>🔄 RESTART</b> — м'який перезапуск сервісу через systemd.\n"
+        "• <b>⚙️ Системна інфо</b> — CPU/RAM/Disk, uptime та споживання пам'яті сервісом.\n\n"
+        "<b>Ризикові дії:</b>\n"
+        "• <b>🧹 Очистити логи</b> — видаляє локальний <code>bot.log</code> та <b>повністю очищає</b> журнали systemd на сервері"
+        " (journalctl --rotate/--vacuum-time=1s). Використовувати тільки коли точно не потрібна історія логів.\n"
+        "• <b>🔄 RESTART</b> / <b>Перезапуск після GIT/PIP</b> — короткочасно зупиняє сервіс, користувачі можуть відчути паузу.\n"
+        "• <b>🔧 ENV</b> — некоректні значення можуть зламати запуск бота (DB_BACKEND, POSTGRES_DSN тощо).\n\n"
+        "Цей бот доступний тільки адміну (ADMIN_ID), усі дії логуються.")
+
+    await message.answer(text, parse_mode="HTML")
+
+
+# --- LOGS VIEWER ---
 @dp.message(F.text == "📜 Логи")
 async def logs_menu(message: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -249,7 +323,7 @@ async def logs_view(cb: CallbackQuery):
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Так, очистити",
+                    text="✅ Так, повністю очистити",
                     callback_data="logs:clear_confirm",
                 ),
                 InlineKeyboardButton(
@@ -261,8 +335,8 @@ async def logs_view(cb: CallbackQuery):
 
         await cb.message.answer(
             "⚠️ <b>Очистити логи</b>\n\n"
-            "Буде видалено локальний файл <code>bot.log</code> у проєкті та максимально стиснуто "
-            "журнали systemd (journalctl) для всієї системи.\n\n"
+            "Буде <b>ПОВНІСТЮ</b> видалено локальний файл <code>bot.log</code> у проєкті та очищено "
+            "історію журналів systemd (journalctl) на сервері.\n\n"
             "Цю операцію слід виконувати лише усвідомлено.",
             reply_markup=kb,
             parse_mode="HTML",
@@ -375,7 +449,54 @@ async def logs_clear_cancel(cb: CallbackQuery):
     await cb.answer()
 
 
-# --- SYSTEM INFO (NEW!) ---
+# --- STATUS (service/db/redis) ---
+@dp.message(F.text == "📊 Статус")
+async def status_menu(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🟢 Сервіс", callback_data="status:service")],
+        [InlineKeyboardButton(text="🗄 PostgreSQL", callback_data="status:db")],
+        [InlineKeyboardButton(text="🧠 Redis", callback_data="status:redis")],
+    ])
+
+    await message.answer(
+        "📊 <b>Статус інфраструктури</b>\n\n"
+        "Оберіть, що перевірити:",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+
+
+@dp.callback_query(F.data.startswith("status:"))
+async def status_view(cb: CallbackQuery):
+    _, target = cb.data.split(":", 1)
+
+    if target == "service":
+        status_raw = run_command(f"systemctl status {SERVICE_NAME}")
+        is_active = "active (running)" in status_raw
+        icon = "🟢" if is_active else "🔴"
+
+        text = (
+            f"{icon} <b>System Status</b>\n"
+            f"<blockquote expandable>{safe_html(status_raw[:3000])}</blockquote>"
+        )
+        await cb.message.answer(text, parse_mode="HTML")
+
+    elif target == "db":
+        text = get_db_status()
+        await cb.message.answer(text, parse_mode="HTML")
+
+    elif target == "redis":
+        text = get_redis_status()
+        await cb.message.answer(text, parse_mode="HTML")
+
+    else:
+        await cb.answer("❌ Невідомий статус-таргет", show_alert=True)
+        return
+
+    await cb.answer()
+
+
+# --- SYSTEM INFO ---
 @dp.message(F.text == "⚙️ Системна інфо")
 async def system_info(message: types.Message):
     msg = await message.answer("⏳ <i>Збираю інформацію...</i>", parse_mode="HTML")
@@ -554,18 +675,76 @@ async def pip_outdated(cb: CallbackQuery):
     await cb.answer()
 
 
-# --- MONITORING ---
-@dp.message(F.text == "📊 Статус")
-async def get_status(message: types.Message):
-    status_raw = run_command(f"systemctl status {SERVICE_NAME}")
-    is_active = "active (running)" in status_raw
-    icon = "🟢" if is_active else "🔴"
+# --- GIT & CONTROL ---
+@dp.message(F.text == "🚀 GIT PULL")
+async def git_update(message: types.Message):
+    msg = await message.answer("⏳ <i>Git Pull...</i>", parse_mode="HTML")
+
+    pull_res = run_command(f"cd {PROJECT_PATH} && git pull")
+    log_res = run_command(
+        f"cd {PROJECT_PATH} && git log -1 --format='%h - %s (%cr) <%an>'"
+    )
+
+    updated = "Updating" in pull_res or "Fast-forward" in pull_res
+    already_uptodate = "Already up to date" in pull_res
+
+    icon = "✅" if (updated or already_uptodate) else "⚠️"
+
+    text = (
+        f"{icon} <b>GIT UPDATE</b>\n"
+        f"🔖 {safe_html(log_res)}\n"
+        f"<blockquote expandable>{safe_html(pull_res)}</blockquote>"
+    )
+
+    await msg.edit_text(text, parse_mode="HTML")
+
+    if updated:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Перезапустити", callback_data="save_and_restart")]
+        ])
+        await message.answer(
+            "✅ Код оновлено! Рекомендується перезапустити сервіс.",
+            reply_markup=kb,
+        )
+
+
+@dp.message(F.text == "🔄 RESTART")
+async def restart_bot_btn(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Підтвердити", callback_data="confirm_restart"),
+            InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_restart"),
+        ]
+    ])
 
     await message.answer(
-        f"{icon} <b>System Status</b>\n"
-        f"<blockquote expandable>{safe_html(status_raw[:3000])}</blockquote>",
-        parse_mode="HTML"
+        "⚠️ <b>Підтвердіть перезапуск</b>\n\n"
+        f"Сервіс <code>{SERVICE_NAME}</code> буде перезапущено.",
+        reply_markup=kb,
+        parse_mode="HTML",
     )
+
+
+@dp.callback_query(F.data == "confirm_restart")
+async def confirm_restart(cb: CallbackQuery):
+    msg = await cb.message.edit_text("🔄 Перезапускаю...")
+    run_command(f"sudo systemctl restart {SERVICE_NAME}")
+
+    await asyncio.sleep(3)
+
+    status = run_command(f"systemctl is-active {SERVICE_NAME}")
+    if status == "active":
+        await msg.edit_text("✅ <b>Перезапуск успішний!</b>", parse_mode="HTML")
+    else:
+        await msg.edit_text(f"⚠️ Status: <code>{status}</code>", parse_mode="HTML")
+
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "cancel_restart")
+async def cancel_restart(cb: CallbackQuery):
+    await cb.message.delete()
+    await cb.answer("Скасовано")
 
 
 # --- ENV EDITOR ---
@@ -722,78 +901,6 @@ async def save_restart(cb: CallbackQuery):
         await cb.message.answer(f"⚠️ Status: {status}", parse_mode="HTML")
 
     await cb.answer()
-
-
-# --- GIT & CONTROL ---
-@dp.message(F.text == "🚀 GIT PULL")
-async def git_update(message: types.Message):
-    msg = await message.answer("⏳ <i>Git Pull...</i>", parse_mode="HTML")
-
-    pull_res = run_command(f"cd {PROJECT_PATH} && git pull")
-    log_res = run_command(
-        f"cd {PROJECT_PATH} && git log -1 --format='%h - %s (%cr) <%an>'"
-    )
-
-    updated = "Updating" in pull_res or "Fast-forward" in pull_res
-    already_uptodate = "Already up to date" in pull_res
-
-    icon = "✅" if (updated or already_uptodate) else "⚠️"
-
-    text = (
-        f"{icon} <b>GIT UPDATE</b>\n"
-        f"🔖 {safe_html(log_res)}\n"
-        f"<blockquote expandable>{safe_html(pull_res)}</blockquote>"
-    )
-
-    await msg.edit_text(text, parse_mode="HTML")
-
-    if updated:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Перезапустити", callback_data="save_and_restart")]
-        ])
-        await message.answer(
-            "✅ Код оновлено! Рекомендується перезапустити сервіс.",
-            reply_markup=kb,
-        )
-
-
-@dp.message(F.text == "🔄 RESTART")
-async def restart_bot_btn(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Підтвердити", callback_data="confirm_restart"),
-            InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_restart"),
-        ]
-    ])
-
-    await message.answer(
-        "⚠️ <b>Підтвердіть перезапуск</b>\n\n"
-        f"Сервіс <code>{SERVICE_NAME}</code> буде перезапущено.",
-        reply_markup=kb,
-        parse_mode="HTML",
-    )
-
-
-@dp.callback_query(F.data == "confirm_restart")
-async def confirm_restart(cb: CallbackQuery):
-    msg = await cb.message.edit_text("🔄 Перезапускаю...")
-    run_command(f"sudo systemctl restart {SERVICE_NAME}")
-
-    await asyncio.sleep(3)
-
-    status = run_command(f"systemctl is-active {SERVICE_NAME}")
-    if status == "active":
-        await msg.edit_text("✅ <b>Перезапуск успішний!</b>", parse_mode="HTML")
-    else:
-        await msg.edit_text(f"⚠️ Status: <code>{status}</code>", parse_mode="HTML")
-
-    await cb.answer()
-
-
-@dp.callback_query(F.data == "cancel_restart")
-async def cancel_restart(cb: CallbackQuery):
-    await cb.message.delete()
-    await cb.answer("Скасовано")
 
 
 # --- BACKUP ---
