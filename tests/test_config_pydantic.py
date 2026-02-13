@@ -23,21 +23,21 @@ class TestDatabaseSettings:
         """Test all default values are set correctly."""
         db = DatabaseSettings()
         assert db.backend == "sqlite"
-        assert db.sqlite_path == ":memory:"
-        assert db.postgres_dsn is None
-        assert db.postgres_admin_dsn is None
+        assert db.sqlite_path == "generator.db"
+        assert db.postgres_dsn == ""
+        assert db.postgres_admin_dsn == ""
         assert db.pg_pool_min_size == 2
         assert db.pg_pool_max_size == 10
 
     def test_postgres_requires_dsn(self):
-        """Test PostgreSQL can be configured without DSN (fallback)."""
-        db = DatabaseSettings(backend="postgres")
-        assert db.backend == "postgres"
+        """Test PostgreSQL requires DSN."""
+        with pytest.raises(ValueError, match="POSTGRES_DSN is required"):
+            DatabaseSettings(backend="postgres", postgres_dsn="")
 
     def test_backend_normalization(self):
-        """Test backend values are normalized."""
+        """Test backend values are normalized to lowercase."""
         db = DatabaseSettings(backend="SQLITE")
-        assert db.backend == "SQLITE"  # Keep as-is
+        assert db.backend == "sqlite"
 
     def test_pool_constraints(self):
         """Test pool size constraints."""
@@ -59,14 +59,13 @@ class TestRedisSettings:
         assert redis.url == "redis://localhost:6379/0"
 
     def test_enabled_requires_url(self):
-        """Test Redis can be enabled without explicit URL."""
-        redis = RedisSettings(enabled=True)
-        assert redis.enabled is True
-        assert redis.url is not None
+        """Test Redis requires URL when enabled."""
+        with pytest.raises(ValueError, match="REDIS_URL is required"):
+            RedisSettings(enabled=True, url="")
 
     def test_disabled_doesnt_require_url(self):
         """Test disabled Redis doesn't need URL."""
-        redis = RedisSettings(enabled=False)
+        redis = RedisSettings(enabled=False, url="")
         assert redis.enabled is False
 
 
@@ -74,9 +73,9 @@ class TestSheetsSettings:
     """Tests for SheetsSettings Pydantic model."""
 
     def test_requires_sheet_ids(self):
-        """Test sheet IDs can be optional."""
-        sheets = SheetsSettings()
-        assert sheets is not None
+        """Test sheet IDs are required."""
+        with pytest.raises(Exception):  # ValidationError
+            SheetsSettings()
 
     def test_service_account_path(self):
         """Test service account path uses default."""
@@ -93,23 +92,23 @@ class TestLoggingSettings:
     def test_default_values(self):
         """Test logging defaults."""
         log = LoggingSettings()
-        assert log.log_level == "ERROR"
+        assert log.log_level == "INFO"
         assert log.log_file == "bot.log"
         assert log.log_max_bytes == 10 * 1024 * 1024
         assert log.log_backup_count == 5
 
     def test_log_level_normalization(self):
-        """Test log level accepts various formats."""
-        log_debug = LoggingSettings(log_level="DEBUG")
+        """Test log level is normalized to uppercase."""
+        log_debug = LoggingSettings(log_level="debug")
         assert log_debug.log_level == "DEBUG"
         
         log_info = LoggingSettings(log_level="info")
-        assert log_info.log_level == "info"
+        assert log_info.log_level == "INFO"
 
     def test_log_level_validation(self):
-        """Test log level accepts any string value."""
-        log = LoggingSettings(log_level="CUSTOM")
-        assert log.log_level == "CUSTOM"
+        """Test invalid log level raises error."""
+        with pytest.raises(Exception):  # ValidationError
+            LoggingSettings(log_level="CUSTOM")
 
     def test_size_constraints(self):
         """Test log file size configuration."""
@@ -129,12 +128,12 @@ class TestWorkScheduleSettings:
         assert schedule.morning_brief_time == "07:30"
 
     def test_timezone_validation(self):
-        """Test timezone accepts various formats."""
+        """Test timezone accepts valid values."""
         schedule = WorkScheduleSettings(timezone="UTC")
         assert schedule.timezone == "UTC"
 
     def test_time_format_validation(self):
-        """Test time format flexibility."""
+        """Test time format validation."""
         schedule = WorkScheduleSettings(
             work_start_time="09:00",
             work_end_time="18:00"
@@ -164,12 +163,9 @@ class TestMaintenanceSettings:
         assert maint.spark_change_interval == 200
 
     def test_oil_limit_compatibility(self):
-        """Test oil_limit as independent value."""
-        maint = MaintenanceSettings(
-            oil_change_interval=100,
-            oil_limit=150
-        )
-        assert maint.oil_limit == 150
+        """Test oil_limit defaults to oil_change_interval."""
+        maint = MaintenanceSettings(oil_change_interval=100)
+        assert maint.oil_limit == 100
 
 
 class TestFuelSettings:
@@ -178,8 +174,8 @@ class TestFuelSettings:
     def test_default_values(self):
         """Test fuel settings defaults."""
         fuel = FuelSettings()
-        assert fuel.fuel_consumption == 0.8
-        assert fuel.emergency_fuel_consumption == 0.9
+        assert fuel.fuel_consumption == 5.3
+        assert fuel.emergency_fuel_consumption == 5.3
         assert fuel.fuel_alert_threshold == 40.0
 
     def test_fuel_rate_alias(self):
@@ -188,12 +184,12 @@ class TestFuelSettings:
         assert fuel.fuel_consumption == 7.5
 
     def test_emergency_fuel_default(self):
-        """Test emergency fuel has independent default."""
+        """Test emergency fuel defaults to main consumption."""
         fuel = FuelSettings(fuel_consumption=1.2)
-        assert fuel.emergency_fuel_consumption == 0.9
+        assert fuel.emergency_fuel_consumption == 1.2
 
     def test_positive_values(self):
-        """Test fuel values can be any float."""
+        """Test fuel values can be positive floats."""
         fuel = FuelSettings(
             fuel_consumption=0.5,
             emergency_fuel_consumption=0.7
@@ -212,30 +208,27 @@ class TestAccessSettings:
 
     def test_whitelist_parsing(self):
         """Test whitelist parsing."""
-        access = AccessSettings(users="444,555")
-        # get_whitelist() returns empty by default in current implementation
-        result = access.get_whitelist() if hasattr(access, 'get_whitelist') else []
-        assert isinstance(result, list)
+        access = AccessSettings(admins="1", users="444,555")
+        result = access.get_whitelist()
+        assert result == [444, 555]
 
     def test_empty_lists(self):
         """Test empty admin/user lists."""
-        access = AccessSettings(admins="", users="")
-        assert access.admins == ""
+        access = AccessSettings(admins="1")  # admins is required
+        assert access.users == ""
 
     def test_invalid_id_format(self):
-        """Test invalid ID format is handled gracefully."""
-        access = AccessSettings(admins="invalid,ids")
-        # Should not raise, just handle gracefully
-        assert access is not None
+        """Test invalid ID format raises error."""
+        with pytest.raises(ValueError, match="Invalid user ID list format"):
+            AccessSettings(admins="invalid,ids")
 
     def test_registration_open_property(self):
         """Test registration_open property logic."""
-        access_on = AccessSettings(bot_status="ON")
-        access_off = AccessSettings(bot_status="OFF")
+        access_on = AccessSettings(admins="1", bot_status="ON")
+        access_off = AccessSettings(admins="1", bot_status="OFF")
         
-        # Current implementation: registration_open is always True
         assert access_on.registration_open is True
-        assert access_off.registration_open is True
+        assert access_off.registration_open is False
 
 
 class TestMainSettings:
@@ -244,6 +237,9 @@ class TestMainSettings:
     def test_is_test_mode(self, monkeypatch):
         """Test is_test_mode property."""
         monkeypatch.setenv("BOT_TOKEN", "token")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
         
         settings_test = Settings(mode="TEST")
         assert settings_test.is_test_mode is True
@@ -254,124 +250,122 @@ class TestMainSettings:
     def test_sheet_id_selection(self, monkeypatch):
         """Test sheet_id property selects correct ID based on mode."""
         monkeypatch.setenv("BOT_TOKEN", "token")
-        monkeypatch.setenv("SHEET_ID_PROD", "prod_sheet")
-        monkeypatch.setenv("SHEET_ID_TEST", "test_sheet")
+        monkeypatch.setenv("ADMINS", "1")
         
-        settings_test = Settings(mode="TEST")
-        settings_prod = Settings(mode="PROD")
-        
+        # Test mode uses test sheet
+        settings_test = Settings(
+            mode="TEST",
+            sheets={"sheet_id_prod": "prod_sheet", "sheet_id_test": "test_sheet"}
+        )
         assert settings_test.sheet_id == "test_sheet"
+        
+        # Prod mode uses prod sheet
+        settings_prod = Settings(
+            mode="PROD",
+            sheets={"sheet_id_prod": "prod_sheet", "sheet_id_test": "test_sheet"}
+        )
         assert settings_prod.sheet_id == "prod_sheet"
 
     def test_kyiv_tz_property(self, monkeypatch):
         """Test kyiv_tz returns timezone object."""
         monkeypatch.setenv("BOT_TOKEN", "token")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
         settings = Settings()
         assert settings.kyiv_tz is not None
 
     def test_print_config(self, monkeypatch, capsys):
         """Test print_config method."""
         monkeypatch.setenv("BOT_TOKEN", "token")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
         settings = Settings()
         settings.print_config()
         captured = capsys.readouterr()
-        assert "Configuration" in captured.out or len(captured.out) >= 0
+        assert "КОНФІГУРАЦІЯ" in captured.out
 
 
 class TestBackwardCompatibility:
-    """Tests for backward compatibility exports."""
+    """Tests for backward compatibility module-level exports."""
 
-    def test_core_exports(self, monkeypatch):
-        """Test core uppercase exports."""
-        monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings()
-        
-        assert settings.BOT_TOKEN == settings.bot_token
-        assert settings.MODE == settings.mode
+    def test_core_exports(self):
+        """Test core module-level exports exist."""
+        from config import BOT_TOKEN, MODE, IS_TEST_MODE
+        assert BOT_TOKEN is not None
+        assert MODE in ["TEST", "PROD"]
+        assert isinstance(IS_TEST_MODE, bool)
 
-    def test_database_exports(self, monkeypatch):
+    def test_database_exports(self):
         """Test database-related exports."""
-        monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings()
-        
-        assert settings.DB_BACKEND == settings.database.backend
-        assert settings.SQLITE_PATH == settings.database.sqlite_path
+        from config import DB_BACKEND, SQLITE_PATH
+        assert DB_BACKEND in ["sqlite", "postgres"]
+        assert SQLITE_PATH is not None
 
-    def test_fuel_exports(self, monkeypatch):
+    def test_fuel_exports(self):
         """Test fuel-related exports."""
-        monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings()
-        
-        assert settings.FUEL_CONSUMPTION == settings.fuel.fuel_consumption
+        from config import FUEL_CONSUMPTION, EMERGENCY_FUEL_CONSUMPTION
+        assert FUEL_CONSUMPTION > 0
+        assert EMERGENCY_FUEL_CONSUMPTION > 0
 
-    def test_admin_ids_export(self, monkeypatch):
+    def test_admin_ids_export(self):
         """Test ADMIN_IDS export."""
-        monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings()
-        
-        assert settings.ADMIN_IDS == settings.access.get_admin_ids()
+        from config import ADMIN_IDS
+        assert isinstance(ADMIN_IDS, list)
 
-    def test_timezone_exports(self, monkeypatch):
+    def test_timezone_exports(self):
         """Test timezone exports."""
-        monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings()
-        
-        assert settings.KYIV == settings.kyiv_tz
+        from config import KYIV, TIMEZONE
+        assert TIMEZONE is not None
+        assert KYIV is not None
 
     def test_validate_env_function(self):
         """Test validate_env function exists."""
         from config import validate_env
         assert callable(validate_env)
 
-    def test_env_bool_helper(self):
-        """Test env_bool helper function exists."""
-        from config import env_bool
-        assert callable(env_bool)
-
 
 class TestValidationErrors:
     """Tests for validation error handling."""
 
     def test_missing_required_field(self, monkeypatch):
-        """Test missing BOT_TOKEN is handled gracefully."""
+        """Test missing BOT_TOKEN raises error."""
         monkeypatch.delenv("BOT_TOKEN", raising=False)
-        # Should not raise - BOT_TOKEN has default or is optional
-        settings = Settings()
-        assert settings is not None
+        with pytest.raises(Exception):  # ValidationError
+            Settings()
 
     def test_invalid_mode(self, monkeypatch):
-        """Test invalid MODE value."""
+        """Test invalid MODE is rejected."""
         monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings(mode="INVALID")
-        assert settings.mode == "INVALID"
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
+        
+        with pytest.raises(Exception):  # ValidationError for invalid literal
+            Settings(mode="INVALID")
 
-    def test_postgres_without_dsn_exits(self, monkeypatch):
-        """Test postgres without DSN doesn't cause exit."""
+    def test_postgres_without_dsn_raises(self, monkeypatch):
+        """Test postgres without DSN raises error."""
         monkeypatch.setenv("BOT_TOKEN", "token")
-        settings = Settings(database={"backend": "postgres"})
-        assert settings is not None
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
+        
+        with pytest.raises(ValueError, match="POSTGRES_DSN is required"):
+            Settings(database={"backend": "postgres", "postgres_dsn": ""})
 
 
 class TestConfigIntegration:
     """Integration tests for configuration loading."""
 
     def test_load_from_env_file(self, tmp_path, monkeypatch):
-        """Test loading configuration from .env file."""
-        # Clean environment
-        monkeypatch.delenv("BOT_TOKEN", raising=False)
-        
-        # Create test env file
-        env_file = tmp_path / ".env.test"
-        env_file.write_text(
-            "BOT_TOKEN=env_file_token\n"
-            "MODE=TEST\n"
-            "ADMINS=123,456\n"
-        )
-        
-        # Load config (in real app would use python-dotenv)
+        """Test loading configuration from environment."""
         monkeypatch.setenv("BOT_TOKEN", "env_file_token")
         monkeypatch.setenv("MODE", "TEST")
         monkeypatch.setenv("ADMINS", "123,456")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
         
         test_settings = Settings()
         assert test_settings.bot_token == "env_file_token"
@@ -382,6 +376,9 @@ class TestConfigIntegration:
         monkeypatch.setenv("BOT_TOKEN", "override_token")
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         monkeypatch.setenv("FUEL_CONSUMPTION", "1.5")
+        monkeypatch.setenv("SHEET_ID_PROD", "prod")
+        monkeypatch.setenv("SHEET_ID_TEST", "test")
+        monkeypatch.setenv("ADMINS", "1")
         
         settings = Settings()
         assert settings.bot_token == "override_token"
