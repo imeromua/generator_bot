@@ -1,3 +1,11 @@
+"""Personnel management handler.
+
+Complete personnel directory management:
+- Personnel list (CRUD)
+- User bindings to personnel names
+- Sync with Google Sheets personnel column
+"""
+
 import logging
 
 from aiogram import Router, F, types
@@ -14,17 +22,24 @@ logger = logging.getLogger(__name__)
 
 
 class AddPersonnelForm(StatesGroup):
+    """FSM states for adding personnel."""
     name = State()
 
 
 class EditPersonnelForm(StatesGroup):
+    """FSM states for editing personnel."""
     old_name = State()
     new_name = State()
 
 
 # --- ПЕРСОНАЛ: ГОЛОВНЕ МЕНЮ ---
 @router.callback_query(F.data == "personnel_menu")
-async def personnel_menu(cb: types.CallbackQuery):
+async def personnel_menu(cb: types.CallbackQuery) -> None:
+    """Display personnel management menu.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -41,7 +56,12 @@ async def personnel_menu(cb: types.CallbackQuery):
 
 # --- ПРИВ'ЯЗКА КОРИСТУВАЧІВ ---
 @router.callback_query(F.data == "personnel_assign")
-async def personnel_assign(cb: types.CallbackQuery):
+async def personnel_assign(cb: types.CallbackQuery) -> None:
+    """Display user list for personnel binding.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -67,7 +87,12 @@ async def personnel_assign(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("pers_user_"))
-async def personnel_choose_user(cb: types.CallbackQuery):
+async def personnel_choose_user(cb: types.CallbackQuery) -> None:
+    """Display personnel selection for specific user.
+
+    Args:
+        cb: Callback query with format "pers_user_UID"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -115,7 +140,12 @@ async def personnel_choose_user(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("pers_set_"))
-async def personnel_set(cb: types.CallbackQuery):
+async def personnel_set(cb: types.CallbackQuery) -> None:
+    """Bind personnel name to user.
+
+    Args:
+        cb: Callback query with format "pers_set_UID_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -131,16 +161,21 @@ async def personnel_set(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Список персоналу оновився. Відкрийте ще раз.", show_alert=True)
 
     db.set_personnel_for_user(uid, names[idx])
-    
+
     actor = actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     logger.info(f"👥 {actor} призначив {names[idx]} для user_id={uid}")
-    
+
     await cb.answer("✅ Призначено", show_alert=True)
     await personnel_choose_user(cb)
 
 
 @router.callback_query(F.data.startswith("pers_clear_"))
-async def personnel_clear(cb: types.CallbackQuery):
+async def personnel_clear(cb: types.CallbackQuery) -> None:
+    """Clear personnel binding from user.
+
+    Args:
+        cb: Callback query with format "pers_clear_UID"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -150,22 +185,27 @@ async def personnel_clear(cb: types.CallbackQuery):
         return await cb.answer("❌ Помилка", show_alert=True)
 
     db.set_personnel_for_user(uid, None)
-    
+
     actor = actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     logger.info(f"👥 {actor} зняв прив'язку для user_id={uid}")
-    
+
     await cb.answer("✅ Прив'язку знято", show_alert=True)
     await personnel_choose_user(cb)
 
 
 # --- СПИСОК ПЕРСОНАЛУ ---
 @router.callback_query(F.data == "personnel_list")
-async def personnel_list(cb: types.CallbackQuery):
+async def personnel_list(cb: types.CallbackQuery) -> None:
+    """Display complete personnel list.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
     personnel = db.get_personnel_names()
-    
+
     if not personnel:
         txt = "👥 <b>Список персоналу</b>\n\n⚠️ Список пустий.\n\n<i>Додайте персонал або запустіть синхронізацію.</i>"
         kb = [
@@ -191,7 +231,12 @@ async def personnel_list(cb: types.CallbackQuery):
 
 # --- УПРАВЛІННЯ ПЕРСОНАЛОМ ---
 @router.callback_query(F.data.startswith("personnel_manage_"))
-async def personnel_manage(cb: types.CallbackQuery):
+async def personnel_manage(cb: types.CallbackQuery) -> None:
+    """Display management options for personnel entry.
+
+    Args:
+        cb: Callback query with format "personnel_manage_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -220,7 +265,13 @@ async def personnel_manage(cb: types.CallbackQuery):
 
 # --- ДОДАТИ ПЕРСОНАЛ ---
 @router.callback_query(F.data == "add_personnel_start")
-async def personnel_add(cb: types.CallbackQuery, state: FSMContext):
+async def personnel_add(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Start personnel addition process.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -229,7 +280,13 @@ async def personnel_add(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(AddPersonnelForm.name)
-async def personnel_save(msg: types.Message, state: FSMContext):
+async def personnel_save(msg: types.Message, state: FSMContext) -> None:
+    """Save new personnel entry.
+
+    Args:
+        msg: Message with personnel name
+        state: FSM context
+    """
     if msg.from_user.id not in config.ADMIN_IDS:
         await state.clear()
         return await msg.answer("⛔ Тільки для адмінів")
@@ -257,7 +314,13 @@ async def personnel_save(msg: types.Message, state: FSMContext):
 
 # --- РЕДАГУВАТИ ПЕРСОНАЛ ---
 @router.callback_query(F.data.startswith("personnel_edit_"))
-async def personnel_edit_start(cb: types.CallbackQuery, state: FSMContext):
+async def personnel_edit_start(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Start personnel edit process.
+
+    Args:
+        cb: Callback query with format "personnel_edit_INDEX"
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -272,24 +335,30 @@ async def personnel_edit_start(cb: types.CallbackQuery, state: FSMContext):
         return await personnel_list(cb)
 
     old_name = personnel[idx]
-    
+
     await state.update_data(old_name=old_name)
     await state.set_state(EditPersonnelForm.new_name)
-    
+
     txt = f"✏️ <b>Редагування персоналу</b>\n\nПоточне ПІБ: <b>{old_name}</b>\n\nВведіть нове ПІБ:"
-    
+
     await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
 
 @router.message(EditPersonnelForm.new_name)
-async def personnel_edit_save(msg: types.Message, state: FSMContext):
+async def personnel_edit_save(msg: types.Message, state: FSMContext) -> None:
+    """Save edited personnel name.
+
+    Args:
+        msg: Message with new personnel name
+        state: FSM context
+    """
     if msg.from_user.id not in config.ADMIN_IDS:
         await state.clear()
         return await msg.answer("⛔ Тільки для адмінів")
 
     data = await state.get_data()
     old_name = data.get("old_name")
-    
+
     if not old_name:
         await state.clear()
         return await msg.answer("❌ Помилка: втрачено стан", reply_markup=back_to_admin())
@@ -317,7 +386,12 @@ async def personnel_edit_save(msg: types.Message, state: FSMContext):
 
 # --- ВИДАЛИТИ ПЕРСОНАЛ ---
 @router.callback_query(F.data.startswith("personnel_delete_"))
-async def personnel_delete_confirm(cb: types.CallbackQuery):
+async def personnel_delete_confirm(cb: types.CallbackQuery) -> None:
+    """Show personnel deletion confirmation.
+
+    Args:
+        cb: Callback query with format "personnel_delete_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -344,7 +418,12 @@ async def personnel_delete_confirm(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("personnel_delete_yes_"))
-async def personnel_delete_execute(cb: types.CallbackQuery):
+async def personnel_delete_execute(cb: types.CallbackQuery) -> None:
+    """Execute personnel deletion.
+
+    Args:
+        cb: Callback query with format "personnel_delete_yes_INDEX"
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
