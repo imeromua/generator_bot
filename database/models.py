@@ -21,15 +21,14 @@ def _is_postgres() -> bool:
     return (getattr(config, "DB_BACKEND", "sqlite") or "sqlite").strip().lower() == "postgres"
 
 
-_QMARK_PATTERN = re.compile(r"\?(?=(?:[^'\"]]|'[^']*'|\"[^\"]*\")*$)")
+_QMARK_PATTERN = re.compile(r"\?")
 
 
 def _translate_qmarks(query: str) -> str:
     """Translate sqlite-style placeholders ('?') to psycopg placeholders ('%s').
 
-    Uses a regex that replaces only placeholders outside of quoted string
-    literals to avoid corrupting SQL that legitimately contains '?' inside
-    string values or comments.
+    For PostgreSQL backend replaces all '?' with '%s'. For SQLite returns
+    query unchanged.
     """
     if not _is_postgres():
         return query
