@@ -1,23 +1,34 @@
+"""Database models and connection management with type hints.
+
+Supports both SQLite and PostgreSQL backends with connection pooling.
+"""
 import logging
-import sqlite3
-from urllib.parse import urlparse, urlunparse
 import re
+import sqlite3
+from typing import Any, Optional, Protocol, TypeVar, Union
+from urllib.parse import ParseResult, urlparse, urlunparse
 
 import config
 
 try:
     import psycopg
-    from psycopg import sql
     from psycopg import errors as pg_errors
+    from psycopg import sql
     from psycopg_pool import ConnectionPool
 except Exception:  # pragma: no cover
-    psycopg = None
-    sql = None
-    pg_errors = None
-    ConnectionPool = None
+    psycopg = None  # type: ignore
+    sql = None  # type: ignore
+    pg_errors = None  # type: ignore
+    ConnectionPool = None  # type: ignore
+
+
+# Type definitions
+CursorType = Union[sqlite3.Cursor, "psycopg.Cursor[Any]"]  # type: ignore
+ConnectionType = Union[sqlite3.Connection, "psycopg.Connection[Any]"]  # type: ignore
 
 
 def _is_postgres() -> bool:
+    """Check if PostgreSQL backend is configured."""
     return (getattr(config, "DB_BACKEND", "sqlite") or "sqlite").strip().lower() == "postgres"
 
 
@@ -29,6 +40,12 @@ def _translate_qmarks(query: str) -> str:
 
     For PostgreSQL backend replaces all '?' with '%s'. For SQLite returns
     query unchanged.
+
+    Args:
+        query: SQL query string with placeholders
+
+    Returns:
+        Translated query string
     """
     if not _is_postgres():
         return query
@@ -36,9 +53,16 @@ def _translate_qmarks(query: str) -> str:
 
 
 def _safe_postgres_target(dsn: str) -> str:
-    """Return safe (password-free) string like user@host:port/db."""
+    """Return safe (password-free) string like user@host:port/db.
+
+    Args:
+        dsn: PostgreSQL connection string
+
+    Returns:
+        Safe connection string without password
+    """
     try:
-        u = urlparse(dsn)
+        u: ParseResult = urlparse(dsn)
         user = u.username or "?"
         host = u.hostname or "localhost"
         port = u.port or 5432
@@ -49,6 +73,11 @@ def _safe_postgres_target(dsn: str) -> str:
 
 
 def db_target_info() -> str:
+    """Get human-readable database target info.
+
+    Returns:
+        String like 'sqlite:path' or 'postgres:user@host:port/db'
+    """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
         return f"sqlite:{db_path}"
@@ -56,20 +85,56 @@ def db_target_info() -> str:
 
 
 class CursorProxy:
-    def __init__(self, cur):
+    """Proxy for database cursors with query translation.
+
+    Translates SQLite-style '?' placeholders to PostgreSQL '%s' style.
+    """
+
+    def __init__(self, cur: CursorType) -> None:
+        """Initialize cursor proxy.
+
+        Args:
+            cur: Underlying database cursor
+        """
         self._cur = cur
 
-    def execute(self, query, params=None):
+    def execute(self, query: str, params: Optional[tuple[Any, ...] | list[Any]] = None) -> CursorType:
+        """Execute query with parameter translation.
+
+        Args:
+            query: SQL query string
+            params: Query parameters (optional)
+
+        Returns:
+            Cursor object
+        """
         q = _translate_qmarks(str(query))
         if params is None:
             return self._cur.execute(q)
         return self._cur.execute(q, params)
 
-    def executemany(self, query, params_seq):
+    def executemany(self, query: str, params_seq: list[tuple[Any, ...]] | list[list[Any]]) -> CursorType:
+        """Execute query multiple times with different parameters.
+
+        Args:
+            query: SQL query string
+            params_seq: Sequence of parameter tuples/lists
+
+        Returns:
+            Cursor object
+        """
         q = _translate_qmarks(str(query))
         return self._cur.executemany(q, params_seq)
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> Any:
+        """Delegate attribute access to underlying cursor.
+
+        Args:
+            item: Attribute name
+
+        Returns:
+            Attribute value from underlying cursor
+        """
         return getattr(self._cur, item)
 
 
@@ -87,33 +152,60 @@ class ConnectionProxy:
     closed" errors when the pool reuses them.
     """
 
-    def __init__(self, conn, from_pool=False):
+    def __init__(self, conn: ConnectionType, from_pool: bool = False) -> None:
+        """Initialize connection proxy.
+
+        Args:
+            conn: Underlying database connection
+            from_pool: Whether connection is from a pool
+        """
         self._conn = conn
         self._from_pool = from_pool
 
-    def execute(self, query, params=None):
+    def execute(self, query: str, params: Optional[tuple[Any, ...] | list[Any]] = None) -> CursorType:
+        """Execute query directly on connection.
+
+        Args:
+            query: SQL query string
+            params: Query parameters (optional)
+
+        Returns:
+            Cursor object
+        """
         q = _translate_qmarks(str(query))
         if params is None:
             return self._conn.execute(q)
         return self._conn.execute(q, params)
 
-    def cursor(self, *args, **kwargs):
+    def cursor(self, *args: Any, **kwargs: Any) -> CursorProxy:
+        """Create a new cursor wrapped in CursorProxy.
+
+        Args:
+            *args: Positional arguments for cursor creation
+            **kwargs: Keyword arguments for cursor creation
+
+        Returns:
+            CursorProxy wrapping the new cursor
+        """
         return CursorProxy(self._conn.cursor(*args, **kwargs))
 
-    def commit(self):
+    def commit(self) -> None:
+        """Commit current transaction."""
         return self._conn.commit()
 
-    def rollback(self):
+    def rollback(self) -> None:
+        """Rollback current transaction."""
         return self._conn.rollback()
 
-    def close(self):
+    def close(self) -> None:
         """Close connection or return to pool."""
         if self._from_pool:
             # Return connection to pool instead of closing
             try:
                 pool = get_postgres_pool()
-                pool.putconn(self._conn)
-                logging.debug("✅ Connection returned to pool")
+                if pool is not None:
+                    pool.putconn(self._conn)
+                    logging.debug("✅ Connection returned to pool")
             except Exception as e:
                 logging.warning(f"⚠️ Failed to return connection to pool: {e}")
                 try:
@@ -123,12 +215,15 @@ class ConnectionProxy:
         else:
             return self._conn.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "ConnectionProxy":
         """Support `with get_connection() as conn:` pattern.
 
         For pooled connections we do NOT delegate to the underlying
         connection's context manager (it would close the connection).
         We simply return self and let __exit__ handle pool return.
+
+        Returns:
+            Self for context manager
         """
         if not self._from_pool:
             # For non-pooled connections (SQLite or direct psycopg) preserve
@@ -136,17 +231,26 @@ class ConnectionProxy:
             self._conn.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         """On context exit, either close connection or return to pool.
 
         For pooled connections: return to pool and DO NOT close.
         For non-pooled connections: delegate to underlying __exit__.
+
+        Args:
+            exc_type: Exception type (if any)
+            exc: Exception instance (if any)
+            tb: Traceback (if any)
+
+        Returns:
+            False to not suppress exceptions
         """
         if self._from_pool:
             try:
                 pool = get_postgres_pool()
-                pool.putconn(self._conn)
-                logging.debug("✅ Connection returned to pool from context manager")
+                if pool is not None:
+                    pool.putconn(self._conn)
+                    logging.debug("✅ Connection returned to pool from context manager")
             except Exception as e:
                 logging.warning(f"⚠️ Failed to return connection to pool: {e}")
                 try:
@@ -158,23 +262,55 @@ class ConnectionProxy:
         # Non-pooled connection: preserve original behaviour
         return self._conn.__exit__(exc_type, exc, tb)
 
-    def __getattr__(self, item):
+    def __getattr__(self, item: str) -> Any:
+        """Delegate attribute access to underlying connection.
+
+        Args:
+            item: Attribute name
+
+        Returns:
+            Attribute value from underlying connection
+        """
         return getattr(self._conn, item)
 
 
 def _parse_dbname_from_dsn(dsn: str) -> str:
-    u = urlparse(dsn)
+    """Extract database name from PostgreSQL DSN.
+
+    Args:
+        dsn: PostgreSQL connection string
+
+    Returns:
+        Database name
+    """
+    u: ParseResult = urlparse(dsn)
     path = (u.path or "").lstrip("/")
     return (path or "").strip()
 
 
 def _build_admin_dsn_from_app_dsn(app_dsn: str) -> str:
-    u = urlparse(app_dsn)
+    """Build admin DSN from application DSN (connects to 'postgres' db).
+
+    Args:
+        app_dsn: Application PostgreSQL DSN
+
+    Returns:
+        Admin DSN pointing to 'postgres' database
+    """
+    u: ParseResult = urlparse(app_dsn)
     new_u = u._replace(path="/postgres")
     return urlunparse(new_u)
 
 
 def _postgres_db_missing(exc: Exception) -> bool:
+    """Check if exception indicates missing database.
+
+    Args:
+        exc: Exception to check
+
+    Returns:
+        True if database doesn't exist
+    """
     try:
         if pg_errors and isinstance(exc, pg_errors.InvalidCatalogName):
             return True
@@ -185,8 +321,12 @@ def _postgres_db_missing(exc: Exception) -> bool:
     return ("does not exist" in msg) and ("database" in msg)
 
 
-def ensure_postgres_database_exists():
-    """Ensure target Postgres database exists; create it if missing."""
+def ensure_postgres_database_exists() -> None:
+    """Ensure target Postgres database exists; create it if missing.
+
+    Raises:
+        RuntimeError: If psycopg not installed or DSN not configured
+    """
     if not _is_postgres():
         return
 
@@ -239,33 +379,40 @@ def ensure_postgres_database_exists():
 
 
 # Global connection pool
-_pg_pool = None
+_pg_pool: Optional["ConnectionPool"] = None  # type: ignore
 
 
-def get_postgres_pool():
-    """Get or create global PostgreSQL connection pool."""
+def get_postgres_pool() -> Optional["ConnectionPool"]:  # type: ignore
+    """Get or create global PostgreSQL connection pool.
+
+    Returns:
+        ConnectionPool instance or None if not using PostgreSQL
+
+    Raises:
+        RuntimeError: If pool cannot be created
+    """
     global _pg_pool
-    
+
     if _pg_pool is None:
         if not _is_postgres():
             return None
-        
+
         if ConnectionPool is None:
             raise RuntimeError("psycopg_pool is not installed but DB_BACKEND=postgres")
-        
+
         dsn = (getattr(config, "POSTGRES_DSN", "") or "").strip()
         if not dsn:
             raise RuntimeError("POSTGRES_DSN is not set")
-        
+
         # Ensure database exists before creating pool
         ensure_postgres_database_exists()
-        
+
         # Create connection pool with reasonable defaults
         min_size = getattr(config, "PG_POOL_MIN_SIZE", 2)
         max_size = getattr(config, "PG_POOL_MAX_SIZE", 10)
         timeout = getattr(config, "PG_POOL_TIMEOUT", 30)
         max_idle = getattr(config, "PG_POOL_MAX_IDLE", 300)  # 5 minutes
-        
+
         try:
             _pg_pool = ConnectionPool(
                 conninfo=dsn,
@@ -277,20 +424,20 @@ def get_postgres_pool():
                 kwargs={
                     "autocommit": True,  # Match SQLite semantics
                     "connect_timeout": 10,
-                }
+                },
             )
             logging.info(f"✅ PostgreSQL connection pool initialized (min={min_size}, max={max_size})")
         except Exception as e:
             logging.error(f"❌ Failed to create connection pool: {e}")
             raise
-    
+
     return _pg_pool
 
 
-def close_postgres_pool():
+def close_postgres_pool() -> None:
     """Close PostgreSQL connection pool gracefully."""
     global _pg_pool
-    
+
     if _pg_pool is not None:
         try:
             _pg_pool.close()
@@ -301,11 +448,15 @@ def close_postgres_pool():
             _pg_pool = None
 
 
-def get_connection():
+def get_connection() -> Union[sqlite3.Connection, ConnectionProxy]:
     """Returns a DB connection.
 
-    - sqlite: sqlite3.Connection (with isolation_level=None for autocommit)
-    - postgres: ConnectionProxy (psycopg connection from pool, autocommit enabled)
+    Returns:
+        - sqlite: sqlite3.Connection (with isolation_level=None for autocommit)
+        - postgres: ConnectionProxy (psycopg connection from pool, autocommit enabled)
+
+    Raises:
+        Exception: If connection cannot be established
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
@@ -321,6 +472,8 @@ def get_connection():
     # PostgreSQL: get connection from pool
     try:
         pool = get_postgres_pool()
+        if pool is None:
+            raise RuntimeError("Failed to get connection pool")
         conn = pool.getconn()
         return ConnectionProxy(conn, from_pool=True)
     except Exception as e:
@@ -328,11 +481,14 @@ def get_connection():
         raise
 
 
-def begin_transaction(conn):
+def begin_transaction(conn: Union[sqlite3.Connection, ConnectionProxy]) -> None:
     """Start a transaction in a backend-appropriate way.
 
     FIX #2: Use SERIALIZABLE isolation level for Postgres to prevent phantom reads
     and ensure proper CAS (Compare-And-Set) operations in concurrent scenarios.
+
+    Args:
+        conn: Database connection
     """
     if _is_postgres():
         try:
@@ -352,7 +508,7 @@ def begin_transaction(conn):
             pass
 
 
-def init_db():
+def init_db() -> None:
     """Створення схеми (ідемпотентно) + seed generator_state defaults.
 
     Підтримка двох генераторів: основного та аварійного.
@@ -513,14 +669,16 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
-    
+
     # PostgreSQL-specific optimized indexes
     if _is_postgres():
-        index_statements.extend([
-            "CREATE INDEX IF NOT EXISTS idx_logs_date_generator ON logs(timestamp, generator_id)",
-            "CREATE INDEX IF NOT EXISTS idx_logs_sync_generator ON logs(is_synced, generator_id) WHERE is_synced = 0",
-        ])
-    
+        index_statements.extend(
+            [
+                "CREATE INDEX IF NOT EXISTS idx_logs_date_generator ON logs(timestamp, generator_id)",
+                "CREATE INDEX IF NOT EXISTS idx_logs_sync_generator ON logs(is_synced, generator_id) WHERE is_synced = 0",
+            ]
+        )
+
     for stmt in index_statements:
         try:
             c.execute(stmt)
@@ -528,30 +686,29 @@ def init_db():
             logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
 
     # Дефолтні значення generator_state
-    defaults = [
+    defaults: list[tuple[str, str]] = [
         # Основні параметри
-        ('total_hours', '0.0'),
-        ('last_oil_change', '0.0'),
-        ('last_spark_change', '0.0'),
-        ('status', 'OFF'),
-        ('active_shift', 'none'),
-        ('last_start_time', ''),
-        ('last_start_date', ''),
-        ('current_fuel', '0.0'),
-        ('fuel_ordered_date', ''),
-        ('fuel_alert_last_sent_ts', ''),
-        ('stop_reminder_sent_date', ''),
-        ('sheet_last_ok_ts', ''),
-        ('sheet_first_fail_ts', ''),
-        ('sheet_offline', '0'),
-        ('sheet_offline_since_ts', ''),
-        ('sync_in_progress', '0'),
-
+        ("total_hours", "0.0"),
+        ("last_oil_change", "0.0"),
+        ("last_spark_change", "0.0"),
+        ("status", "OFF"),
+        ("active_shift", "none"),
+        ("last_start_time", ""),
+        ("last_start_date", ""),
+        ("current_fuel", "0.0"),
+        ("fuel_ordered_date", ""),
+        ("fuel_alert_last_sent_ts", ""),
+        ("stop_reminder_sent_date", ""),
+        ("sheet_last_ok_ts", ""),
+        ("sheet_first_fail_ts", ""),
+        ("sheet_offline", "0"),
+        ("sheet_offline_since_ts", ""),
+        ("sync_in_progress", "0"),
         # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
-        ('active_generator', 'main'),
-        ('emergency_total_hours', '0.0'),
-        ('emergency_last_oil_change', '0.0'),
-        ('emergency_last_spark_change', '0.0'),
+        ("active_generator", "main"),
+        ("emergency_total_hours", "0.0"),
+        ("emergency_last_oil_change", "0.0"),
+        ("emergency_last_spark_change", "0.0"),
     ]
 
     # Backend-specific INSERT syntax (no fallback needed with direct syntax)
