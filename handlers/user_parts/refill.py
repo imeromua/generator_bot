@@ -1,5 +1,11 @@
+"""Fuel refill handlers.
+
+Manage fuel refills with driver and receipt tracking.
+"""
+
 import asyncio
-from datetime import datetime
+from datetime import datetime, time
+from typing import Optional
 
 from aiogram import Router, F, types
 from aiogram.exceptions import TelegramBadRequest
@@ -19,15 +25,24 @@ router = Router()
 
 
 class RefillForm(StatesGroup):
+    """FSM states for refill flow."""
     driver = State()
     liters = State()
     receipt = State()
 
 
-def _within_work_window(now_t, start_t, end_t) -> bool:
+def _within_work_window(now_t: time, start_t: time, end_t: time) -> bool:
     """Труе якщо now_t всередині [start_t, end_t) вікна.
 
     Працює для вікон, які НЕ перетинають північ (start<=end) та які перетинають північ.
+
+    Args:
+        now_t: Current time
+        start_t: Window start time
+        end_t: Window end time
+
+    Returns:
+        True if now_t is within the window
     """
     if start_t <= end_t:
         return start_t <= now_t < end_t
@@ -39,6 +54,9 @@ def _refill_allowed_now() -> tuple[bool, str]:
     """Перевіряє чи дозволено прийом палива зараз на основі WORK_START_TIME/WORK_END_TIME.
 
     Повертає (ok, human_message).
+
+    Returns:
+        Tuple of (allowed, error_message)
     """
     try:
         now = now_kiev()
@@ -57,7 +75,11 @@ def _refill_allowed_now() -> tuple[bool, str]:
 
 
 def _fuel_quick_buttons() -> types.InlineKeyboardMarkup:
-    """FIX #21: Швидкі кнопки для вибору кількості палива."""
+    """FIX #21: Швидкі кнопки для вибору кількості палива.
+
+    Returns:
+        Inline keyboard with quick fuel amount buttons
+    """
     kb = [
         [
             types.InlineKeyboardButton(text="20 л", callback_data="fuel_20"),
@@ -76,7 +98,13 @@ def _fuel_quick_buttons() -> types.InlineKeyboardMarkup:
 
 # --- ЗАПРАВКА ---
 @router.callback_query(F.data == "refill_init")
-async def refill_start(cb: types.CallbackQuery, state: FSMContext):
+async def refill_start(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Start refill flow.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     # FIX #21: Only check at init, not at every step
     ok, err = _refill_allowed_now()
     if not ok:
@@ -99,7 +127,13 @@ async def refill_start(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(RefillForm.driver, F.data.startswith("drv_"))
-async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
+async def refill_driver(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Select driver for refill.
+
+    Args:
+        cb: Callback query with driver selection
+        state: FSM context
+    """
     # FIX #21: No check here - user already started the flow
     driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
@@ -112,8 +146,13 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(RefillForm.liters, F.data.startswith("fuel_"))
-async def refill_quick_amount(cb: types.CallbackQuery, state: FSMContext):
-    """FIX #21: Обробка швидких кнопок вибору кількості палива."""
+async def refill_quick_amount(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """FIX #21: Обробка швидких кнопок вибору кількості палива.
+
+    Args:
+        cb: Callback query with fuel amount selection
+        state: FSM context
+    """
     fuel_type = cb.data.split("_")[1]
     
     if fuel_type == "custom":
@@ -142,8 +181,13 @@ async def refill_quick_amount(cb: types.CallbackQuery, state: FSMContext):
 
 
 @router.message(RefillForm.liters)
-async def refill_ask_receipt(msg: types.Message, state: FSMContext):
-    """Обробка ручного вводу кількості літрів."""
+async def refill_ask_receipt(msg: types.Message, state: FSMContext) -> None:
+    """Обробка ручного вводу кількості літрів.
+
+    Args:
+        msg: Message with liters amount
+        state: FSM context
+    """
     data = await state.get_data()
     chat_id = int(data.get("ui_chat_id", msg.chat.id))
     message_id = int(data.get("ui_message_id", 0))
@@ -185,7 +229,13 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
 
 
 @router.message(RefillForm.receipt)
-async def refill_save(msg: types.Message, state: FSMContext):
+async def refill_save(msg: types.Message, state: FSMContext) -> None:
+    """Save refill with receipt number.
+
+    Args:
+        msg: Message with receipt number
+        state: FSM context
+    """
     # FIX #21: Check again only at final save to catch edge cases
     ok, err = _refill_allowed_now()
     if not ok:

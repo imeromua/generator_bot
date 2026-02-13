@@ -1,5 +1,10 @@
+"""Shift management handlers.
+
+Start/stop generator shifts with validation and sync.
+"""
+
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 
 from aiogram import Router, F, types
 
@@ -20,10 +25,18 @@ from utils.messaging import notify_success, notify_error  # FIX #25
 router = Router()
 
 
-def _within_work_window(now_t, start_t, end_t) -> bool:
+def _within_work_window(now_t: time, start_t: time, end_t: time) -> bool:
     """True if now_t is inside [start_t, end_t) window.
 
     Works for windows that do NOT cross midnight (start<=end) and windows that DO cross midnight.
+
+    Args:
+        now_t: Current time
+        start_t: Window start time
+        end_t: Window end time
+
+    Returns:
+        True if now_t is within the window
     """
     if start_t <= end_t:
         return start_t <= now_t < end_t
@@ -33,7 +46,12 @@ def _within_work_window(now_t, start_t, end_t) -> bool:
 
 # --- СТАРТ ---
 @router.callback_query(F.data.in_({"m_start", "d_start", "e_start", "x_start"}))
-async def gen_start(cb: types.CallbackQuery):
+async def gen_start(cb: types.CallbackQuery) -> None:
+    """Старт зміни генератора.
+
+    Args:
+        cb: Callback query (m_start/d_start/e_start/x_start)
+    """
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
@@ -152,7 +170,12 @@ async def gen_start(cb: types.CallbackQuery):
 
 # --- СТОП ---
 @router.callback_query(F.data.in_({"m_end", "d_end", "e_end", "x_end"}))
-async def gen_stop(cb: types.CallbackQuery):
+async def gen_stop(cb: types.CallbackQuery) -> None:
+    """Закриття зміни генератора.
+
+    Args:
+        cb: Callback query (m_end/d_end/e_end/x_end)
+    """
     operator_personnel = get_operator_personnel_name(cb.from_user.id)
     if not operator_personnel:
         return await cb.answer("⚠️ Нема прив'язки до персоналу. Адмінка → Персонал.", show_alert=True)
