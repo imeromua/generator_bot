@@ -1,5 +1,22 @@
+"""Google Sheets synchronization handler.
+
+Bidirectional smart sync:
+- Compares data by dates between DB and Sheets
+- Syncs only changes, doesn't overwrite
+- Auto-resolves conflicts (more data = priority)
+- Syncs drivers and personnel directories
+- Validates fuel consumption
+
+Safety:
+- Admin-only
+- Only when generator is OFF
+- Lock during execution
+- Logged to system journal
+"""
+
 import asyncio
 import logging
+from typing import Callable
 
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -16,7 +33,20 @@ try:
 except ImportError:
     # Fallback if import fails - емодзі часу доби
     def shift_pretty(code: str) -> str:
-        mapping = {'м': '🌅 Зміна 1', 'd': '☀️ Зміна 2', 'e': '🌙 Зміна 3', 'x': '⚡ Екстра'}
+        """Форматування назви зміни.
+
+        Args:
+            code: Shift code
+
+        Returns:
+            Formatted shift name with emoji
+        """
+        mapping = {
+            'м': '🌅 Зміна 1',
+            'd': '☀️ Зміна 2',
+            'e': '🌙 Зміна 3',
+            'x': '⚡ Екстра'
+        }
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
@@ -28,6 +58,11 @@ logger = logging.getLogger(__name__)
 
 
 def _smart_sync_confirm_kb() -> InlineKeyboardMarkup:
+    """Create confirmation keyboard for smart sync.
+
+    Returns:
+        Inline keyboard markup
+    """
     kb = [
         [InlineKeyboardButton(text="✅ Підтверджую синхронізацію", callback_data="sync_smart_execute")],
         [InlineKeyboardButton(text="❌ Скасувати", callback_data="sync_menu")],
@@ -36,6 +71,11 @@ def _smart_sync_confirm_kb() -> InlineKeyboardMarkup:
 
 
 def _back_kb() -> InlineKeyboardMarkup:
+    """Create back button keyboard.
+
+    Returns:
+        Inline keyboard markup
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="sync_menu")]]
     )
@@ -43,8 +83,9 @@ def _back_kb() -> InlineKeyboardMarkup:
 
 def _acquire_sync_lock() -> bool:
     """FIX #14: Try to acquire sync lock atomically.
-    
-    Returns True if lock was acquired, False if sync is already in progress.
+
+    Returns:
+        True if lock was acquired, False if sync is already in progress
     """
     try:
         current = db.get_state_value("sync_in_progress", "0")
@@ -57,7 +98,7 @@ def _acquire_sync_lock() -> bool:
         return False
 
 
-def _release_sync_lock():
+def _release_sync_lock() -> None:
     """FIX #14: Release sync lock."""
     try:
         db.set_state("sync_in_progress", "0")
@@ -67,8 +108,9 @@ def _release_sync_lock():
 
 def _check_generator_off() -> tuple[bool, str]:
     """Перевіряє чи генератор вимкнений та чи активний основний.
-    
-    Returns: (is_off: bool, message: str)
+
+    Returns:
+        Tuple of (is_off: bool, error_message: str)
     """
     try:
         # Перевірка 1: Активний генератор - має бути основний
@@ -80,17 +122,17 @@ def _check_generator_off() -> tuple[bool, str]:
                 "📊 Звіт аварійного генератора експортується окремо в Excel.\n"
                 "🔄 Перемкніть на основний генератор для синхронізації."
             )
-        
+
         # Перевірка 2: Статус - має бути OFF
         st = db.get_state() or {}
         status = (st.get("status") or "OFF").upper()
-        
+
         if status == "ON":
             active_shift = st.get("active_shift", "none")
             # FIX: Use shift_pretty() for user-friendly display
             shift_name = shift_pretty(active_shift)
             return False, f"⛔ Синхронізація неможлива поки генератор працює ({shift_name}).\n\n📋 Закрийте активну зміну перед синхронізацією!"
-        
+
         return True, ""
     except Exception as e:
         logger.error(f"Error checking generator status: {e}")
@@ -98,11 +140,14 @@ def _check_generator_off() -> tuple[bool, str]:
 
 
 @router.callback_query(F.data == "sync_menu")
-async def show_sync_menu(cb: types.CallbackQuery):
+async def show_sync_menu(cb: types.CallbackQuery) -> None:
     """Показує меню синхронізації.
-    
+
     Тільки розумна двонаправлена синхронізація.
     Старі окремі імпорт/експорт видалені з інтерфейсу.
+
+    Args:
+        cb: Callback query
     """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
@@ -110,12 +155,12 @@ async def show_sync_menu(cb: types.CallbackQuery):
     # FIX #14: Show if sync is already in progress
     sync_in_progress = db.get_state_value("sync_in_progress", "0") == "1"
     status_text = "\n⚠️ <b>Синхронізація вже виконується!</b>\n" if sync_in_progress else ""
-    
+
     # Перевірка статусу генератора
     is_off, gen_msg = _check_generator_off()
     if not is_off:
         status_text += f"\n{gen_msg}\n"
-    
+
     txt = (
         "🔄 <b>Розумна синхронізація з Google Sheets</b>\n\n"
         f"{status_text}"
@@ -141,8 +186,12 @@ async def show_sync_menu(cb: types.CallbackQuery):
 
 # --- РОЗУМНА СИНХРОНІЗАЦІЯ ---
 @router.callback_query(F.data == "sync_smart")
-async def sync_smart_confirm(cb: types.CallbackQuery):
-    """Підтвердження розумної синхронізації."""
+async def sync_smart_confirm(cb: types.CallbackQuery) -> None:
+    """Підтвердження розумної синхронізації.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -177,8 +226,12 @@ async def sync_smart_confirm(cb: types.CallbackQuery):
 
 
 @router.callback_query(F.data == "sync_smart_execute")
-async def sync_smart_execute(cb: types.CallbackQuery):
-    """Виконання розумної синхронізації."""
+async def sync_smart_execute(cb: types.CallbackQuery) -> None:
+    """Виконання розумної синхронізації.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -226,21 +279,21 @@ async def sync_smart_execute(cb: types.CallbackQuery):
         )
 
         await cb.message.edit_text(txt, reply_markup=_back_kb())
-        
+
         # FIX #25: Notify success
         notify_success(
-            user_id, 
+            user_id,
             f"✅ Синхронізовано: {report.total_dates} дат, "
             f"імпорт: {report.imported}, експорт: {report.exported}"
         )
 
     except Exception as e:
         logger.error(f"❌ Помилка синхронізації: {e}", exc_info=True)
-        
+
         # FIX #25: Notify error
         error_msg = str(e)[:100]  # Обрізаємо довгі помилки
         notify_error(user_id, f"❌ Помилка синхронізації: {error_msg}")
-        
+
         await cb.message.edit_text(
             f"❌ <b>Помилка синхронізації</b>\n\n{e}",
             reply_markup=_back_kb(),

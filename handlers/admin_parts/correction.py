@@ -1,4 +1,22 @@
+"""Manual corrections handler.
+
+Allows admins to manually adjust generator state values:
+- Current fuel level
+- Fuel consumption rate
+- Total motor hours
+- Last oil change hours
+- Last spark change hours
+
+Safety:
+- Only when generator is OFF
+- Transactional updates (FIX #12)
+- Single-window UI (FIX #24)
+- Logged to system journal
+- Dynamic handler factory (FIX #13)
+"""
+
 import logging
+from typing import Callable, Any
 
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
@@ -16,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class CorrectionForm(StatesGroup):
+    """FSM states for manual corrections."""
     fuel = State()
     total_hours = State()
     last_oil = State()
@@ -24,13 +43,17 @@ class CorrectionForm(StatesGroup):
 
 
 def _build_correction_text() -> str:
-    """Створює текст зі станом корекцій."""
+    """Створює текст зі станом корекцій.
+
+    Returns:
+        Formatted text with current state values
+    """
     st = db.get_state()
     try:
         fuel_consumption = float(st.get('fuel_consumption', config.FUEL_CONSUMPTION) or config.FUEL_CONSUMPTION)
     except Exception:
         fuel_consumption = config.FUEL_CONSUMPTION
-    
+
     return (
         "🧩 <b>Корекція</b>\n\n"
         f"⛽️ Поточний залишок палива: <b>{float(st.get('current_fuel', 0.0) or 0.0):.1f} л</b>\n"
@@ -42,7 +65,13 @@ def _build_correction_text() -> str:
 
 
 @router.callback_query(F.data == "corr_menu")
-async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
+async def corr_menu(cb: types.CallbackQuery, state: FSMContext) -> None:
+    """Display correction menu.
+
+    Args:
+        cb: Callback query
+        state: FSM context
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -53,7 +82,7 @@ async def corr_menu(cb: types.CallbackQuery, state: FSMContext):
 
 # FIX #13: Generic handler for all numeric corrections to reduce code duplication
 # FIX #22: Use human-readable Ukrainian labels instead of technical field names
-CORRECTION_CONFIGS = {
+CORRECTION_CONFIGS: dict[str, dict[str, Any]] = {
     "fuel": {
         "state_key": "current_fuel",
         "state_obj": CorrectionForm.fuel,
@@ -119,10 +148,24 @@ CORRECTION_CONFIGS = {
 }
 
 
-def _create_correction_handler(corr_type: str, config_dict: dict):
-    """FIX #13: Factory function to create correction handlers dynamically."""
-    
-    async def set_handler(cb: types.CallbackQuery, state: FSMContext):
+def _create_correction_handler(corr_type: str, config_dict: dict[str, Any]) -> tuple[Callable, Callable]:
+    """FIX #13: Factory function to create correction handlers dynamically.
+
+    Args:
+        corr_type: Correction type key
+        config_dict: Configuration dictionary
+
+    Returns:
+        Tuple of (set_handler, save_handler)
+    """
+
+    async def set_handler(cb: types.CallbackQuery, state: FSMContext) -> None:
+        """Start correction process.
+
+        Args:
+            cb: Callback query
+            state: FSM context
+        """
         if cb.from_user.id not in config.ADMIN_IDS:
             return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
@@ -134,18 +177,24 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
 
         get_current = config_dict.get("get_current", lambda st: float(st.get(config_dict["state_key"], 0.0) or 0.0))
         cur = get_current(st)
-        
+
         # FIX #22: Add optional help text for specific fields (e.g., fuel_consumption)
         help_text = config_dict.get("help_text", "")
-        
+
         await cb.message.edit_text(
             f"{config_dict['prompt_emoji']} {config_dict['prompt_text']}: <b>{cur:.1f} {config_dict['units']}</b>\nВведіть нове значення ({config_dict['units']}):{help_text}",
             reply_markup=back_to_corr(),
         )
         await state.set_state(config_dict["state_obj"])
         await cb.answer()
-    
-    async def save_handler(msg: types.Message, state: FSMContext):
+
+    async def save_handler(msg: types.Message, state: FSMContext) -> None:
+        """Save corrected value.
+
+        Args:
+            msg: Message with new value
+            state: FSM context
+        """
         if msg.from_user.id not in config.ADMIN_IDS:
             await state.clear()
             # FIX #24: Delete user message to maintain single-window UI
@@ -162,26 +211,26 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
             await state.clear()
             await msg.answer("⛔ Помилка: втрачено зв'язок з UI. Поверніться в меню.")
             return
-        
+
         ui_chat_id, ui_msg_id = ui_msg
 
         # FIX #12: Transactional status check at write time
         conn = get_connection()
         try:
             begin_transaction(conn)
-            
+
             # Check status atomically within transaction
             current_status = _conn_get_state_value(conn, "status", "OFF")
             if current_status == "ON":
                 conn.rollback()
                 await state.clear()
-                
+
                 # FIX #24: Edit UI message and delete user message
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-                
+
                 try:
                     await msg.bot.edit_message_text(
                         chat_id=ui_chat_id,
@@ -192,7 +241,7 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                 except Exception:
                     pass
                 return
-            
+
             # Validate and parse input
             try:
                 val_text = (msg.text or "").replace(",", ".").strip()
@@ -200,13 +249,13 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
 
                 if val < config_dict["min_val"]:
                     conn.rollback()
-                    
+
                     # FIX #24: Edit UI message and delete user message
                     try:
                         await msg.delete()
                     except Exception:
                         pass
-                    
+
                     try:
                         await msg.bot.edit_message_text(
                             chat_id=ui_chat_id,
@@ -217,16 +266,16 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                     except Exception:
                         pass
                     return
-                    
+
                 if val > config_dict["max_val"]:
                     conn.rollback()
-                    
+
                     # FIX #24: Edit UI message and delete user message
                     try:
                         await msg.delete()
                     except Exception:
                         pass
-                    
+
                     try:
                         await msg.bot.edit_message_text(
                             chat_id=ui_chat_id,
@@ -240,22 +289,22 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
 
                 # Apply the change
                 config_dict["db_setter"](val)
-                
+
                 # Log the correction
                 actor = actor_name(msg.from_user.id, first_name=msg.from_user.first_name)
                 db.add_log(config_dict["log_event"], actor, val=str(val), conn=conn)
                 logger.info(f"{config_dict['log_emoji']} {actor} встановив {config_dict['state_key']}: {val}")
-                
+
                 conn.commit()
 
                 await state.clear()
-                
+
                 # FIX #24: Edit UI message and delete user message
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-                
+
                 txt = "✅ Збережено.\n\n" + _build_correction_text()
                 try:
                     await msg.bot.edit_message_text(
@@ -269,13 +318,13 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
 
             except ValueError:
                 conn.rollback()
-                
+
                 # FIX #24: Edit UI message and delete user message
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-                
+
                 try:
                     await msg.bot.edit_message_text(
                         chat_id=ui_chat_id,
@@ -285,7 +334,7 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                     )
                 except Exception:
                     pass
-        
+
         except Exception as e:
             try:
                 conn.rollback()
@@ -293,13 +342,13 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                 pass
             logger.error(f"Помилка корекції {corr_type}: {e}", exc_info=True)
             await state.clear()
-            
+
             # FIX #24: Edit UI message and delete user message
             try:
                 await msg.delete()
             except Exception:
                 pass
-            
+
             try:
                 await msg.bot.edit_message_text(
                     chat_id=ui_chat_id,
@@ -314,7 +363,7 @@ def _create_correction_handler(corr_type: str, config_dict: dict):
                 conn.close()
             except Exception:
                 pass
-    
+
     return set_handler, save_handler
 
 
