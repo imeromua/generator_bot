@@ -530,22 +530,23 @@ def init_db():
         ('emergency_last_spark_change', '0.0'),
     ]
 
-    for k, v in defaults:
-        try:
-            c.execute(
-                """
-                INSERT INTO generator_state (key, value) VALUES (?, ?)
-                ON CONFLICT(key) DO NOTHING
-                """,
-                (k, v),
-            )
-        except Exception as e:
+    # Backend-specific INSERT syntax (no fallback needed with direct syntax)
+    if _is_postgres():
+        for k, v in defaults:
             try:
-                if _is_postgres():
-                    conn.rollback()
+                c.execute(
+                    "INSERT INTO generator_state (key, value) VALUES (%s, %s) ON CONFLICT(key) DO NOTHING",
+                    (k, v),
+                )
+            except Exception as e:
+                logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e}")
+    else:
+        # SQLite with autocommit: use INSERT OR IGNORE directly
+        for k, v in defaults:
+            try:
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
-            except Exception as e2:
-                logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e2}")
+            except Exception as e:
+                logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e}")
 
     try:
         conn.commit()
