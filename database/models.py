@@ -82,6 +82,10 @@ class ConnectionProxy:
 
     To keep sqlite-like semantics and avoid silent rollbacks on context exit,
     we enable autocommit for Postgres connections in `get_connection()`.
+
+    For pooled connections we MUST NOT close them on context exit, only return
+    them to the pool. Closing pooled connections leads to "the connection is
+    closed" errors when the pool reuses them.
     """
 
     def __init__(self, conn, from_pool=False):
@@ -121,17 +125,38 @@ class ConnectionProxy:
             return self._conn.close()
 
     def __enter__(self):
-        self._conn.__enter__()
+        """Support `with get_connection() as conn:` pattern.
+
+        For pooled connections we do NOT delegate to the underlying
+        connection's context manager (it would close the connection).
+        We simply return self and let __exit__ handle pool return.
+        """
+        if not self._from_pool:
+            # For non-pooled connections (SQLite or direct psycopg) preserve
+            # default context manager behaviour.
+            self._conn.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        # Don't close pooled connections on context exit
+        """On context exit, either close connection or return to pool.
+
+        For pooled connections: return to pool and DO NOT close.
+        For non-pooled connections: delegate to underlying __exit__.
+        """
         if self._from_pool:
             try:
                 pool = get_postgres_pool()
                 pool.putconn(self._conn)
+                logging.debug("✅ Connection returned to pool from context manager")
             except Exception as e:
                 logging.warning(f"⚠️ Failed to return connection to pool: {e}")
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+            # Do not suppress exceptions
+            return False
+        # Non-pooled connection: preserve original behaviour
         return self._conn.__exit__(exc_type, exc, tb)
 
     def __getattr__(self, item):
