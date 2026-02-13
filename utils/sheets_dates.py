@@ -8,8 +8,10 @@ from datetime import datetime, date, timedelta
 from typing import Any, Optional
 import re
 
+import gspread
 
-def sheet_name_to_month(sheet_name: str) -> int | None:
+
+def sheet_name_to_month(sheet_name: str) -> Optional[int]:
     """Перетворює назву листа (місяць) на номер місяця.
 
     Підтримує UA/RU/EN назви як в старих реалізаціях.
@@ -37,9 +39,9 @@ def sheet_name_to_month(sheet_name: str) -> int | None:
 
 def try_parse_date_from_cell(
     value: Any,
-    sheet_month: int | None,
+    sheet_month: Optional[int],
     sheet_year: int
-) -> date | None:
+) -> Optional[date]:
     """Намагається розпарсити дату з клітинки колонки A.
 
     Підтримує ISO, dd.mm.yyyy, dd/mm/yyyy, 'dd.mm' (з місяцем листа),
@@ -118,10 +120,10 @@ def try_parse_date_from_cell(
 
 
 def find_row_by_date_in_column_a(
-    ws: Any,
+    ws: gspread.Worksheet,
     target_date: date,
     sheet_name: str
-) -> int | None:
+) -> Optional[int]:
     """Шукає рядок за датою в колонці A.
 
     Args:

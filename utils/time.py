@@ -1,3 +1,5 @@
+"""Time formatting and timezone utilities."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,12 +8,23 @@ import config
 
 
 def now_kiev() -> datetime:
-    """Повертає поточний час у таймзоні Europe/Kyiv (config.KYIV)."""
+    """Повертає поточний час у таймзоні Europe/Kyiv (config.KYIV).
+
+    Returns:
+        Current datetime in Kyiv timezone
+    """
     return datetime.now(config.KYIV)
 
 
 def format_hours_hhmm(hours_float: float) -> str:
-    """Конвертує години (float) у формат ГГ:ХХ. Підтримує від'ємні значення."""
+    """Конвертує години (float) у формат ГГ:ХХ. Підтримує від'ємні значення.
+
+    Args:
+        hours_float: Hours as decimal (e.g., 2.5 = 2h 30m)
+
+    Returns:
+        Formatted time string HH:MM (e.g., "02:30")
+    """
     try:
         h = float(hours_float)
     except Exception:

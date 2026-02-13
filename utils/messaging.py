@@ -5,7 +5,6 @@
 """
 
 import logging
-from typing import Optional
 
 import database.db_api as db
 
