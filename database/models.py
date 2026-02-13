@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 from urllib.parse import urlparse, urlunparse
+import re
 
 import config
 
@@ -18,11 +19,19 @@ def _is_postgres() -> bool:
     return (getattr(config, "DB_BACKEND", "sqlite") or "sqlite").strip().lower() == "postgres"
 
 
+_QMARK_PATTERN = re.compile(r"\?(?=(?:[^'\"]|'[^']*'|\"[^\"]*\")*$)")
+
+
 def _translate_qmarks(query: str) -> str:
-    """Translate sqlite-style placeholders ('?') to psycopg placeholders ('%s')."""
+    """Translate sqlite-style placeholders ('?') to psycopg placeholders ('%s').
+
+    Uses a regex that replaces only placeholders outside of quoted string
+    literals to avoid corrupting SQL that legitimately contains '?' inside
+    string values or comments.
+    """
     if not _is_postgres():
         return query
-    return query.replace("?", "%s")
+    return _QMARK_PATTERN.sub("%s", str(query))
 
 
 def _safe_postgres_target(dsn: str) -> str:
@@ -210,7 +219,7 @@ def get_connection():
 
 def begin_transaction(conn):
     """Start a transaction in a backend-appropriate way.
-    
+
     FIX #2: Use SERIALIZABLE isolation level for Postgres to prevent phantom reads
     and ensure proper CAS (Compare-And-Set) operations in concurrent scenarios.
     """
@@ -234,7 +243,7 @@ def begin_transaction(conn):
 
 def init_db():
     """Створення схеми (ідемпотентно) + seed generator_state defaults.
-    
+
     Підтримка двох генераторів: основного та аварійного.
     Додано generator_id в logs та maintenance для розділення записів.
     """
@@ -245,23 +254,23 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id INTEGER PRIMARY KEY, name TEXT UNIQUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY, 
-            event_type TEXT, 
-            timestamp TEXT, 
-            user_name TEXT, 
-            value TEXT, 
-            driver_name TEXT, 
-            receipt_number TEXT, 
+            id INTEGER PRIMARY KEY,
+            event_type TEXT,
+            timestamp TEXT,
+            user_name TEXT,
+            value TEXT,
+            driver_name TEXT,
+            receipt_number TEXT,
             is_synced INTEGER DEFAULT 0,
             generator_id TEXT DEFAULT 'main'
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
-            id INTEGER PRIMARY KEY, 
-            date TEXT, 
-            type TEXT, 
-            hours REAL, 
+            id INTEGER PRIMARY KEY,
+            date TEXT,
+            type TEXT,
+            hours REAL,
             admin TEXT,
             generator_id TEXT DEFAULT 'main'
         )''')
@@ -281,23 +290,23 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS logs (
-            id BIGSERIAL PRIMARY KEY, 
-            event_type TEXT, 
-            timestamp TEXT, 
-            user_name TEXT, 
-            value TEXT, 
-            driver_name TEXT, 
-            receipt_number TEXT, 
+            id BIGSERIAL PRIMARY KEY,
+            event_type TEXT,
+            timestamp TEXT,
+            user_name TEXT,
+            value TEXT,
+            driver_name TEXT,
+            receipt_number TEXT,
             is_synced INTEGER DEFAULT 0,
             generator_id TEXT DEFAULT 'main'
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
-            id BIGSERIAL PRIMARY KEY, 
-            date TEXT, 
-            type TEXT, 
-            hours DOUBLE PRECISION, 
+            id BIGSERIAL PRIMARY KEY,
+            date TEXT,
+            type TEXT,
+            hours DOUBLE PRECISION,
             admin TEXT,
             generator_id TEXT DEFAULT 'main'
         )''')
@@ -418,7 +427,7 @@ def init_db():
         ('sheet_offline', '0'),
         ('sheet_offline_since_ts', ''),
         ('sync_in_progress', '0'),
-        
+
         # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
         ('active_generator', 'main'),  # 'main' або 'emergency'
         ('emergency_total_hours', '0.0'),  # мотогодини аварійного
