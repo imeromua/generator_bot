@@ -1,3 +1,8 @@
+"""Main bot entry point with auto-restart and graceful shutdown.
+
+Handles bot initialization, middleware setup, background tasks,
+and automatic restart on transient network errors.
+"""
 import asyncio
 import errno
 import logging
@@ -7,6 +12,7 @@ import sys
 from datetime import datetime
 import inspect
 from urllib.parse import urlparse
+from typing import Any, Callable, Awaitable, TypeVar
 
 import aiohttp
 from aiogram import Bot, Dispatcher
@@ -20,9 +26,11 @@ from redis.asyncio import Redis
 # Імпорт конфігурації (спочатку, щоб отримати параметри логування)
 import config
 
+T = TypeVar('T')
+
 
 # --- НАЛАШТУВАННЯ ЛОГУВАННЯ ---
-def setup_logging():
+def setup_logging() -> None:
     """Налаштовує логування з ротацією файлів та виводом в консоль.
 
     Видаляє всі попередні хендлери, щоб уникнути дублювання (double logging).
@@ -33,7 +41,7 @@ def setup_logging():
     if root_logger.handlers:
         root_logger.handlers.clear()
 
-    handlers = []
+    handlers: list[logging.Handler] = []
 
     # 1. Console Handler (щоб бачити логи в докері/консолі)
     console_handler = logging.StreamHandler()
@@ -81,14 +89,27 @@ from handlers.admin_parts import dtek_parser
 from services.scheduler import scheduler_loop
 
 
-async def _run_blocking(func, *args, **kwargs):
-    """Run sync/blocking function in a thread executor to avoid blocking event loop."""
+async def _run_blocking(func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """Run sync/blocking function in a thread executor to avoid blocking event loop.
+
+    Args:
+        func: Blocking function to run
+        *args: Positional arguments for func
+        **kwargs: Keyword arguments for func
+
+    Returns:
+        Result from func execution
+    """
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
 
-async def _close_redis(redis: Redis):
-    """Best-effort close of redis client + pool (supports sync/async methods)."""
+async def _close_redis(redis: Redis) -> None:
+    """Best-effort close of redis client + pool (supports sync/async methods).
+
+    Args:
+        redis: Redis client instance
+    """
     try:
         res = redis.close()
         if inspect.isawaitable(res):
@@ -104,6 +125,14 @@ async def _close_redis(redis: Redis):
 
 
 def _safe_redis_target(url: str) -> str:
+    """Extract safe display string from Redis URL (without password).
+
+    Args:
+        url: Redis connection URL
+
+    Returns:
+        Safe display string (host:port/db)
+    """
     try:
         u = urlparse(url)
         host = u.hostname or "localhost"
@@ -115,8 +144,13 @@ def _safe_redis_target(url: str) -> str:
 
 
 def _is_transient_network_error(exc: Exception) -> bool:
-    """
-    Визначаємо "тимчасові" помилки, при яких треба робити retry/restart.
+    """Визначаємо "тимчасові" помилки, при яких треба робити retry/restart.
+
+    Args:
+        exc: Exception to check
+
+    Returns:
+        True if error is transient (network-related)
     """
     if isinstance(exc, TelegramNetworkError):
         return True
@@ -157,14 +191,29 @@ def _is_transient_network_error(exc: Exception) -> bool:
     return False
 
 
-async def _sleep_with_jitter(base_seconds: int, jitter_seconds: int = 3):
-    """Сон з невеликим випадковим джитером."""
+async def _sleep_with_jitter(base_seconds: int, jitter_seconds: int = 3) -> None:
+    """Сон з невеликим випадковим джитером.
+
+    Args:
+        base_seconds: Base sleep duration
+        jitter_seconds: Maximum random jitter to add
+    """
     extra = random.randint(0, max(0, jitter_seconds))
     await asyncio.sleep(max(0, base_seconds + extra))
 
 
-async def _run_background_forever(name: str, coro_func, *args):
-    """Supervisor: тримає фоновий процес живим, перезапускає при падінні."""
+async def _run_background_forever(
+    name: str,
+    coro_func: Callable[..., Awaitable[Any]],
+    *args: Any
+) -> None:
+    """Supervisor: тримає фоновий процес живим, перезапускає при падінні.
+
+    Args:
+        name: Task name for logging
+        coro_func: Async function to supervise
+        *args: Arguments for coro_func
+    """
     attempt = 0
     min_delay = 5
     max_delay = 60
@@ -186,7 +235,7 @@ async def _run_background_forever(name: str, coro_func, *args):
             await _sleep_with_jitter(delay, jitter_seconds=5)
 
 
-async def on_shutdown():
+async def on_shutdown() -> None:
     """Graceful shutdown handler: close PostgreSQL connection pool."""
     logger.info("🛑 Shutting down bot...")
     try:
@@ -198,9 +247,12 @@ async def on_shutdown():
 
 
 def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
-    """Побудова Dispatcher з усіма middlewares та routers."""
+    """Побудова Dispatcher з усіма middlewares та routers.
 
-    storage = MemoryStorage()
+    Returns:
+        Tuple of (Dispatcher, optional Redis client)
+    """
+    storage: MemoryStorage | RedisStorage = MemoryStorage()
     redis_client: Redis | None = None
 
     if getattr(config, "REDIS_ENABLED", False):
@@ -241,10 +293,14 @@ def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     return dp, redis_client
 
 
-async def run_polling_once(dp: Dispatcher):
-    """Один цикл запуску бота."""
-    bot = None
-    tasks = []
+async def run_polling_once(dp: Dispatcher) -> None:
+    """Один цикл запуску бота.
+
+    Args:
+        dp: Dispatcher instance
+    """
+    bot: Bot | None = None
+    tasks: list[asyncio.Task[Any]] = []
 
     try:
         logger.info(f"🗄 DB backend: {getattr(config, 'DB_BACKEND', 'sqlite')} ({db_models.db_target_info()})")
@@ -303,7 +359,7 @@ async def run_polling_once(dp: Dispatcher):
                 pass
 
 
-async def main():
+async def main() -> None:
     """Auto-restart цикл."""
     setup_logging()
     logger.info("🔎 Перевірка .env ...")
