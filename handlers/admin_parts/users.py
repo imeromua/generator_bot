@@ -1,3 +1,8 @@
+"""User list handler.
+
+Displays all registered users with their Telegram IDs.
+"""
+
 from aiogram import Router, F, types
 
 import config
@@ -8,7 +13,14 @@ router = Router()
 
 # --- ЮЗЕРИ ---
 @router.callback_query(F.data == "users_list")
-async def users_view(cb: types.CallbackQuery):
+async def users_view(cb: types.CallbackQuery) -> None:
+    """Display list of all registered users.
+
+    Shows user name and Telegram ID (copyable).
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 

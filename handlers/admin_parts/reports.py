@@ -1,3 +1,8 @@
+"""Reports handler (deprecated feature stub).
+
+Keeps handler to avoid crashes if old callback arrives.
+"""
+
 import logging
 
 from aiogram import Router, types
@@ -10,8 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.callback_query(lambda cb: cb.data == "download_report")
-async def report_removed(cb: types.CallbackQuery):
-    # Feature removed: keep handler only to avoid crashes if old button/callback arrives.
+async def report_removed(cb: types.CallbackQuery) -> None:
+    """Handle deprecated report download callback.
+
+    Feature removed: keep handler only to avoid crashes if old button/callback arrives.
+
+    Args:
+        cb: Callback query
+    """
     if cb.from_user.id not in config.ADMIN_IDS:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
