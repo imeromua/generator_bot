@@ -9,7 +9,7 @@ description = "Telegram bot for generator management with Google Sheets sync"
 authors = [{name = "imeromua", email = "imerom25@gmail.com"}]
 requires-python = ">=3.11"
 readme = "README.md"
-# ВИПРАВЛЕННЯ 1: Ліцензія тепер має бути рядком (SPDX expression)
+# ВИПРАВЛЕННЯ 1: Ліцензія як рядок
 license = "MIT"
 
 dependencies = [
@@ -45,51 +45,23 @@ dev = [
     "types-aiofiles",
 ]
 
-# ВИПРАВЛЕННЯ 2: Явне визначення пакетів для flat-layout
+# ВИПРАВЛЕННЯ 2: Використовуємо find directive, це надійніше для setuptools
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["database*", "handlers*", "keyboards*", "middlewares*", "services*", "utils*"]
+namespaces = false
+
+# Додатково: включаємо кореневі модулі, якщо вони потрібні (config.py)
 [tool.setuptools]
-packages = ["database", "handlers", "keyboards", "middlewares", "services", "utils"]
+py-modules = ["config", "main"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = [
-    "E",     # pycodestyle errors
-    "W",     # pycodestyle warnings
-    "F",     # pyflakes
-    "I",     # isort
-    "C90",   # mccabe complexity
-    "N",     # pep8-naming
-    "UP",    # pyupgrade
-    "B",     # flake8-bugbear
-    "A",     # flake8-builtins
-    "COM",   # flake8-commas
-    "C4",    # flake8-comprehensions
-    "DTZ",   # flake8-datetimez
-    "ISC",   # flake8-implicit-str-concat
-    "ICN",   # flake8-import-conventions
-    "PIE",   # flake8-pie
-    "PT",    # flake8-pytest-style
-    "Q",     # flake8-quotes
-    "RSE",   # flake8-raise
-    "RET",   # flake8-return
-    "SIM",   # flake8-simplify
-    "TID",   # flake8-tidy-imports
-    "ARG",   # flake8-unused-arguments
-    "PTH",   # flake8-use-pathlib
-    "ERA",   # eradicate (commented out code)
-    "PL",    # pylint
-    "TRY",   # tryceratops
-    "RUF",   # ruff-specific rules
-]
-ignore = [
-    "E501",    # Line too long (handled by black)
-    "PLR0913", # Too many arguments
-    "TRY003",  # Avoid specifying long messages outside exception class
-    "COM812",  # Trailing comma missing (conflicts with black)
-    "ISC001",  # Implicit string concatenation (conflicts with black)
-]
+select = ["E", "W", "F", "I", "C90", "N", "UP", "B", "A", "COM", "C4", "DTZ", "PIE", "PT", "Q", "RSE", "RET", "SIM", "TID", "ARG", "PTH", "ERA", "PL", "TRY", "RUF"]
+ignore = ["E501", "PLR0913", "TRY003", "COM812", "ISC001"]
 
 [tool.black]
 line-length = 120
