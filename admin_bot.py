@@ -250,9 +250,26 @@ async def logs_menu(message: types.Message):
     ])
     await message.answer("📜 <b>Перегляд логів</b>\nОберіть дію:", reply_markup=kb, parse_mode="HTML")
 
+# ВАЖЛИВО: Специфічні хендлери (confirm/cancel) мають бути ВИЩЕ за загальний (startswith),
+# щоб вони спрацьовували першими.
+
+@dp.callback_query(F.data == "logs:clear_confirm")
+async def logs_clear_confirm(cb: CallbackQuery):
+    msg = await cb.message.edit_text("⏳ <i>Очищаю логи...</i>", parse_mode="HTML")
+    result = clear_all_logs()
+    await msg.edit_text("✅ <b>Очищення виконано</b>\n<blockquote expandable>" + safe_html(result) + "</blockquote>", parse_mode="HTML")
+    await cb.answer("✅ Готово")
+
+@dp.callback_query(F.data == "logs:clear_cancel")
+async def logs_clear_cancel(cb: CallbackQuery):
+    await cb.message.edit_text("❌ Очищення логів скасовано")
+    await cb.answer()
+
 @dp.callback_query(F.data.startswith("logs:"))
 async def logs_view(cb: CallbackQuery):
     parts = cb.data.split(":")
+    
+    # Меню підтвердження очищення
     if cb.data == "logs:clear":
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Так, очистити все", callback_data="logs:clear_confirm"), InlineKeyboardButton(text="❌ Скасувати", callback_data="logs:clear_cancel")]
@@ -261,6 +278,7 @@ async def logs_view(cb: CallbackQuery):
         await cb.answer()
         return
 
+    # Обробка інших кнопок
     if len(parts) == 2:
         _, option = parts
         if option == "today":
@@ -274,12 +292,17 @@ async def logs_view(cb: CallbackQuery):
                 await cb.message.answer_document(FSInputFile(filename))
                 os.remove(filename)
             return
-        else:
+        elif option.isdigit():  # <--- ДОДАНО ПЕРЕВІРКУ: Тільки якщо це число
             n = int(option)
             cmd = f"journalctl -u {SERVICE_NAME} -n {n} --no-pager"
             title = f"📋 Останні {n} записів"
+        else:
+            # Якщо сюди потрапило щось інше (наприклад, confirm, який не перехопився) - ігноруємо
+            return
+
     elif len(parts) == 3:
         _, filter_level, n = parts
+        if not n.isdigit(): return # Безпека
         n = int(n)
         if filter_level == "errors":
             cmd = f"journalctl -u {SERVICE_NAME} -n 500 --no-pager | grep -E 'ERROR|CRITICAL|Exception|Traceback' | tail -n {n}"
@@ -310,18 +333,6 @@ async def logs_view(cb: CallbackQuery):
         await msg.edit_text(f"{title}\n<blockquote expandable>{safe_html(chunks[0])}</blockquote>", parse_mode="HTML")
         for chunk in chunks[1:]:
             await cb.message.answer(f"<blockquote expandable>{safe_html(chunk)}</blockquote>", parse_mode="HTML")
-    await cb.answer()
-
-@dp.callback_query(F.data == "logs:clear_confirm")
-async def logs_clear_confirm(cb: CallbackQuery):
-    msg = await cb.message.edit_text("⏳ <i>Очищаю логи...</i>", parse_mode="HTML")
-    result = clear_all_logs()
-    await msg.edit_text("✅ <b>Очищення виконано</b>\n<blockquote expandable>" + safe_html(result) + "</blockquote>", parse_mode="HTML")
-    await cb.answer("✅ Готово")
-
-@dp.callback_query(F.data == "logs:clear_cancel")
-async def logs_clear_cancel(cb: CallbackQuery):
-    await cb.message.edit_text("❌ Очищення логів скасовано")
     await cb.answer()
 
 # --- STATUS ---
