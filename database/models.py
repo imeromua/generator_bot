@@ -9,17 +9,19 @@ try:
     import psycopg
     from psycopg import sql
     from psycopg import errors as pg_errors
+    from psycopg_pool import ConnectionPool
 except Exception:  # pragma: no cover
     psycopg = None
     sql = None
     pg_errors = None
+    ConnectionPool = None
 
 
 def _is_postgres() -> bool:
     return (getattr(config, "DB_BACKEND", "sqlite") or "sqlite").strip().lower() == "postgres"
 
 
-_QMARK_PATTERN = re.compile(r"\?(?=(?:[^'\"]|'[^']*'|\"[^\"]*\")*$)")
+_QMARK_PATTERN = re.compile(r"\?(?=(?:[^'\"]]|'[^']*'|\"[^\"]*\")*$)")
 
 
 def _translate_qmarks(query: str) -> str:
@@ -82,8 +84,9 @@ class ConnectionProxy:
     we enable autocommit for Postgres connections in `get_connection()`.
     """
 
-    def __init__(self, conn):
+    def __init__(self, conn, from_pool=False):
         self._conn = conn
+        self._from_pool = from_pool
 
     def execute(self, query, params=None):
         q = _translate_qmarks(str(query))
@@ -101,13 +104,34 @@ class ConnectionProxy:
         return self._conn.rollback()
 
     def close(self):
-        return self._conn.close()
+        """Close connection or return to pool."""
+        if self._from_pool:
+            # Return connection to pool instead of closing
+            try:
+                pool = get_postgres_pool()
+                pool.putconn(self._conn)
+                logging.debug("✅ Connection returned to pool")
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to return connection to pool: {e}")
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+        else:
+            return self._conn.close()
 
     def __enter__(self):
         self._conn.__enter__()
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        # Don't close pooled connections on context exit
+        if self._from_pool:
+            try:
+                pool = get_postgres_pool()
+                pool.putconn(self._conn)
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to return connection to pool: {e}")
         return self._conn.__exit__(exc_type, exc, tb)
 
     def __getattr__(self, item):
@@ -149,7 +173,7 @@ def ensure_postgres_database_exists():
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is not set")
 
-    # FIX #4: Add connection timeout
+    # Check if DB exists using temporary connection
     try:
         with psycopg.connect(dsn, connect_timeout=10):
             return
@@ -190,11 +214,74 @@ def ensure_postgres_database_exists():
         )
 
 
+# Global connection pool
+_pg_pool = None
+
+
+def get_postgres_pool():
+    """Get or create global PostgreSQL connection pool."""
+    global _pg_pool
+    
+    if _pg_pool is None:
+        if not _is_postgres():
+            return None
+        
+        if ConnectionPool is None:
+            raise RuntimeError("psycopg_pool is not installed but DB_BACKEND=postgres")
+        
+        dsn = (getattr(config, "POSTGRES_DSN", "") or "").strip()
+        if not dsn:
+            raise RuntimeError("POSTGRES_DSN is not set")
+        
+        # Ensure database exists before creating pool
+        ensure_postgres_database_exists()
+        
+        # Create connection pool with reasonable defaults
+        min_size = getattr(config, "PG_POOL_MIN_SIZE", 2)
+        max_size = getattr(config, "PG_POOL_MAX_SIZE", 10)
+        timeout = getattr(config, "PG_POOL_TIMEOUT", 30)
+        max_idle = getattr(config, "PG_POOL_MAX_IDLE", 300)  # 5 minutes
+        
+        try:
+            _pg_pool = ConnectionPool(
+                conninfo=dsn,
+                min_size=min_size,
+                max_size=max_size,
+                timeout=timeout,
+                max_idle=max_idle,
+                # Configure connection properties
+                kwargs={
+                    "autocommit": True,  # Match SQLite semantics
+                    "connect_timeout": 10,
+                }
+            )
+            logging.info(f"✅ PostgreSQL connection pool initialized (min={min_size}, max={max_size})")
+        except Exception as e:
+            logging.error(f"❌ Failed to create connection pool: {e}")
+            raise
+    
+    return _pg_pool
+
+
+def close_postgres_pool():
+    """Close PostgreSQL connection pool gracefully."""
+    global _pg_pool
+    
+    if _pg_pool is not None:
+        try:
+            _pg_pool.close()
+            logging.info("✅ PostgreSQL connection pool closed")
+        except Exception as e:
+            logging.warning(f"⚠️ Error closing connection pool: {e}")
+        finally:
+            _pg_pool = None
+
+
 def get_connection():
     """Returns a DB connection.
 
     - sqlite: sqlite3.Connection (with isolation_level=None for autocommit)
-    - postgres: ConnectionProxy (psycopg connection wrapper, autocommit enabled)
+    - postgres: ConnectionProxy (psycopg connection from pool, autocommit enabled)
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
@@ -207,14 +294,14 @@ def get_connection():
             pass
         return conn
 
-    ensure_postgres_database_exists()
-    # FIX #4: Add connection timeout
-    conn = psycopg.connect(getattr(config, "POSTGRES_DSN"), connect_timeout=10)
+    # PostgreSQL: get connection from pool
     try:
-        conn.autocommit = True
-    except Exception:
-        pass
-    return ConnectionProxy(conn)
+        pool = get_postgres_pool()
+        conn = pool.getconn()
+        return ConnectionProxy(conn, from_pool=True)
+    except Exception as e:
+        logging.error(f"❌ Failed to get connection from pool: {e}")
+        raise
 
 
 def begin_transaction(conn):
@@ -398,10 +485,18 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
         "CREATE INDEX IF NOT EXISTS idx_logs_is_synced ON logs(is_synced)",
-        "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",  # NEW: index for emergency generator
-        "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",  # NEW: index for maintenance per generator
+        "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",
+        "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
+    
+    # PostgreSQL-specific optimized indexes
+    if _is_postgres():
+        index_statements.extend([
+            "CREATE INDEX IF NOT EXISTS idx_logs_date_generator ON logs(timestamp, generator_id)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_sync_generator ON logs(is_synced, generator_id) WHERE is_synced = 0",
+        ])
+    
     for stmt in index_statements:
         try:
             c.execute(stmt)
@@ -429,10 +524,10 @@ def init_db():
         ('sync_in_progress', '0'),
 
         # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
-        ('active_generator', 'main'),  # 'main' або 'emergency'
-        ('emergency_total_hours', '0.0'),  # мотогодини аварійного
-        ('emergency_last_oil_change', '0.0'),  # остання заміна мастила (аварійний)
-        ('emergency_last_spark_change', '0.0'),  # остання заміна свічок (аварійний)
+        ('active_generator', 'main'),
+        ('emergency_total_hours', '0.0'),
+        ('emergency_last_oil_change', '0.0'),
+        ('emergency_last_spark_change', '0.0'),
     ]
 
     for k, v in defaults:
@@ -461,4 +556,4 @@ def init_db():
     except Exception as e:
         logging.warning(f"⚠️ Помилка закриття з'єднання: {e}")
 
-    logging.info("✅ База даних ініціалізована (підтримка 2 генераторів + ТО).")
+    logging.info("✅ База даних ініціалізована (підтримка 2 генераторів + ТО + connection pool).")
