@@ -9,8 +9,13 @@ All settings are validated at startup with Pydantic, providing:
 - Clear error messages
 - Nested configuration
 - Backward compatibility
+
+Important:
+- The module must be importable even when required environment variables are not set
+  (e.g. during test collection).
+- Validation of required runtime variables is performed by validate_env().
 """
-import sys
+
 from pathlib import Path
 from typing import Literal, Optional
 from zoneinfo import ZoneInfo
@@ -78,8 +83,11 @@ class SheetsSettings(BaseSettings):
 
     runtime_enabled: bool = Field(default=True, alias="SHEETS_RUNTIME_ENABLED")
     service_account_path: Path = Field(default=Path("service_account.json"), alias="SERVICE_ACCOUNT_PATH")
-    sheet_id_prod: str = Field(alias="SHEET_ID_PROD")
-    sheet_id_test: str = Field(alias="SHEET_ID_TEST")
+
+    # Keep defaults to allow importing module during tests without env.
+    sheet_id_prod: str = Field(default="", alias="SHEET_ID_PROD")
+    sheet_id_test: str = Field(default="", alias="SHEET_ID_TEST")
+
     sheet_name: str = Field(default="ЛЮТИЙ", alias="SHEET_NAME")
     logs_sheet_name: str = Field(default="ПОДІЇ", alias="LOGS_SHEET_NAME")
 
@@ -148,6 +156,7 @@ class MaintenanceSettings(BaseSettings):
     oil_change_interval: int = Field(default=100, gt=0, alias="OIL_CHANGE_INTERVAL")
     spark_change_interval: int = Field(default=100, gt=0, alias="SPARK_CHANGE_INTERVAL")
     maintenance_interval: int = Field(default=300, gt=0, alias="MAINTENANCE_INTERVAL")
+
     # Backward compatibility
     oil_limit: Optional[int] = Field(default=None, gt=0, alias="OIL_LIMIT")
 
@@ -179,11 +188,9 @@ class FuelSettings(BaseSettings):
     @model_validator(mode="after")
     def handle_fuel_aliases(self) -> "FuelSettings":
         """Handle FUEL_RATE alias and set emergency defaults."""
-        # FUEL_RATE is alias for FUEL_CONSUMPTION
         if self.fuel_rate is not None:
             self.fuel_consumption = self.fuel_rate
 
-        # If emergency not set, use main consumption
         if self.emergency_fuel_consumption is None:
             self.emergency_fuel_consumption = self.fuel_consumption
 
@@ -195,7 +202,8 @@ class FuelSettings(BaseSettings):
 class AccessSettings(BaseSettings):
     """Access control configuration."""
 
-    admins: str = Field(alias="ADMINS")  # Comma-separated list
+    # Keep defaults to allow module import during tests.
+    admins: str = Field(default="", alias="ADMINS")  # Comma-separated list
     bot_status: Literal["ON", "OFF"] = Field(default="ON", alias="BOT_STATUS")
     users: str = Field(default="", alias="USERS")  # Comma-separated whitelist
 
@@ -205,7 +213,6 @@ class AccessSettings(BaseSettings):
         """Validate comma-separated ID list."""
         if not v.strip():
             return ""
-        # Try parsing to validate format
         try:
             [int(x.strip()) for x in v.split(",") if x.strip()]
         except ValueError as e:
@@ -235,19 +242,19 @@ class AccessSettings(BaseSettings):
 class Settings(BaseSettings):
     """Main application settings."""
 
-    # Core
-    bot_token: str = Field(alias="BOT_TOKEN")
+    # Core (keep defaults to make module import safe; validate_env() enforces them for runtime)
+    bot_token: str = Field(default="", alias="BOT_TOKEN")
     mode: Literal["TEST", "PROD"] = Field(default="TEST", alias="MODE")
 
     # Nested settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
-    sheets: SheetsSettings = Field(default_factory=lambda: SheetsSettings())
+    sheets: SheetsSettings = Field(default_factory=SheetsSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     schedule: WorkScheduleSettings = Field(default_factory=WorkScheduleSettings)
     maintenance: MaintenanceSettings = Field(default_factory=MaintenanceSettings)
     fuel: FuelSettings = Field(default_factory=FuelSettings)
-    access: AccessSettings = Field(default_factory=lambda: AccessSettings())
+    access: AccessSettings = Field(default_factory=AccessSettings)
 
     @property
     def is_test_mode(self) -> bool:
@@ -266,7 +273,6 @@ class Settings(BaseSettings):
 
     def validate_all(self) -> None:
         """Validate all configuration (for backward compatibility with validate_env())."""
-        # Pydantic already validates on init, but we keep this for compatibility
         if self.is_test_mode:
             print("⚠️  УВАГА: Бот запущено в ТЕСТОВОМУ режимі (SHEET_ID_TEST)")
 
@@ -315,24 +321,23 @@ class Settings(BaseSettings):
 # ==========================================
 # Global settings instance (singleton)
 # ==========================================
+_SETTINGS_LOAD_ERROR: Exception | None = None
 try:
     settings = Settings()
 except Exception as e:
-    print("=" * 60)
-    print("❌ ПОМИЛКА КОНФІГУРАЦІЇ!")
-    print("")
-    print(f"Деталі: {e}")
-    print("")
-    print("Перевірте файл .env та переконайтесь, що всі обов'язкові параметри вказані.")
-    print("Скопіюйте .env.example → .env і заповніть необхідні значення.")
-    print("=" * 60)
-    sys.exit(1)
+    # Do not fail module import (important for test collection).
+    # Runtime should call validate_env() and receive a clear error.
+    _SETTINGS_LOAD_ERROR = e
+    settings = Settings(
+        bot_token="",
+        sheets=SheetsSettings(sheet_id_prod="", sheet_id_test=""),
+        access=AccessSettings(admins=""),
+    )
 
 
 # ==========================================
 # Backward compatibility exports
 # ==========================================
-# These allow existing code to work without changes
 
 # Core
 BOT_TOKEN = settings.bot_token
@@ -393,17 +398,36 @@ REGISTRATION_OPEN = settings.access.registration_open
 WHITELIST = settings.access.get_whitelist()
 
 
-# Backward compatibility function
 def validate_env() -> None:
     """Validate environment configuration (backward compatibility).
 
-    Note: With Pydantic, validation happens automatically on Settings init.
-    This function is kept for compatibility with existing code.
+    Pydantic validates on Settings init, but we additionally enforce required
+    runtime variables here.
     """
+    if _SETTINGS_LOAD_ERROR is not None:
+        raise RuntimeError(f"Configuration error: {_SETTINGS_LOAD_ERROR}") from _SETTINGS_LOAD_ERROR
+
+    errors: list[str] = []
+
+    if not settings.bot_token.strip():
+        errors.append("BOT_TOKEN is required")
+
+    # Sheets IDs are required only when sheets runtime is enabled.
+    if settings.sheets.runtime_enabled:
+        if not settings.sheets.sheet_id_prod.strip():
+            errors.append("SHEET_ID_PROD is required when SHEETS_RUNTIME_ENABLED=true")
+        if not settings.sheets.sheet_id_test.strip():
+            errors.append("SHEET_ID_TEST is required when SHEETS_RUNTIME_ENABLED=true")
+
+    if not settings.access.admins.strip():
+        errors.append("ADMINS is required")
+
+    if errors:
+        raise RuntimeError("Invalid environment:\n- " + "\n- ".join(errors))
+
     settings.validate_all()
 
 
-# Helper to avoid breaking existing utility usage
 def _env_bool(name: str, default: bool = False) -> bool:
     """Legacy helper for boolean env vars (kept for compatibility)."""
     import os

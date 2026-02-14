@@ -112,7 +112,7 @@ jobs:
           ADMINS=123456789
           MODE=TEST
           DB_BACKEND=sqlite
-          SQLITE_PATH=:memory:
+          SQLITE_PATH=/tmp/generator_test.sqlite
           REDIS_ENABLED=0
           SHEETS_RUNTIME_ENABLED=0
           EOF
