@@ -24,6 +24,15 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_SETTINGS_BASE_CONFIG = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+_SETTINGS_NESTED_CONFIG = SettingsConfigDict(
+    env_file=".env",
+    env_nested_delimiter="__",
+    extra="ignore",
+    populate_by_name=True,
+)
+
+
 class DatabaseSettings(BaseSettings):
     """Database configuration."""
 
@@ -59,7 +68,7 @@ class DatabaseSettings(BaseSettings):
                 ) from e
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class RedisSettings(BaseSettings):
@@ -75,7 +84,7 @@ class RedisSettings(BaseSettings):
             raise ValueError("REDIS_URL is required when REDIS_ENABLED=true")
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class SheetsSettings(BaseSettings):
@@ -91,7 +100,7 @@ class SheetsSettings(BaseSettings):
     sheet_name: str = Field(default="ЛЮТИЙ", alias="SHEET_NAME")
     logs_sheet_name: str = Field(default="ПОДІЇ", alias="LOGS_SHEET_NAME")
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class LoggingSettings(BaseSettings):
@@ -108,7 +117,7 @@ class LoggingSettings(BaseSettings):
         """Normalize log level to uppercase."""
         return v.upper()
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class WorkScheduleSettings(BaseSettings):
@@ -147,7 +156,7 @@ class WorkScheduleSettings(BaseSettings):
             raise ValueError(f"Invalid time format: {v}") from e
         return v
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class MaintenanceSettings(BaseSettings):
@@ -167,7 +176,7 @@ class MaintenanceSettings(BaseSettings):
             self.oil_limit = self.oil_change_interval
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class FuelSettings(BaseSettings):
@@ -196,7 +205,7 @@ class FuelSettings(BaseSettings):
 
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class AccessSettings(BaseSettings):
@@ -236,7 +245,7 @@ class AccessSettings(BaseSettings):
         """Check if registration is open."""
         return self.bot_status == "ON"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = _SETTINGS_BASE_CONFIG
 
 
 class Settings(BaseSettings):
@@ -315,7 +324,7 @@ class Settings(BaseSettings):
         print(f"Таймзона: {self.kyiv_tz}")
         print("=" * 60 + "\n")
 
-    model_config = SettingsConfigDict(env_file=".env", env_nested_delimiter="__", extra="ignore")
+    model_config = _SETTINGS_NESTED_CONFIG
 
 
 # ==========================================

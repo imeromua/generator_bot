@@ -8,11 +8,11 @@ Functionality:
 """
 
 import logging
-from io import BytesIO
 from datetime import datetime, timedelta
+from io import BytesIO
 from typing import Optional
 
-from aiogram import Router, F, types
+from aiogram import F, Router, types
 from aiogram.fsm.context import FSMContext
 
 import config
@@ -21,9 +21,10 @@ from keyboards.builders import InlineKeyboardBuilder
 
 try:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.cell.cell import MergedCell
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
+
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False
@@ -35,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 # Maximum reports in archive
 MAX_ARCHIVE_SIZE: int = 10
+
+# NOTE: avoid backslash escapes inside f-string expressions (coverage parser / Python syntax)
+MARK_MAIN = "🔹"
+MARK_EMERGENCY = "🔸"
+MARK_INACTIVE = "▫️"
 
 
 def _generator_keyboard(last_export_time: Optional[str] = None) -> types.InlineKeyboardMarkup:
@@ -200,22 +206,22 @@ async def gen_stats_view(cb: types.CallbackQuery, state: FSMContext) -> None:
 
     # Get fuel balance as float
     try:
-        current_fuel = float(db.get_state_value('current_fuel', '0.0'))
+        current_fuel = float(db.get_state_value("current_fuel", "0.0"))
     except (ValueError, TypeError):
         current_fuel = 0.0
 
     text = (
         f"📊 <b>Статистика генераторів</b>\n"
         f"──────────────────\n\n"
-        f"{'\U0001f539' if active_gen == 'main' else '\u25ab\ufe0f'} <b>Основний генератор</b>\n"
+        f"{MARK_MAIN if active_gen == 'main' else MARK_INACTIVE} <b>Основний генератор</b>\n"
         f"  ⏱ Мотогодини: {main_stats['total_hours']:.1f} год\n"
         f"  🛢 Від заміни мастила: {main_stats['last_oil_change']:.1f} год\n"
         f"  🕯 Від заміни свічок: {main_stats['last_spark_change']:.1f} год\n\n"
-        f"{'\U0001f538' if active_gen == 'emergency' else '\u25ab\ufe0f'} <b>Аварійний генератор</b>\n"
+        f"{MARK_EMERGENCY if active_gen == 'emergency' else MARK_INACTIVE} <b>Аварійний генератор</b>\n"
         f"  ⏱ Мотогодини: {emerg_stats['total_hours']:.1f} год\n"
         f"  🛢 Від заміни мастила: {emerg_stats['last_oil_change']:.1f} год\n"
         f"  🕯 Від заміни свічок: {emerg_stats['last_spark_change']:.1f} год\n\n"
-        f"{'\U0001f539' if active_gen == 'main' else '\U0001f538'} - Активний генератор\n"
+        f"{MARK_MAIN if active_gen == 'main' else MARK_EMERGENCY} - Активний генератор\n"
         f"──────────────────\n"
         f"💡 Спільні параметри:\n"
         f"  ⛽ Залишок палива: {current_fuel:.1f} л\n"
@@ -244,9 +250,10 @@ async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext) -> None:
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
     # Get reports archive from state
-    archive_json = db.get_state_value('reports_archive', '[]')
+    archive_json = db.get_state_value("reports_archive", "[]")
     try:
         import json
+
         archive = json.loads(archive_json)
     except Exception:
         archive = []
@@ -267,7 +274,7 @@ async def gen_archive_view(cb: types.CallbackQuery, state: FSMContext) -> None:
     # real index in archive list (short int, valid for Telegram).
     indexed_archive = list(enumerate(archive))
     for shown_idx, (real_index, report) in enumerate(reversed(indexed_archive), 1):
-        timestamp = report.get('timestamp', '')
+        timestamp = report.get("timestamp", "")
 
         # Format date
         try:
@@ -303,9 +310,10 @@ async def gen_get_report(cb: types.CallbackQuery, state: FSMContext) -> None:
         return await cb.answer("❌ Невірний індекс звіту", show_alert=True)
 
     # Read actual archive from DB
-    archive_json = db.get_state_value('reports_archive', '[]')
+    archive_json = db.get_state_value("reports_archive", "[]")
     try:
         import json
+
         archive = json.loads(archive_json)
     except Exception:
         archive = []
@@ -314,7 +322,7 @@ async def gen_get_report(cb: types.CallbackQuery, state: FSMContext) -> None:
         return await cb.answer("❌ Звіт не знайдено в архіві", show_alert=True)
 
     report = archive[idx]
-    file_id = report.get('file_id')
+    file_id = report.get("file_id")
 
     if not file_id:
         return await cb.answer("❌ У записі відсутній file_id", show_alert=True)
@@ -329,7 +337,7 @@ async def gen_get_report(cb: types.CallbackQuery, state: FSMContext) -> None:
         await cb.message.answer_document(
             document=file_id,
             caption="📊 Звіт аварійного генератора з архіву",
-            reply_markup=_document_keyboard()
+            reply_markup=_document_keyboard(),
         )
     except Exception as e:
         logger.error(f"Помилка отримання звіту з архіву: {e}")
@@ -350,7 +358,7 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext) -> None:
     if not EXCEL_AVAILABLE:
         return await cb.answer(
             "❌ Модуль openpyxl не встановлено.\nВиконайте: pip install openpyxl",
-            show_alert=True
+            show_alert=True,
         )
 
     await cb.answer("📤 Генерую звіт...")
@@ -366,29 +374,29 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext) -> None:
         header_font = Font(bold=True, color="FFFFFF")
 
         # Title
-        ws['A1'] = "Звіт: Аварійний генератор"
-        ws['A1'].font = Font(bold=True, size=14)
-        ws.merge_cells('A1:D1')
+        ws["A1"] = "Звіт: Аварійний генератор"
+        ws["A1"].font = Font(bold=True, size=14)
+        ws.merge_cells("A1:D1")
 
         # General information
         stats = db.get_generator_stats("emergency")
         st = db.get_state()
 
-        ws['A3'] = "Мотогодини:"
-        ws['B3'] = f"{stats['total_hours']:.2f} год"
+        ws["A3"] = "Мотогодини:"
+        ws["B3"] = f"{stats['total_hours']:.2f} год"
 
-        ws['A4'] = "Від заміни мастила:"
-        ws['B4'] = f"{stats['last_oil_change']:.2f} год"
+        ws["A4"] = "Від заміни мастила:"
+        ws["B4"] = f"{stats['last_oil_change']:.2f} год"
 
-        ws['A5'] = "Від заміни свічок:"
-        ws['B5'] = f"{stats['last_spark_change']:.2f} год"
+        ws["A5"] = "Від заміни свічок:"
+        ws["B5"] = f"{stats['last_spark_change']:.2f} год"
 
-        ws['A6'] = "Поточний залишок палива:"
-        ws['B6'] = f"{float(st.get('current_fuel', 0.0)):.2f} л"
+        ws["A6"] = "Поточний залишок палива:"
+        ws["B6"] = f"{float(st.get('current_fuel', 0.0)):.2f} л"
 
         # Events table
-        ws['A8'] = "Журнал подій (аварійний генератор)"
-        ws['A8'].font = Font(bold=True, size=12)
+        ws["A8"] = "Журнал подій (аварійний генератор)"
+        ws["A8"].font = Font(bold=True, size=12)
 
         # Table headers
         headers = ["Дата/Час", "Подія", "Користувач", "Значення", "Водій"]
@@ -434,12 +442,10 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext) -> None:
         # Auto-width columns (safely handle MergedCell)
         for col_idx in range(1, 6):  # Columns A-E
             max_length = 0
-            # Get column letter safely through function
             column_letter = get_column_letter(col_idx)
 
             for row_idx in range(1, ws.max_row + 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
-                # Skip merged cells
                 if MergedCell and isinstance(cell, MergedCell):
                     continue
                 try:
@@ -468,30 +474,30 @@ async def gen_export_excel(cb: types.CallbackQuery, state: FSMContext) -> None:
         sent_msg = await cb.message.answer_document(
             document=file,
             caption=f"📊 Звіт аварійного генератора\n🗓 Період: {start_date} — {end_date}\n📁 {len(logs)} подій",
-            reply_markup=_document_keyboard()
+            reply_markup=_document_keyboard(),
         )
 
         # Save to archive
         import json
-        archive_json = db.get_state_value('reports_archive', '[]')
+
+        archive_json = db.get_state_value("reports_archive", "[]")
         try:
             archive = json.loads(archive_json)
         except Exception:
             archive = []
 
-        # Add new report
-        archive.append({
-            'file_id': sent_msg.document.file_id,
-            'timestamp': datetime.now(config.KYIV).isoformat(),
-            'filename': filename
-        })
+        archive.append(
+            {
+                "file_id": sent_msg.document.file_id,
+                "timestamp": datetime.now(config.KYIV).isoformat(),
+                "filename": filename,
+            }
+        )
 
-        # Limit archive size
         if len(archive) > MAX_ARCHIVE_SIZE:
             archive = archive[-MAX_ARCHIVE_SIZE:]
 
-        # Save back to DB
-        db.set_state_value('reports_archive', json.dumps(archive))
+        db.set_state_value("reports_archive", json.dumps(archive))
 
     except Exception as e:
         logger.error(f"Помилка експорту Excel: {e}", exc_info=True)
