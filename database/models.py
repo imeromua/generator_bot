@@ -2,6 +2,7 @@
 
 Supports both SQLite and PostgreSQL backends with connection pooling.
 """
+
 import logging
 import re
 import sqlite3
@@ -91,226 +92,124 @@ class CursorProxy:
     """
 
     def __init__(self, cur: CursorType) -> None:
-        """Initialize cursor proxy.
-
-        Args:
-            cur: Underlying database cursor
-        """
         self._cur = cur
 
     def execute(self, query: str, params: Optional[tuple[Any, ...] | list[Any]] = None) -> CursorType:
-        """Execute query with parameter translation.
-
-        Args:
-            query: SQL query string
-            params: Query parameters (optional)
-
-        Returns:
-            Cursor object
-        """
         q = _translate_qmarks(str(query))
         if params is None:
             return self._cur.execute(q)
         return self._cur.execute(q, params)
 
     def executemany(self, query: str, params_seq: list[tuple[Any, ...]] | list[list[Any]]) -> CursorType:
-        """Execute query multiple times with different parameters.
-
-        Args:
-            query: SQL query string
-            params_seq: Sequence of parameter tuples/lists
-
-        Returns:
-            Cursor object
-        """
         q = _translate_qmarks(str(query))
         return self._cur.executemany(q, params_seq)
 
     def __getattr__(self, item: str) -> Any:
-        """Delegate attribute access to underlying cursor.
-
-        Args:
-            item: Attribute name
-
-        Returns:
-            Attribute value from underlying cursor
-        """
         return getattr(self._cur, item)
 
 
 class ConnectionProxy:
-    """Small adapter around psycopg connection to support sqlite-style SQL.
+    """Adapter around psycopg connection to support sqlite-style SQL.
 
-    IMPORTANT (Postgres): psycopg connections are transactional by default.
-    Many project modules use `with get_connection() as conn:` and do not call `commit()`.
-
-    To keep sqlite-like semantics and avoid silent rollbacks on context exit,
-    we enable autocommit for Postgres connections in `get_connection()`.
-
-    For pooled connections we MUST NOT close them on context exit, only return
-    them to the pool. Closing pooled connections leads to "the connection is
-    closed" errors when the pool reuses them.
+    psycopg connections are transactional by default; to match sqlite-like
+    behaviour, we enable autocommit when creating the pool.
     """
 
-    def __init__(self, conn: ConnectionType, from_pool: bool = False) -> None:
-        """Initialize connection proxy.
-
-        Args:
-            conn: Underlying database connection
-            from_pool: Whether connection is from a pool
-        """
+    def __init__(self, conn: ConnectionType) -> None:
         self._conn = conn
-        self._from_pool = from_pool
 
     def execute(self, query: str, params: Optional[tuple[Any, ...] | list[Any]] = None) -> CursorType:
-        """Execute query directly on connection.
-
-        Args:
-            query: SQL query string
-            params: Query parameters (optional)
-
-        Returns:
-            Cursor object
-        """
         q = _translate_qmarks(str(query))
         if params is None:
             return self._conn.execute(q)
         return self._conn.execute(q, params)
 
     def cursor(self, *args: Any, **kwargs: Any) -> CursorProxy:
-        """Create a new cursor wrapped in CursorProxy.
-
-        Args:
-            *args: Positional arguments for cursor creation
-            **kwargs: Keyword arguments for cursor creation
-
-        Returns:
-            CursorProxy wrapping the new cursor
-        """
         return CursorProxy(self._conn.cursor(*args, **kwargs))
 
     def commit(self) -> None:
-        """Commit current transaction."""
         return self._conn.commit()
 
     def rollback(self) -> None:
-        """Rollback current transaction."""
         return self._conn.rollback()
 
     def close(self) -> None:
-        """Close connection or return to pool."""
-        if self._from_pool:
-            # Return connection to pool instead of closing
-            try:
-                pool = get_postgres_pool()
-                if pool is not None:
-                    pool.putconn(self._conn)
-                    logging.debug("✅ Connection returned to pool")
-            except Exception as e:
-                logging.warning(f"⚠️ Failed to return connection to pool: {e}")
-                try:
-                    self._conn.close()
-                except Exception:
-                    pass
-        else:
-            return self._conn.close()
+        return self._conn.close()
 
     def __enter__(self) -> "ConnectionProxy":
-        """Support `with get_connection() as conn:` pattern.
-
-        For pooled connections we do NOT delegate to the underlying
-        connection's context manager (it would close the connection).
-        We simply return self and let __exit__ handle pool return.
-
-        Returns:
-            Self for context manager
-        """
-        if not self._from_pool:
-            # For non-pooled connections (SQLite or direct psycopg) preserve
-            # default context manager behaviour.
-            self._conn.__enter__()
+        self._conn.__enter__()
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
-        """On context exit, either close connection or return to pool.
-
-        For pooled connections: return to pool and DO NOT close.
-        For non-pooled connections: delegate to underlying __exit__.
-
-        Args:
-            exc_type: Exception type (if any)
-            exc: Exception instance (if any)
-            tb: Traceback (if any)
-
-        Returns:
-            False to not suppress exceptions
-        """
-        if self._from_pool:
-            try:
-                pool = get_postgres_pool()
-                if pool is not None:
-                    pool.putconn(self._conn)
-                    logging.debug("✅ Connection returned to pool from context manager")
-            except Exception as e:
-                logging.warning(f"⚠️ Failed to return connection to pool: {e}")
-                try:
-                    self._conn.close()
-                except Exception:
-                    pass
-            # Do not suppress exceptions
-            return False
-        # Non-pooled connection: preserve original behaviour
         return self._conn.__exit__(exc_type, exc, tb)
 
     def __getattr__(self, item: str) -> Any:
-        """Delegate attribute access to underlying connection.
-
-        Args:
-            item: Attribute name
-
-        Returns:
-            Attribute value from underlying connection
-        """
         return getattr(self._conn, item)
 
 
-def _parse_dbname_from_dsn(dsn: str) -> str:
-    """Extract database name from PostgreSQL DSN.
+class PooledConnectionProxy(ConnectionProxy):
+    """Connection proxy backed by psycopg_pool.ConnectionPool.
 
-    Args:
-        dsn: PostgreSQL connection string
-
-    Returns:
-        Database name
+    Uses pool.connection() context manager under the hood and returns
+    connections to the pool on close()/__exit__.
     """
+
+    def __init__(self, pool: "ConnectionPool") -> None:  # type: ignore[name-defined]
+        self._pool = pool
+        self._ctx = pool.connection()
+        self._closed = False
+
+        conn = self._ctx.__enter__()
+        # Best-effort: ensure autocommit (pool kwargs should already set it).
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+
+        super().__init__(conn)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._ctx.__exit__(None, None, None)
+        except Exception:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+    def __enter__(self) -> "PooledConnectionProxy":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+        try:
+            if self._closed:
+                return False
+            self._closed = True
+            return bool(self._ctx.__exit__(exc_type, exc, tb))
+        except Exception:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            return False
+
+
+def _parse_dbname_from_dsn(dsn: str) -> str:
     u: ParseResult = urlparse(dsn)
     path = (u.path or "").lstrip("/")
     return (path or "").strip()
 
 
 def _build_admin_dsn_from_app_dsn(app_dsn: str) -> str:
-    """Build admin DSN from application DSN (connects to 'postgres' db).
-
-    Args:
-        app_dsn: Application PostgreSQL DSN
-
-    Returns:
-        Admin DSN pointing to 'postgres' database
-    """
     u: ParseResult = urlparse(app_dsn)
     new_u = u._replace(path="/postgres")
     return urlunparse(new_u)
 
 
 def _postgres_db_missing(exc: Exception) -> bool:
-    """Check if exception indicates missing database.
-
-    Args:
-        exc: Exception to check
-
-    Returns:
-        True if database doesn't exist
-    """
     try:
         if pg_errors and isinstance(exc, pg_errors.InvalidCatalogName):
             return True
@@ -322,11 +221,6 @@ def _postgres_db_missing(exc: Exception) -> bool:
 
 
 def ensure_postgres_database_exists() -> None:
-    """Ensure target Postgres database exists; create it if missing.
-
-    Raises:
-        RuntimeError: If psycopg not installed or DSN not configured
-    """
     if not _is_postgres():
         return
 
@@ -337,7 +231,6 @@ def ensure_postgres_database_exists() -> None:
     if not dsn:
         raise RuntimeError("POSTGRES_DSN is not set")
 
-    # Check if DB exists using temporary connection
     try:
         with psycopg.connect(dsn, connect_timeout=10):
             return
@@ -383,14 +276,7 @@ _pg_pool: Optional["ConnectionPool"] = None  # type: ignore
 
 
 def get_postgres_pool() -> Optional["ConnectionPool"]:  # type: ignore
-    """Get or create global PostgreSQL connection pool.
-
-    Returns:
-        ConnectionPool instance or None if not using PostgreSQL
-
-    Raises:
-        RuntimeError: If pool cannot be created
-    """
+    """Get or create global PostgreSQL connection pool."""
     global _pg_pool
 
     if _pg_pool is None:
@@ -404,14 +290,12 @@ def get_postgres_pool() -> Optional["ConnectionPool"]:  # type: ignore
         if not dsn:
             raise RuntimeError("POSTGRES_DSN is not set")
 
-        # Ensure database exists before creating pool
         ensure_postgres_database_exists()
 
-        # Create connection pool with reasonable defaults
         min_size = getattr(config, "PG_POOL_MIN_SIZE", 2)
         max_size = getattr(config, "PG_POOL_MAX_SIZE", 10)
         timeout = getattr(config, "PG_POOL_TIMEOUT", 30)
-        max_idle = getattr(config, "PG_POOL_MAX_IDLE", 300)  # 5 minutes
+        max_idle = getattr(config, "PG_POOL_MAX_IDLE", 300)
 
         try:
             _pg_pool = ConnectionPool(
@@ -420,9 +304,8 @@ def get_postgres_pool() -> Optional["ConnectionPool"]:  # type: ignore
                 max_size=max_size,
                 timeout=timeout,
                 max_idle=max_idle,
-                # Configure connection properties
                 kwargs={
-                    "autocommit": True,  # Match SQLite semantics
+                    "autocommit": True,
                     "connect_timeout": 10,
                 },
             )
@@ -448,20 +331,15 @@ def close_postgres_pool() -> None:
             _pg_pool = None
 
 
-def get_connection() -> Union[sqlite3.Connection, ConnectionProxy]:
+def get_connection() -> Union[sqlite3.Connection, ConnectionProxy, PooledConnectionProxy]:
     """Returns a DB connection.
 
     Returns:
         - sqlite: sqlite3.Connection (with isolation_level=None for autocommit)
-        - postgres: ConnectionProxy (psycopg connection from pool, autocommit enabled)
-
-    Raises:
-        Exception: If connection cannot be established
+        - postgres: PooledConnectionProxy (psycopg connection from pool)
     """
     if not _is_postgres():
         db_path = (getattr(config, "SQLITE_PATH", "generator.db") or "generator.db").strip()
-        # FIX #1: Use isolation_level=None (autocommit) for SQLite to avoid locking issues
-        # This provides similar semantics to Postgres autocommit mode
         conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10, isolation_level=None)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
@@ -469,51 +347,30 @@ def get_connection() -> Union[sqlite3.Connection, ConnectionProxy]:
             pass
         return conn
 
-    # PostgreSQL: get connection from pool
-    try:
-        pool = get_postgres_pool()
-        if pool is None:
-            raise RuntimeError("Failed to get connection pool")
-        conn = pool.getconn()
-        return ConnectionProxy(conn, from_pool=True)
-    except Exception as e:
-        logging.error(f"❌ Failed to get connection from pool: {e}")
-        raise
+    pool = get_postgres_pool()
+    if pool is None:
+        raise RuntimeError("Failed to get connection pool")
+    return PooledConnectionProxy(pool)
 
 
 def begin_transaction(conn: Union[sqlite3.Connection, ConnectionProxy]) -> None:
-    """Start a transaction in a backend-appropriate way.
-
-    FIX #2: Use SERIALIZABLE isolation level for Postgres to prevent phantom reads
-    and ensure proper CAS (Compare-And-Set) operations in concurrent scenarios.
-
-    Args:
-        conn: Database connection
-    """
+    """Start a transaction in a backend-appropriate way."""
     if _is_postgres():
         try:
-            # Use SERIALIZABLE for strongest isolation guarantees
             conn.execute("BEGIN ISOLATION LEVEL SERIALIZABLE")
         except Exception as e:
-            # FIX #3: Log errors instead of silent failures
             logging.warning(f"Failed to begin transaction: {e}")
             pass
     else:
-        # SQLite: BEGIN IMMEDIATE prevents deadlocks in concurrent writes
         try:
             conn.execute("BEGIN IMMEDIATE")
         except Exception as e:
-            # FIX #3: Log errors instead of silent failures
             logging.warning(f"Failed to begin transaction: {e}")
             pass
 
 
 def init_db() -> None:
-    """Створення схеми (ідемпотентно) + seed generator_state defaults.
-
-    Підтримка двох генераторів: основного та аварійного.
-    Додано generator_id в logs та maintenance для розділення записів.
-    """
+    """Створення схеми (ідемпотентно) + seed generator_state defaults."""
     conn = get_connection()
     c = conn.cursor()
 
@@ -588,7 +445,6 @@ def init_db() -> None:
             timestamp TEXT NOT NULL
         )''')
 
-    # Міграція: додавання receipt_number (старий код)
     try:
         c.execute("SELECT receipt_number FROM logs LIMIT 1")
         logging.info("✅ Колонка receipt_number вже існує")
@@ -612,7 +468,6 @@ def init_db() -> None:
             else:
                 logging.warning(f"⚠️ Не вдалося додати receipt_number: {e}")
 
-    # Міграція: додавання generator_id в logs (нове для підтримки аварійного генератора)
     try:
         c.execute("SELECT generator_id FROM logs LIMIT 1")
         logging.info("✅ Колонка generator_id в logs вже існує")
@@ -634,9 +489,8 @@ def init_db() -> None:
             if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
                 logging.info("✅ Колонка generator_id в logs вже існує")
             else:
-                logging.warning(f"⚠️ Не вдалося додати generator_id: {e}")
+                logging.warning(f"⚠️ Не вдалося додати generator_id в logs: {e}")
 
-    # Міграція: додавання generator_id в maintenance (нове для ТО по генераторах)
     try:
         c.execute("SELECT generator_id FROM maintenance LIMIT 1")
         logging.info("✅ Колонка generator_id в maintenance вже існує")
@@ -660,7 +514,6 @@ def init_db() -> None:
             else:
                 logging.warning(f"⚠️ Не вдалося додати generator_id в maintenance: {e}")
 
-    # Індекси для оптимізації пошуку (створюються ПІСЛЯ міграцій!)
     index_statements = [
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type)",
@@ -670,7 +523,6 @@ def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
     ]
 
-    # PostgreSQL-specific optimized indexes
     if _is_postgres():
         index_statements.extend(
             [
@@ -685,9 +537,7 @@ def init_db() -> None:
         except Exception as e:
             logging.warning(f"⚠️ Не вдалося створити індекс ({stmt}): {e}")
 
-    # Дефолтні значення generator_state
     defaults: list[tuple[str, str]] = [
-        # Основні параметри
         ("total_hours", "0.0"),
         ("last_oil_change", "0.0"),
         ("last_spark_change", "0.0"),
@@ -704,14 +554,12 @@ def init_db() -> None:
         ("sheet_offline", "0"),
         ("sheet_offline_since_ts", ""),
         ("sync_in_progress", "0"),
-        # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
         ("active_generator", "main"),
         ("emergency_total_hours", "0.0"),
         ("emergency_last_oil_change", "0.0"),
         ("emergency_last_spark_change", "0.0"),
     ]
 
-    # Backend-specific INSERT syntax (no fallback needed with direct syntax)
     if _is_postgres():
         for k, v in defaults:
             try:
@@ -722,7 +570,6 @@ def init_db() -> None:
             except Exception as e:
                 logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e}")
     else:
-        # SQLite with autocommit: use INSERT OR IGNORE directly
         for k, v in defaults:
             try:
                 c.execute("INSERT OR IGNORE INTO generator_state (key, value) VALUES (?, ?)", (k, v))
