@@ -12,6 +12,8 @@ import config
 from database.models import get_connection, begin_transaction, ConnectionProxy, _is_postgres
 from database.api.state import _conn_get_state_float, _conn_get_state_value, _conn_set_state_value
 
+logger = logging.getLogger(__name__)
+
 
 def get_today_completed_shifts(generator_id: Optional[str] = None) -> set[str]:
     """Отримує завершені зміни за сьогодні.
@@ -194,8 +196,8 @@ def add_log(
         if close_conn:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"add_log: failed to close connection: {e}", exc_info=True)
 
 
 def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict[str, any]:
@@ -230,8 +232,8 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict[str, 
                 st_time = _conn_get_state_value(conn, "last_start_time", "")
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as re:
+                    logger.debug(f"try_start_shift: rollback failed (already_on): {re}", exc_info=True)
                 return {"ok": False, "reason": "already_on", "active_shift": active, "start_time": st_time}
 
             _conn_set_state_value(conn, "active_shift", event_type)
@@ -253,8 +255,8 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict[str, 
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as re:
+                logger.debug(f"try_start_shift: rollback failed: {re}", exc_info=True)
             logging.error(f"try_start_shift error: {e}", exc_info=True)
             return {"ok": False, "reason": "error"}
 
@@ -292,16 +294,16 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict[st
             if status != "ON":
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as re:
+                    logger.debug(f"try_stop_shift: rollback failed (already_off): {re}", exc_info=True)
                 return {"ok": False, "reason": "already_off"}
 
             active = _conn_get_state_value(conn, "active_shift", "none")
             if active != expected_start:
                 try:
                     conn.rollback()
-                except Exception:
-                    pass
+                except Exception as re:
+                    logger.debug(f"try_stop_shift: rollback failed (wrong_shift): {re}", exc_info=True)
                 return {"ok": False, "reason": "wrong_shift", "active_shift": active}
 
             # Отримуємо поточний генератор
@@ -421,8 +423,8 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict[st
         except Exception as e:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as re:
+                logger.debug(f"try_stop_shift: rollback failed: {re}", exc_info=True)
             logging.error(f"try_stop_shift error: {e}", exc_info=True)
             return {"ok": False, "reason": "error"}
 

@@ -11,6 +11,8 @@ from urllib.parse import ParseResult, urlparse, urlunparse
 
 import config
 
+logger = logging.getLogger(__name__)
+
 try:
     import psycopg
     from psycopg import errors as pg_errors
@@ -163,8 +165,8 @@ class PooledConnectionProxy(ConnectionProxy):
         # Best-effort: ensure autocommit (pool kwargs should already set it).
         try:
             conn.autocommit = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to set autocommit on pooled connection: {e}", exc_info=True)
 
         super().__init__(conn)
 
@@ -174,11 +176,12 @@ class PooledConnectionProxy(ConnectionProxy):
         self._closed = True
         try:
             self._ctx.__exit__(None, None, None)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Pool ctx exit failed in close(): {e}", exc_info=True)
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as ce:
+                logger.debug(f"Underlying conn close failed: {ce}", exc_info=True)
 
     def __enter__(self) -> "PooledConnectionProxy":
         return self
@@ -189,11 +192,12 @@ class PooledConnectionProxy(ConnectionProxy):
                 return False
             self._closed = True
             return bool(self._ctx.__exit__(exc_type, exc, tb))
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Pool ctx exit failed in __exit__(): {e}", exc_info=True)
             try:
                 self._conn.close()
-            except Exception:
-                pass
+            except Exception as ce:
+                logger.debug(f"Underlying conn close failed in __exit__(): {ce}", exc_info=True)
             return False
 
 
@@ -213,8 +217,8 @@ def _postgres_db_missing(exc: Exception) -> bool:
     try:
         if pg_errors and isinstance(exc, pg_errors.InvalidCatalogName):
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to check pg_errors.InvalidCatalogName: {e}", exc_info=True)
 
     msg = str(exc).lower()
     return ("does not exist" in msg) and ("database" in msg)
@@ -251,19 +255,16 @@ def ensure_postgres_database_exists() -> None:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
             logging.info(f"✅ Postgres DB created: {dbname}")
         except Exception as ce:
-            try:
-                if pg_errors and isinstance(ce, pg_errors.DuplicateDatabase):
-                    pass
-                else:
-                    if "already exists" not in str(ce).lower():
-                        raise
-            except Exception:
+            # Idempotent: ignore if DB already exists
+            if (pg_errors and isinstance(ce, pg_errors.DuplicateDatabase)) or ("already exists" in str(ce).lower()):
+                logging.info(f"✅ Postgres DB already exists: {dbname}")
+            else:
                 raise
         finally:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to close admin connection: {e}", exc_info=True)
     except Exception as e:
         raise RuntimeError(
             f"Failed to create Postgres database '{dbname}'. "
@@ -343,8 +344,8 @@ def get_connection() -> Union[sqlite3.Connection, ConnectionProxy, PooledConnect
         conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10, isolation_level=None)
         try:
             conn.execute("PRAGMA foreign_keys=ON")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to set PRAGMA foreign_keys=ON: {e}", exc_info=True)
         return conn
 
     pool = get_postgres_pool()
@@ -360,13 +361,13 @@ def begin_transaction(conn: Union[sqlite3.Connection, ConnectionProxy]) -> None:
             conn.execute("BEGIN ISOLATION LEVEL SERIALIZABLE")
         except Exception as e:
             logging.warning(f"Failed to begin transaction: {e}")
-            pass
+            return
     else:
         try:
             conn.execute("BEGIN IMMEDIATE")
         except Exception as e:
             logging.warning(f"Failed to begin transaction: {e}")
-            pass
+            return
 
 
 def init_db() -> None:

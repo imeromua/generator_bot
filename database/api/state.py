@@ -2,12 +2,16 @@
 
 Manages generator state, sheet connectivity, and dual generator support.
 """
+
+import logging
 import time
 from typing import Any, Optional, Union
 import sqlite3
 
 import config
 from database.models import get_connection, ConnectionProxy
+
+logger = logging.getLogger(__name__)
 
 _OFFLINE_THRESHOLD_SECONDS = 24 * 60 * 60
 
@@ -106,9 +110,9 @@ def _conn_set_state_value(
             """,
             (str(key), str(value)),
         )
-    except Exception:
-        # не валимо критичні операції, якщо state тимчасово битий
-        pass
+    except Exception as e:
+        # Best-effort: не валимо критичні операції, якщо state тимчасово битий
+        logger.debug(f"_conn_set_state_value failed for key={key}: {e}", exc_info=True)
 
 
 def _conn_get_state_float(
@@ -157,8 +161,8 @@ def sheet_mark_ok(ts: Optional[int] = None) -> None:
         set_state("sheet_first_fail_ts", "")
         set_state("sheet_offline", "0")
         set_state("sheet_offline_since_ts", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"sheet_mark_ok failed: {e}", exc_info=True)
 
 
 def sheet_mark_fail(ts: Optional[int] = None) -> None:
@@ -172,8 +176,8 @@ def sheet_mark_fail(ts: Optional[int] = None) -> None:
         first = str(get_state_value("sheet_first_fail_ts", "") or "").strip()
         if not first:
             set_state("sheet_first_fail_ts", str(now_ts))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"sheet_mark_fail failed: {e}", exc_info=True)
 
 
 def sheet_force_offline(ts: Optional[int] = None) -> None:
@@ -193,8 +197,8 @@ def sheet_force_offline(ts: Optional[int] = None) -> None:
 
         set_state("sheet_offline", "1")
         set_state("sheet_offline_since_ts", str(now_ts))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"sheet_force_offline failed: {e}", exc_info=True)
 
 
 def sheet_force_online(ts: Optional[int] = None) -> None:
@@ -210,8 +214,8 @@ def sheet_force_online(ts: Optional[int] = None) -> None:
         set_state("sheet_offline", "0")
         set_state("sheet_offline_since_ts", "")
         set_state("sheet_first_fail_ts", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"sheet_force_online failed: {e}", exc_info=True)
 
 
 def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:

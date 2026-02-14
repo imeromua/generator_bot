@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional
 
 import config
-from database.models import get_connection
+from database.models import get_connection, _is_postgres
 from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
 
 logger = logging.getLogger(__name__)
@@ -213,8 +213,8 @@ def _restore_generator_state() -> None:
                     delta = (end_ts - start_ts).total_seconds() / 3600.0
                     running_hours += delta
                     running_fuel -= delta * rate
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to restore shift delta for {shift}: {e}", exc_info=True)
                 del active_shifts[shift]
         elif event == "total_hours_set":
             try:
@@ -240,8 +240,8 @@ def _restore_generator_state() -> None:
     except Exception as e:
         try:
             conn.rollback()
-        except Exception:
-            pass
+        except Exception as re:
+            logger.debug(f"Rollback failed in _restore_generator_state: {re}", exc_info=True)
         logger.error(f"❌ Помилка запису стану генератора: {e}")
     finally:
         conn.close()
@@ -304,6 +304,18 @@ def _import_main_sheet_data(all_values: list[list[str]]) -> None:
     conn = get_connection()
     all_drivers: set[str] = set()
     all_personnel: set[str] = set()
+
+    def _insert_driver(conn_: sqlite3.Connection, name: str) -> None:
+        if _is_postgres():
+            conn_.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (name,))
+        else:
+            conn_.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (name,))
+
+    def _insert_personnel(conn_: sqlite3.Connection, name: str) -> None:
+        if _is_postgres():
+            conn_.execute("INSERT INTO personnel_names (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (name,))
+        else:
+            conn_.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (name,))
 
     for row in data_rows:
         driver_ref = _get(row, idx_drivers_dict).strip()
@@ -375,27 +387,15 @@ def _import_main_sheet_data(all_values: list[list[str]]) -> None:
 
     for d in all_drivers:
         try:
-            conn.execute("INSERT OR IGNORE INTO drivers (name) VALUES (?)", (d,))
-        except Exception:
-            try:
-                conn.execute("INSERT INTO drivers (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (d,))
-            except Exception:
-                try:
-                    conn.execute("INSERT INTO drivers (name) VALUES (?)", (d,))
-                except Exception:
-                    pass
+            _insert_driver(conn, d)
+        except Exception as e:
+            logger.warning(f"Failed to insert driver '{d}': {e}")
 
     for p in all_personnel:
         try:
-            conn.execute("INSERT OR IGNORE INTO personnel_names (name) VALUES (?)", (p,))
-        except Exception:
-            try:
-                conn.execute("INSERT INTO personnel_names (name) VALUES (?) ON CONFLICT(name) DO NOTHING", (p,))
-            except Exception:
-                try:
-                    conn.execute("INSERT INTO personnel_names (name) VALUES (?)", (p,))
-                except Exception:
-                    pass
+            _insert_personnel(conn, p)
+        except Exception as e:
+            logger.warning(f"Failed to insert personnel '{p}': {e}")
 
     conn.commit()
     conn.close()
