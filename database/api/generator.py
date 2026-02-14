@@ -24,20 +24,19 @@ logger = logging.getLogger(__name__)
 GeneratorType = Literal["main", "emergency"]
 
 
-def _upsert_query(table: str, key_col: str, val_col: str) -> str:
-    """Generate upsert SQL for SQLite or PostgreSQL.
+def _upsert_generator_state_query() -> str:
+    """Upsert into generator_state(key,value) for SQLite/PostgreSQL.
 
-    SQLite: INSERT OR REPLACE
-    PostgreSQL: INSERT ... ON CONFLICT ... DO UPDATE
+    NOTE: Query is intentionally constant (no dynamic table/column names) to
+    avoid unsafe string-based SQL construction.
     """
     if _is_postgres():
-        return f"""
-            INSERT INTO {table} ({key_col}, {val_col})
+        return """
+            INSERT INTO generator_state (key, value)
             VALUES (?, ?)
-            ON CONFLICT ({key_col}) DO UPDATE SET {val_col} = EXCLUDED.{val_col}
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """
-    else:
-        return f"INSERT OR REPLACE INTO {table} ({key_col}, {val_col}) VALUES (?, ?)"
+    return "INSERT OR REPLACE INTO generator_state (key, value) VALUES (?, ?)"
 
 
 def get_active_generator() -> GeneratorType:
@@ -95,9 +94,9 @@ def switch_generator(target: GeneratorType, admin_name: str = "admin") -> tuple[
             gen_name = "Основний" if target == "main" else "Аварійний"
             return False, f"ℹ️ {gen_name} генератор вже активний"
 
-        # Перемикаємо (використовуємо upsert для сумісності з PostgreSQL)
-        upsert = _upsert_query("generator_state", "key", "value")
-        cur.execute(upsert, ('active_generator', target))
+        # Перемикаємо (upsert для сумісності з PostgreSQL)
+        upsert = _upsert_generator_state_query()
+        cur.execute(upsert, ("active_generator", target))
         conn.commit()
 
         # Логуємо подію
@@ -174,7 +173,7 @@ def update_generator_hours(gen_type: GeneratorType, hours_delta: float) -> None:
     current = float(row[0]) if row and row[0] else 0.0
 
     new_value = current + hours_delta
-    upsert = _upsert_query("generator_state", "key", "value")
+    upsert = _upsert_generator_state_query()
     cur.execute(upsert, (key, str(new_value)))
     conn.commit()
     conn.close()
@@ -191,7 +190,7 @@ def set_generator_hours(gen_type: GeneratorType, hours: float) -> None:
     """
     conn = get_connection()
     key = "total_hours" if gen_type == "main" else "emergency_total_hours"
-    upsert = _upsert_query("generator_state", "key", "value")
+    upsert = _upsert_generator_state_query()
     conn.execute(upsert, (key, str(hours)))
     conn.commit()
     conn.close()
@@ -218,7 +217,7 @@ def update_generator_maintenance(
     else:
         key = f"emergency_last_{maintenance_type}_change"
 
-    upsert = _upsert_query("generator_state", "key", "value")
+    upsert = _upsert_generator_state_query()
     conn.execute(upsert, (key, str(new_hours)))
     conn.commit()
     conn.close()

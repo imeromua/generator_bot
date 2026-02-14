@@ -2,13 +2,14 @@
 
 Manages generator operation logs, shift tracking, and fuel consumption.
 """
+
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Union
 import sqlite3
 
 import config
-from database.models import get_connection, begin_transaction, ConnectionProxy
+from database.models import get_connection, begin_transaction, ConnectionProxy, _is_postgres
 from database.api.state import _conn_get_state_float, _conn_get_state_value, _conn_set_state_value
 
 
@@ -448,13 +449,32 @@ def mark_synced(ids: list[int]) -> None:
     """
     if not ids:
         return
+
+    safe_ids: list[int] = []
+    for x in ids:
+        try:
+            safe_ids.append(int(x))
+        except Exception:
+            continue
+
+    if not safe_ids:
+        return
+
     try:
         with get_connection() as conn:
-            placeholders = ",".join("?" * len(ids))
-            conn.execute(
-                f"UPDATE logs SET is_synced = 1 WHERE id IN ({placeholders})",
-                ids,
-            )
+            if _is_postgres():
+                # Postgres: avoid dynamic IN (...) SQL entirely
+                conn.execute(
+                    "UPDATE logs SET is_synced = 1 WHERE id = ANY(?)",
+                    (safe_ids,),
+                )
+            else:
+                # SQLite: dynamic placeholders are safe because values are parameterized
+                placeholders = ",".join("?" * len(safe_ids))
+                conn.execute(
+                    f"UPDATE logs SET is_synced = 1 WHERE id IN ({placeholders})",  # nosec B608
+                    safe_ids,
+                )
     except Exception as e:
         logging.error(f"Помилка позначення синхронізованих: {e}")
 
