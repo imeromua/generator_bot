@@ -8,6 +8,7 @@ Provides admin interface for:
 - Database backups
 - Git updates and service restarts
 """
+
 import logging
 import subprocess
 import asyncio
@@ -15,8 +16,9 @@ import os
 import re
 import html
 import sys
+import shlex
 from datetime import datetime
-from typing import Any
+from typing import Any, Sequence
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -84,37 +86,68 @@ class PipState(StatesGroup):
 
 
 # --- ДОПОМІЖНІ ФУНКЦІЇ ---
-def run_command(cmd: str, timeout: int = 30) -> str:
-    """Execute shell command with timeout and error handling.
+def _truncate_output(output: str) -> str:
+    output = (output or "").strip()
+    if len(output) > MAX_OUTPUT_SIZE:
+        return output[:MAX_OUTPUT_SIZE] + "\n\n... (обрізано, занадто довгий вивід)"
+    return output
+
+
+def _format_cmd(args: Sequence[str]) -> str:
+    """Return shell-like command string for display (no execution)."""
+    return " ".join(shlex.quote(a) for a in args)
+
+
+def run_command(cmd: str | Sequence[str], timeout: int = 30, cwd: str | None = None) -> str:
+    """Execute command safely (shell=False) with timeout and error handling.
+
+    Accepts either a list of arguments (preferred) or a simple string command.
+    If a string command contains shell operators (&&, |, >, <, ;, backticks, newline),
+    it is blocked to avoid command injection.
 
     Args:
-        cmd: Shell command to execute
+        cmd: Command as args list/tuple, or simple string command
         timeout: Timeout in seconds
+        cwd: Optional working directory
 
     Returns:
-        Command output (truncated if too long)
+        Command output (truncated if too long), or formatted error
     """
+    if isinstance(cmd, str):
+        if any(op in cmd for op in ("&&", "|", ">", "<", ";", "`", "\n")):
+            return "❌ Команда заблокована (небезпечні shell-оператори)"
+        try:
+            args = shlex.split(cmd)
+        except ValueError as e:
+            return f"❌ Помилка парсингу команди: {e}"
+    else:
+        args = list(cmd)
+
+    if not args:
+        return "❌ Порожня команда"
+
     try:
-        result = subprocess.check_output(
-            cmd,
-            shell=True,
+        result = subprocess.run(
+            args,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=timeout
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+            check=False,
         )
-        output = result.decode('utf-8').strip()
+        output = _truncate_output(result.stdout or "")
 
-        # Truncate if too long
-        if len(output) > MAX_OUTPUT_SIZE:
-            output = output[:MAX_OUTPUT_SIZE] + "\n\n... (обрізано, занадто довгий вивід)"
+        if result.returncode != 0:
+            if not output:
+                output = "(no output)"
+            return f"❌ Error (exit code {result.returncode}):\n{output}"
 
-        return output
+        return output or "✅ OK"
     except subprocess.TimeoutExpired:
         return f"⏱ Timeout ({timeout}s)"
-    except subprocess.CalledProcessError as e:
-        error_output = e.output.decode('utf-8')
-        if len(error_output) > MAX_OUTPUT_SIZE:
-            error_output = error_output[:MAX_OUTPUT_SIZE] + "\n\n... (обрізано)"
-        return f"❌ Error (exit code {e.returncode}):\n{error_output}"
+    except FileNotFoundError:
+        return f"❌ Команда не знайдена: {args[0]}"
     except Exception as e:
         return f"❌ Exception: {str(e)}"
 
@@ -210,15 +243,15 @@ def clear_all_logs() -> str:
     Returns:
         Combined output from all clear operations
     """
-    commands = []
+    commands: list[Sequence[str]] = []
     if os.path.exists(LOG_FILE):
-        commands.append(f"rm -f {LOG_FILE}")
-    commands.append("sudo journalctl --rotate")
-    commands.append("sudo journalctl --vacuum-time=1s")
+        commands.append(["rm", "-f", LOG_FILE])
+    commands.append(["sudo", "journalctl", "--rotate"])
+    commands.append(["sudo", "journalctl", "--vacuum-time=1s"])
 
     outputs = []
-    for cmd in commands:
-        outputs.append(f"$ {cmd}\n{run_command(cmd, timeout=60)}")
+    for args in commands:
+        outputs.append(f"$ {_format_cmd(args)}\n{run_command(args, timeout=60)}")
     return "\n\n".join(outputs)
 
 
@@ -236,8 +269,9 @@ def get_db_status() -> str:
     if not m:
         return "❌ Неправильний формат DSN"
     user, _password, host, port, dbname = m.groups()
-    cmd = f"pg_isready -h {host} -p {port} -U {user} -d {dbname}"
-    output = run_command(cmd, timeout=10)
+
+    cmd_args = ["pg_isready", "-h", host, "-p", port, "-U", user, "-d", dbname]
+    output = run_command(cmd_args, timeout=10)
     healthy = "accepting connections" in output
     icon = "🟢" if healthy else "🔴"
     return (
@@ -258,8 +292,9 @@ def get_redis_status() -> str:
     redis_url = env.get("REDIS_URL", "redis://localhost:6379/0")
     if not redis_enabled:
         return "ℹ️ Redis вимкнено"
-    cmd = f"redis-cli -u '{redis_url}' PING"
-    output = run_command(cmd, timeout=5)
+
+    cmd_args = ["redis-cli", "-u", redis_url, "PING"]
+    output = run_command(cmd_args, timeout=5)
     healthy = "PONG" in output
     icon = "🟢" if healthy else "🔴"
     return (
