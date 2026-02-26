@@ -375,10 +375,12 @@ your-domain.com {
 {
     "generator": "main",
     "stats": {
+        "oil_needed": 43.7,
+        "spark_needed": 93.7,
+        "maintenance_needed": 143.7,
         "total_hours": 156.3,
-        "hours_until_oil": 43.7,
-        "hours_until_spark": 93.7,
-        "hours_until_maintenance": 143.7,
+        "last_oil": 56.3,
+        "last_spark": 6.3,
         "oil_interval": 100,
         "spark_interval": 100,
         "maintenance_interval": 300

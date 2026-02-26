@@ -35,6 +35,11 @@ import database.db_api as db  # noqa: E402
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Константи
+# ---------------------------------------------------------------------------
+MAX_EVENTS_LIMIT = 100
+
+# ---------------------------------------------------------------------------
 # Telegram WebApp — валідація initData
 # ---------------------------------------------------------------------------
 
@@ -197,7 +202,7 @@ async def api_schedule(request: web.Request) -> web.Response:
 async def api_events(request: web.Request) -> web.Response:
     """GET /api/events?limit=20 — останні події."""
     try:
-        limit = min(int(request.query.get("limit", "20")), 100)
+        limit = min(int(request.query.get("limit", "20")), MAX_EVENTS_LIMIT)
     except (ValueError, TypeError):
         limit = 20
 

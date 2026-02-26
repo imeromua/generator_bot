@@ -33,7 +33,7 @@ const API = (() => {
 
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
-            throw new Error(body.error || `HTTP ${resp.status}`);
+            throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
         }
 
         return resp.json();
