@@ -276,6 +276,15 @@ OIL_CHANGE_HOURS=50.0      # Інтервал заміни мастила
 SPARK_CHANGE_HOURS=100.0   # Інтервал заміни свічок
 ```
 
+#### Mini App (Telegram WebApp):
+```env
+WEBAPP_URL=https://your-domain.com   # Публічний URL (HTTPS)
+WEBAPP_HOST=0.0.0.0                  # Адреса прослуховування
+WEBAPP_PORT=8080                     # Порт веб-сервера
+```
+
+> Детальна документація по впровадженню Mini App: [`docs/MINIAPP.md`](docs/MINIAPP.md)
+
 ### 2) `service_account.json`
 
 1. Створіть Service Account в [Google Cloud Console](https://console.cloud.google.com/)
@@ -349,6 +358,19 @@ SPARK_CHANGE_HOURS=100.0   # Інтервал заміни свічок
 ---
 
 ## 🐛 Виправлені критичні помилки
+
+### Версія 2.3 (26.02.2026)
+- ✅ **Mini App (Telegram WebApp)**: повнофункціональний веб-інтерфейс
+  - Дашборд з індикатором стану генератора та прогрес-баром палива
+  - Графік відключень з навігацією по датах та тижневим оглядом
+  - Журнал подій з іконками та метаданими
+  - Стан ТО з прогрес-барами та історією
+  - Адаптація під тему Telegram (світла/темна)
+  - Автооновлення дашборда кожні 30 секунд
+  - Аутентифікація через Telegram WebApp initData (HMAC-SHA256)
+- ✅ REST API для Mini App (`webapp_server.py`, aiohttp)
+- ✅ Інтеграція веб-сервера в `main.py` (запуск разом з ботом)
+- ✅ Документація з впровадження Mini App ([`docs/MINIAPP.md`](docs/MINIAPP.md))
 
 ### Версія 2.2 (13.02.2026)
 - ✅ Підтримка двох генераторів (основний + аварійний)
