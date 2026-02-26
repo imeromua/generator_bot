@@ -70,11 +70,10 @@ def main_dashboard(role, active_shift, completed_shifts):
     kb.append([InlineKeyboardButton(text="📨 Повідомлення", callback_data="view_messages")])
 
     # Mini App button (якщо WEBAPP_URL налаштовано)
-    webapp_url = getattr(config, "WEBAPP_URL", "")
-    if webapp_url:
+    if config.WEBAPP_URL:
         kb.append([InlineKeyboardButton(
             text="📱 Mini App",
-            web_app=WebAppInfo(url=webapp_url),
+            web_app=WebAppInfo(url=config.WEBAPP_URL),
         )])
 
     if role == 'admin':

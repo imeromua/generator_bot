@@ -335,7 +335,7 @@ class FuelSettings:
     def __init__(self, *, fuel_consumption=0.8, fuel_rate=None,
                  emergency_fuel_consumption=0.9,
                  fuel_alert_threshold=40.0):
-        # fuel_rate — аліас для fuel_consumption (зворотна сумісність)
+        # fuel_rate -- аліас для fuel_consumption (зворотна сумісність)
         if fuel_rate is not None:
             self.fuel_consumption = fuel_rate
         else:
@@ -354,11 +354,21 @@ class AccessSettings:
 
     def get_admin_ids(self):
         """Парсить рядок з ID адмінів у список int."""
-        return [int(x.strip()) for x in self.admins.split(",") if x.strip().isdigit()]
+        result = []
+        for x in self.admins.split(","):
+            x = x.strip()
+            if x.isdigit():
+                result.append(int(x))
+        return result
 
     def get_whitelist(self):
         """Парсить рядок з ID користувачів у список int."""
-        return [int(x.strip()) for x in self.users.split(",") if x.strip().isdigit()]
+        result = []
+        for x in self.users.split(","):
+            x = x.strip()
+            if x.isdigit():
+                result.append(int(x))
+        return result
 
     @property
     def registration_open(self):
