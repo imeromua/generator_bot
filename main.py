@@ -15,6 +15,7 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
+from aiohttp import web
 from redis.asyncio import Redis
 
 # Імпорт конфігурації (спочатку, щоб отримати параметри логування)
@@ -79,6 +80,7 @@ from handlers.admin_parts import dtek_parser
 
 # Імпорт сервісів
 from services.scheduler import scheduler_loop
+from handlers.webapp_api import create_webapp_app
 
 
 async def _run_blocking(func, *args, **kwargs):
@@ -245,6 +247,7 @@ async def run_polling_once(dp: Dispatcher):
     """Один цикл запуску бота."""
     bot = None
     tasks = []
+    webapp_runner = None
 
     try:
         logger.info(f"🗄 DB backend: {getattr(config, 'DB_BACKEND', 'sqlite')} ({db_models.db_target_info()})")
@@ -261,12 +264,30 @@ async def run_polling_once(dp: Dispatcher):
         logger.info("🚀 Запуск фонових процесів...")
         tasks.append(asyncio.create_task(_run_background_forever("scheduler", scheduler_loop, bot), name="scheduler"))
 
+        # Запуск Mini App веб-сервера
+        if config.WEBAPP_URL:
+            try:
+                webapp_app = create_webapp_app()
+                webapp_runner = web.AppRunner(webapp_app)
+                await webapp_runner.setup()
+                site = web.TCPSite(
+                    webapp_runner,
+                    host=config.WEBAPP_HOST,
+                    port=config.WEBAPP_PORT,
+                )
+                await site.start()
+                logger.info(f"📱 Mini App веб-сервер запущено: http://{config.WEBAPP_HOST}:{config.WEBAPP_PORT}")
+            except Exception as e:
+                logger.error(f"❌ Помилка запуску Mini App веб-сервера: {e}")
+
         logger.info("=" * 50)
         logger.info("🚀 БОТ ЗАПУЩЕНО!")
         logger.info(f"📅 Режим: {'TEST' if config.IS_TEST_MODE else 'PROD'}")
         logger.info(f"📊 Таблиця: {config.SHEET_NAME}")
         logger.info(f"👥 Адмінів: {len(config.ADMIN_IDS)}")
         logger.info(f"🔓 Реєстрація: {'Відкрита' if config.REGISTRATION_OPEN else 'Закрита'}")
+        if config.WEBAPP_URL:
+            logger.info(f"📱 Mini App: {config.WEBAPP_URL}")
         logger.info("=" * 50)
         logger.info("Натисніть Ctrl+C для зупинки.")
 
@@ -283,6 +304,14 @@ async def run_polling_once(dp: Dispatcher):
         )
 
     finally:
+        # Зупинка Mini App веб-сервера
+        if webapp_runner:
+            try:
+                await webapp_runner.cleanup()
+                logger.info("✅ Mini App веб-сервер зупинено")
+            except Exception:
+                pass
+
         for t in tasks:
             try:
                 t.cancel()
