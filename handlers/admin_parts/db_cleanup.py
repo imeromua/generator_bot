@@ -56,6 +56,7 @@ async def db_cleanup_execute(cb: types.CallbackQuery):
             conn.execute("DELETE FROM users")
             conn.execute("DELETE FROM maintenance")
             conn.execute("DELETE FROM user_ui")
+            conn.execute("DELETE FROM user_messages")
 
             # Скидаємо generator_state до дефолтів
             conn.execute("UPDATE generator_state SET value = '0.0' WHERE key = 'total_hours'")
@@ -68,6 +69,11 @@ async def db_cleanup_execute(cb: types.CallbackQuery):
             conn.execute("UPDATE generator_state SET value = '0.0' WHERE key = 'current_fuel'")
             conn.execute("UPDATE generator_state SET value = '' WHERE key = 'fuel_ordered_date'")
             conn.execute("UPDATE generator_state SET value = '' WHERE key = 'stop_reminder_sent_date'")
+            # Скидаємо стан аварійного генератора
+            conn.execute("UPDATE generator_state SET value = 'main' WHERE key = 'active_generator'")
+            conn.execute("UPDATE generator_state SET value = '0.0' WHERE key = 'emergency_total_hours'")
+            conn.execute("UPDATE generator_state SET value = '0.0' WHERE key = 'emergency_last_oil_change'")
+            conn.execute("UPDATE generator_state SET value = '0.0' WHERE key = 'emergency_last_spark_change'")
 
         logger.info(f"✅ БД очищено адміном {cb.from_user.id}")
 

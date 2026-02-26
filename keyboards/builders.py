@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import database.db_api as db
 from datetime import datetime
@@ -68,6 +68,13 @@ def main_dashboard(role, active_shift, completed_shifts):
     kb.append([InlineKeyboardButton(text="🕘 Останні події", callback_data="events_last")])
     # FIX #25: Add Messages button
     kb.append([InlineKeyboardButton(text="📨 Повідомлення", callback_data="view_messages")])
+
+    # Mini App button (якщо WEBAPP_URL налаштовано)
+    if config.WEBAPP_URL:
+        kb.append([InlineKeyboardButton(
+            text="📱 Mini App",
+            web_app=WebAppInfo(url=config.WEBAPP_URL),
+        )])
 
     if role == 'admin':
         kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home", style="primary")])

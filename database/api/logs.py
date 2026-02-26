@@ -295,12 +295,8 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
                         if dt.time() < datetime.strptime(start_time_str, "%H:%M").time():
                             start_dt = start_dt - timedelta(days=1)
                     
-                    # FIX #18: Use localize() for proper timezone handling (DST aware)
-                    try:
-                        start_dt = config.KYIV.localize(start_dt)
-                    except AttributeError:
-                        # Fallback if KYIV doesn't have localize (not pytz)
-                        start_dt = start_dt.replace(tzinfo=config.KYIV)
+                    # Use replace() for ZoneInfo (localize is pytz-only)
+                    start_dt = start_dt.replace(tzinfo=config.KYIV)
                     
                     # Calculate duration
                     duration_hours = (dt - start_dt).total_seconds() / 3600.0
