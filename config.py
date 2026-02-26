@@ -245,6 +245,12 @@ if __name__ == "__main__":
 
 # --- MINI APP (Telegram WebApp) ---
 WEBAPP_URL = (os.getenv("WEBAPP_URL", "") or "").strip()
+WEBAPP_HOST = (os.getenv("WEBAPP_HOST", "0.0.0.0") or "0.0.0.0").strip()
+
+try:
+    WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", "8080"))
+except ValueError:
+    WEBAPP_PORT = 8080
 
 
 # =====================================================================
