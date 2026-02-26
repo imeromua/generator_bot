@@ -405,9 +405,9 @@
 
         const stats = data.stats;
         const items = [
-            { label: "🛢 Заміна мастила", key: "hours_until_oil", interval: "oil_interval" },
-            { label: "🕯 Заміна свічок", key: "hours_until_spark", interval: "spark_interval" },
-            { label: "🔧 Планове ТО", key: "hours_until_maintenance", interval: "maintenance_interval" },
+            { label: "🛢 Заміна мастила", key: "oil_needed", intervalKey: "oil_interval" },
+            { label: "🕯 Заміна свічок", key: "spark_needed", intervalKey: "spark_interval" },
+            { label: "🔧 Планове ТО", key: "maintenance_needed", intervalKey: "maintenance_interval" },
         ];
 
         const totalHours = stats.total_hours || 0;
@@ -421,7 +421,7 @@
             const remaining = stats[item.key];
             if (remaining === undefined || remaining === null) return "";
 
-            const interval = stats[item.interval] || 100;
+            const interval = stats[item.intervalKey] || 100;
             const pct = Math.max(0, Math.min(100, (remaining / interval) * 100));
             let cls = "ok";
             if (pct < 15) cls = "danger";

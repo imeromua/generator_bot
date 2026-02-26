@@ -236,6 +236,11 @@ async def api_maintenance(request: web.Request) -> web.Response:
                 "admin": row[4] if len(row) > 4 else "",
             })
 
+        # Додаємо інтервали ТО з конфігурації для прогрес-барів
+        stats["oil_interval"] = config.OIL_CHANGE_INTERVAL
+        stats["spark_interval"] = config.SPARK_CHANGE_INTERVAL
+        stats["maintenance_interval"] = config.MAINTENANCE_INTERVAL
+
         return web.json_response({
             "generator": active_gen,
             "stats": stats,
