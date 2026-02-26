@@ -133,21 +133,30 @@ async def api_status(request: web.Request) -> web.Response:
         estimated_fuel = current_fuel
 
         if status == "ON":
-            start_str = state.get("start_time", "")
-            if start_str:
+            start_time_str = state.get("start_time", "")
+            start_date_str = state.get("start_date", "")
+            if start_time_str:
                 try:
-                    start_dt = datetime.fromisoformat(start_str)
+                    if start_date_str:
+                        start_dt = datetime.strptime(
+                            f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M"
+                        )
+                    else:
+                        start_dt = datetime.strptime(
+                            f"{datetime.now(config.KYIV).strftime('%Y-%m-%d')} {start_time_str}",
+                            "%Y-%m-%d %H:%M",
+                        )
+                    start_dt = start_dt.replace(tzinfo=config.KYIV)
                     now = datetime.now(config.KYIV)
-                    if start_dt.tzinfo is None:
-                        from zoneinfo import ZoneInfo
-                        start_dt = start_dt.replace(tzinfo=ZoneInfo("Europe/Kyiv"))
                     elapsed_h = (now - start_dt).total_seconds() / 3600
-                    estimated_fuel = max(0, current_fuel - elapsed_h * fuel_rate)
+                    if 0 < elapsed_h < 24:
+                        estimated_fuel = max(0, current_fuel - elapsed_h * fuel_rate)
                 except (ValueError, TypeError):
                     pass
 
-        # Мотогодини
-        total_hours = float(state.get("total_hours", 0))
+        # Мотогодини — використовуємо дані активного генератора
+        gen_stats = db.get_generator_stats(active_gen)
+        total_hours = float(gen_stats.get("total_hours", 0))
 
         payload = {
             "status": status,
