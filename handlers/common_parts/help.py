@@ -1,5 +1,6 @@
 from aiogram import Router, types
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 
 import config
 import database.db_api as db
@@ -125,13 +126,16 @@ async def cmd_privacy(msg: types.Message):
 
 # FIX: Add callback handler for "home" button to return to dashboard
 @router.callback_query(lambda cb: cb.data == "home")
-async def cb_home(cb: types.CallbackQuery):
+async def cb_home(cb: types.CallbackQuery, state: FSMContext):
     """Повернення на головну сторінку (дашборд)."""
+    await state.clear()
     from handlers.common_parts.dash import show_dash
+    from handlers.user_parts.utils import ensure_user
     
-    user_id = cb.from_user.id
-    user_info = db.get_user(user_id)
-    user_name = user_info[1] if user_info else cb.from_user.full_name
+    user = ensure_user(cb.from_user.id, cb.from_user.first_name)
+    if not user:
+        await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
+        return
     
-    await show_dash(cb.message, user_id, user_name)
+    await show_dash(cb.message, user[0], user[1])
     await cb.answer()
