@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>⚡ Генератор — Mini App</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Навігація -->
+        <nav class="tabs" id="tabs">
+            <button class="tab active" data-tab="dashboard">🏠 Головна</button>
+            <button class="tab" data-tab="schedule">📅 Графік</button>
+            <button class="tab" data-tab="events">🕘 Події</button>
+            <button class="tab" data-tab="maintenance">🔧 ТО</button>
+        </nav>
+
+        <!-- Статус-панель -->
+        <div class="status-bar" id="status-bar">
+            <span id="gen-indicator" class="indicator off"></span>
+            <span id="gen-label">Завантаження...</span>
+        </div>
+
+        <!-- Вкладка: Головна -->
+        <section class="page active" id="page-dashboard">
+            <!-- Статус генератора -->
+            <div class="card" id="card-status">
+                <div class="card-header">
+                    <h2>⚡ Стан генератора</h2>
+                    <span class="badge" id="badge-status">—</span>
+                </div>
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <span class="stat-label">Генератор</span>
+                            <span class="stat-value" id="stat-generator">—</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Активна зміна</span>
+                            <span class="stat-value" id="stat-shift">—</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">⛽ Паливо</span>
+                            <span class="stat-value" id="stat-fuel">— л</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">⏱ Мотогодини</span>
+                            <span class="stat-value" id="stat-hours">— год</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🔥 Витрата</span>
+                            <span class="stat-value" id="stat-rate">— л/год</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🕐 Робочий час</span>
+                            <span class="stat-value" id="stat-work-hours">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Зміни сьогодні -->
+            <div class="card" id="card-shifts">
+                <div class="card-header">
+                    <h2>📋 Зміни сьогодні</h2>
+                </div>
+                <div class="card-body">
+                    <div class="shifts-grid" id="shifts-grid">
+                        <div class="shift-item" id="shift-m">
+                            <span class="shift-icon">🌅</span>
+                            <span class="shift-name">Зміна 1</span>
+                            <span class="shift-status" id="shift-m-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-d">
+                            <span class="shift-icon">☀️</span>
+                            <span class="shift-name">Зміна 2</span>
+                            <span class="shift-status" id="shift-d-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-e">
+                            <span class="shift-icon">🌙</span>
+                            <span class="shift-name">Зміна 3</span>
+                            <span class="shift-status" id="shift-e-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-x">
+                            <span class="shift-icon">⚡</span>
+                            <span class="shift-name">Екстра</span>
+                            <span class="shift-status" id="shift-x-status">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Тижневий графік (мініатюра) -->
+            <div class="card" id="card-week">
+                <div class="card-header">
+                    <h2>📅 Тиждень</h2>
+                </div>
+                <div class="card-body">
+                    <div class="week-grid" id="week-grid">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Графік -->
+        <section class="page" id="page-schedule">
+            <div class="card">
+                <div class="card-header">
+                    <h2>📅 Графік відключень</h2>
+                    <div class="date-nav">
+                        <button class="btn-icon" id="sched-prev">◀</button>
+                        <span id="sched-date-label">—</span>
+                        <button class="btn-icon" id="sched-next">▶</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="legend">
+                        <span class="legend-item"><span class="dot green"></span> Є світло</span>
+                        <span class="legend-item"><span class="dot red"></span> Відключення</span>
+                    </div>
+                    <div class="schedule-grid" id="schedule-grid">
+                        <!-- Заповнюється JS -->
+                    </div>
+                    <div class="schedule-summary" id="schedule-summary"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Події -->
+        <section class="page" id="page-events">
+            <div class="card">
+                <div class="card-header">
+                    <h2>🕘 Останні події</h2>
+                    <button class="btn-sm" id="events-refresh">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="events-list" id="events-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Технічне обслуговування -->
+        <section class="page" id="page-maintenance">
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔧 Технічне обслуговування</h2>
+                </div>
+                <div class="card-body">
+                    <div class="mnt-stats" id="mnt-stats">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2>📜 Історія ТО</h2>
+                </div>
+                <div class="card-body">
+                    <div class="mnt-history" id="mnt-history">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Завантаження -->
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Завантаження даних...</p>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

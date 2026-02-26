@@ -1,0 +1,657 @@
+/* ====================================================================
+   Generator Bot — Mini App Styles
+   Telegram WebApp-сумісний дизайн, адаптивний, українська мова
+   ==================================================================== */
+
+/* --- CSS Variables (Telegram theme integration) --- */
+:root {
+    --tg-bg: var(--tg-theme-bg-color, #ffffff);
+    --tg-text: var(--tg-theme-text-color, #1a1a2e);
+    --tg-hint: var(--tg-theme-hint-color, #7a7a8c);
+    --tg-link: var(--tg-theme-link-color, #2481cc);
+    --tg-btn: var(--tg-theme-button-color, #2481cc);
+    --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --tg-secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f5);
+    --tg-header-bg: var(--tg-theme-header-bg-color, #2481cc);
+    --tg-section-bg: var(--tg-theme-section-bg-color, #ffffff);
+
+    --card-radius: 14px;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --gap: 12px;
+    --transition: 0.2s ease;
+
+    --color-on: #27ae60;
+    --color-off: #95a5a6;
+    --color-danger: #e74c3c;
+    --color-warn: #f39c12;
+    --color-info: #3498db;
+}
+
+/* --- Reset & Base --- */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: var(--tg-secondary-bg);
+    color: var(--tg-text);
+    font-size: 15px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+}
+
+#app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 0 var(--gap) var(--gap);
+    padding-bottom: calc(var(--gap) + env(safe-area-inset-bottom, 0px));
+}
+
+/* --- Tabs Navigation --- */
+.tabs {
+    display: flex;
+    gap: 2px;
+    background: var(--tg-section-bg);
+    border-radius: 12px;
+    padding: 4px;
+    margin: var(--gap) 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--card-shadow);
+}
+
+.tab {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--tg-hint);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 4px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all var(--transition);
+    white-space: nowrap;
+}
+
+.tab.active {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+    box-shadow: 0 2px 8px rgba(36,129,204,0.3);
+}
+
+.tab:not(.active):active {
+    background: var(--tg-secondary-bg);
+}
+
+/* --- Status Bar --- */
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--tg-section-bg);
+    border-radius: 10px;
+    margin-bottom: var(--gap);
+    box-shadow: var(--card-shadow);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.indicator.on {
+    background: var(--color-on);
+    box-shadow: 0 0 8px rgba(39,174,96,0.5);
+    animation: pulse 2s infinite;
+}
+
+.indicator.off {
+    background: var(--color-off);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* --- Cards --- */
+.card {
+    background: var(--tg-section-bg);
+    border-radius: var(--card-radius);
+    box-shadow: var(--card-shadow);
+    margin-bottom: var(--gap);
+    overflow: hidden;
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+}
+
+.card-header h2 {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.card-body {
+    padding: 0 16px 16px;
+}
+
+/* --- Badge --- */
+.badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge.on {
+    background: rgba(39,174,96,0.15);
+    color: var(--color-on);
+}
+
+.badge.off {
+    background: rgba(149,165,166,0.15);
+    color: var(--color-off);
+}
+
+/* --- Stats Grid --- */
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.stat {
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 11px;
+    color: var(--tg-hint);
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.stat-value.fuel-low {
+    color: var(--color-danger);
+}
+
+.stat-value.fuel-warn {
+    color: var(--color-warn);
+}
+
+/* --- Shifts Grid --- */
+.shifts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.shift-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+    padding: 10px 12px;
+    transition: background var(--transition);
+}
+
+.shift-item.completed {
+    background: rgba(39,174,96,0.1);
+}
+
+.shift-item.active {
+    background: rgba(36,129,204,0.1);
+    box-shadow: inset 0 0 0 2px var(--tg-btn);
+}
+
+.shift-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.shift-name {
+    font-size: 12px;
+    font-weight: 600;
+    flex: 1;
+}
+
+.shift-status {
+    font-size: 11px;
+    color: var(--tg-hint);
+    font-weight: 500;
+}
+
+.shift-status.done {
+    color: var(--color-on);
+}
+
+.shift-status.running {
+    color: var(--tg-btn);
+    font-weight: 700;
+}
+
+/* --- Week Grid --- */
+.week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+}
+
+.week-day {
+    text-align: center;
+    padding: 8px 2px;
+    border-radius: 8px;
+    background: var(--tg-secondary-bg);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.week-day:hover {
+    transform: translateY(-1px);
+}
+
+.week-day.today {
+    box-shadow: inset 0 0 0 2px var(--tg-btn);
+}
+
+.week-day-name {
+    display: block;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--tg-hint);
+}
+
+.week-day-num {
+    display: block;
+    font-size: 14px;
+    font-weight: 700;
+    margin: 2px 0;
+}
+
+.week-day-off {
+    display: block;
+    font-size: 10px;
+    color: var(--color-danger);
+    font-weight: 600;
+}
+
+/* --- Schedule Grid --- */
+.date-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#sched-date-label {
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 100px;
+    text-align: center;
+}
+
+.btn-icon {
+    border: none;
+    background: var(--tg-secondary-bg);
+    color: var(--tg-text);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background var(--transition);
+}
+
+.btn-icon:active {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+}
+
+.legend {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.dot.green { background: var(--color-on); }
+.dot.red { background: var(--color-danger); }
+
+.schedule-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+.sched-hour {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all var(--transition);
+}
+
+.sched-hour.on {
+    background: rgba(39,174,96,0.08);
+    color: var(--color-on);
+}
+
+.sched-hour.off {
+    background: rgba(231,76,60,0.08);
+    color: var(--color-danger);
+}
+
+.sched-hour-icon {
+    font-size: 11px;
+}
+
+.schedule-summary {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--tg-hint);
+    text-align: center;
+}
+
+/* --- Events List --- */
+.btn-sm {
+    border: none;
+    background: var(--tg-secondary-bg);
+    color: var(--tg-text);
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background var(--transition);
+}
+
+.btn-sm:active {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+}
+
+.events-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.event-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+}
+
+.event-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+    width: 28px;
+    text-align: center;
+}
+
+.event-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.event-type {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.event-meta {
+    font-size: 11px;
+    color: var(--tg-hint);
+    margin-top: 2px;
+}
+
+.event-value {
+    font-size: 12px;
+    color: var(--tg-text);
+    margin-top: 2px;
+}
+
+/* --- Maintenance --- */
+.mnt-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mnt-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+}
+
+.mnt-item-label {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.mnt-item-value {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.mnt-item-value.ok {
+    color: var(--color-on);
+}
+
+.mnt-item-value.warn {
+    color: var(--color-warn);
+}
+
+.mnt-item-value.danger {
+    color: var(--color-danger);
+}
+
+.mnt-progress {
+    width: 100%;
+    height: 6px;
+    background: var(--tg-secondary-bg);
+    border-radius: 3px;
+    margin-top: 6px;
+    overflow: hidden;
+}
+
+.mnt-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.mnt-progress-bar.ok { background: var(--color-on); }
+.mnt-progress-bar.warn { background: var(--color-warn); }
+.mnt-progress-bar.danger { background: var(--color-danger); }
+
+.mnt-history {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.mnt-history-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+}
+
+.mnt-history-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.mnt-history-body {
+    flex: 1;
+}
+
+.mnt-history-type {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.mnt-history-meta {
+    font-size: 11px;
+    color: var(--tg-hint);
+    margin-top: 2px;
+}
+
+/* --- Empty state --- */
+.empty-state {
+    text-align: center;
+    padding: 24px;
+    color: var(--tg-hint);
+    font-size: 14px;
+}
+
+.empty-state-icon {
+    font-size: 40px;
+    margin-bottom: 8px;
+}
+
+/* --- Loader --- */
+.loader {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--tg-bg);
+    z-index: 1000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+}
+
+.loader.visible {
+    display: flex;
+}
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--tg-secondary-bg);
+    border-top-color: var(--tg-btn);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* --- Pages --- */
+.page {
+    display: none;
+}
+
+.page.active {
+    display: block;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Error toast --- */
+.toast {
+    position: fixed;
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--color-danger);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 2000;
+    box-shadow: 0 4px 16px rgba(231,76,60,0.4);
+    animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s;
+    opacity: 0;
+    animation-fill-mode: forwards;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* --- Scrollbar --- */
+::-webkit-scrollbar {
+    width: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--tg-hint);
+    border-radius: 2px;
+}
