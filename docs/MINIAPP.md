@@ -1,217 +1,368 @@
-# 📱 Mini App — Документація з впровадження
+# 📱 Telegram Mini App — Документація по впровадженню
 
-Telegram Mini App для бота управління генератором. Надає зручний веб-інтерфейс для перегляду стану генератора, графіків відключень, подій та технічного обслуговування.
+## Зміст
 
----
-
-## 📋 Зміст
-
-- [Огляд](#-огляд)
-- [Архітектура](#-архітектура)
-- [Вимоги](#-вимоги)
-- [Встановлення](#-встановлення)
-- [Налаштування](#-налаштування)
-- [API ендпоінти](#-api-ендпоінти)
-- [Безпека](#-безпека)
-- [Інтерфейс](#-інтерфейс)
-- [Розгортання](#-розгортання)
-- [Усунення проблем](#-усунення-проблем)
-
----
-
-## 🔍 Огляд
-
-Mini App — це веб-додаток, який працює всередині Telegram через [Telegram WebApp API](https://core.telegram.org/bots/webapps). Він надає зручний сучасний інтерфейс для:
-
-- **Дашборд**: стан генератора, рівень палива, мотогодини, активна зміна
-- **Графік відключень**: 24-годинна сітка з кольоровим кодуванням
-- **Журнал подій**: останні події (старти/стопи, заправки, ТО)
-- **Технічне обслуговування**: статус ТО, прогрес-бари, історія
-- **Генератори**: інформація про основний та аварійний генератори
-
-### Переваги Mini App:
-
-| Функція | Telegram чат | Mini App |
-|---------|-------------|----------|
-| Перегляд стану | Текстове повідомлення | Візуальний дашборд |
-| Графік | Текстовий список | Кольорова сітка |
-| ТО | Текстові числа | Прогрес-бари |
-| Оновлення | Нове повідомлення | Автооновлення |
-| Теми | Фіксований | Адаптується під тему Telegram |
+- [Огляд](#огляд)
+- [Архітектура](#архітектура)
+- [Вимоги](#вимоги)
+- [Встановлення](#встановлення)
+- [Налаштування](#налаштування)
+- [Запуск](#запуск)
+- [Розгортання на сервері](#розгортання-на-сервері)
+- [HTTPS та домен](#https-та-домен)
+- [Реєстрація Mini App в BotFather](#реєстрація-mini-app-в-botfather)
+- [API ендпоінти](#api-ендпоінти)
+- [Структура файлів](#структура-файлів)
+- [Безпека](#безпека)
+- [Оновлення](#оновлення)
+- [Вирішення проблем](#вирішення-проблем)
 
 ---
 
-## 🏗 Архітектура
+## Огляд
+
+**Generator Bot Mini App** — це вебзастосунок (Telegram WebApp), який працює безпосередньо всередині Telegram. Надає сучасний адаптивний інтерфейс для моніторингу стану генератора.
+
+### Можливості:
+
+| Функція | Опис |
+|---------|------|
+| 🏠 **Дашборд** | Статус генератора, паливо, мотогодини, зміни |
+| 📅 **Графік** | Графік відключень з навігацією по датах |
+| 🕘 **Події** | Журнал останніх подій (старт/стоп, заправки, ТО) |
+| 🔧 **ТО** | Стан технічного обслуговування з прогрес-барами |
+
+### Особливості:
+- ✅ Адаптивний дизайн для мобільних пристроїв
+- ✅ Інтеграція з темою Telegram (світла/темна)
+- ✅ Автоматичне оновлення даних кожні 30 секунд
+- ✅ Тижневий огляд графіку відключень
+- ✅ Оцінка палива «на льоту» під час роботи генератора
+- ✅ Повністю українською мовою
+
+---
+
+## Архітектура
 
 ```
-┌─────────────────────────────────────────┐
-│           Telegram клієнт               │
-│  ┌─────────────┐  ┌──────────────────┐  │
-│  │  Bot чат     │  │  Mini App (WebApp)│  │
-│  └──────┬──────┘  └────────┬─────────┘  │
-└─────────┼─────────────────┼─────────────┘
-          │                  │
-          │ Polling          │ HTTPS
-          │                  │
-┌─────────┼─────────────────┼─────────────┐
-│         │    Сервер бота   │             │
-│  ┌──────┴──────┐  ┌───────┴──────────┐  │
-│  │ aiogram Bot │  │ aiohttp WebServer│  │
-│  │ (handlers)  │  │ (webapp API)     │  │
-│  └──────┬──────┘  └───────┬──────────┘  │
-│         │                  │             │
-│         └──────┬───────────┘             │
-│         ┌──────┴──────┐                  │
-│         │  Database   │                  │
-│         │  (SQLite/PG)│                  │
-│         └─────────────┘                  │
-└──────────────────────────────────────────┘
+┌───────────────────────────┐
+│   Telegram (клієнт)       │
+│   ┌───────────────────┐   │
+│   │  Mini App (WebApp) │   │
+│   │  HTML / CSS / JS   │   │
+│   └────────┬──────────┘   │
+│            │ HTTP/HTTPS    │
+└────────────┼──────────────┘
+             │
+┌────────────▼──────────────┐
+│  webapp_server.py          │
+│  (aiohttp)                 │
+│  ┌─────────┐ ┌──────────┐ │
+│  │ Static  │ │ REST API │ │
+│  │ Files   │ │ /api/*   │ │
+│  └─────────┘ └────┬─────┘ │
+│                   │        │
+│  ┌────────────────▼─────┐  │
+│  │  database.db_api     │  │
+│  │  (SQLite / Postgres) │  │
+│  └──────────────────────┘  │
+└────────────────────────────┘
 ```
 
-### Компоненти:
-
-1. **Frontend** (`webapp/`): Статичний SPA (HTML/CSS/JS)
-   - `index.html` — головна сторінка
-   - `css/style.css` — стилі з підтримкою тем Telegram
-   - `js/app.js` — логіка додатку
-
-2. **Backend API** (`handlers/webapp_api.py`): REST ендпоінти
-   - Обслуговується aiohttp паралельно з ботом
-   - Аутентифікація через Telegram WebApp initData
-
-3. **Інтеграція** (`main.py`): Запуск веб-сервера разом з ботом
+**Потік даних:**
+1. Telegram відкриває Mini App за URL (`WEBAPP_URL`)
+2. Mini App завантажує HTML/CSS/JS з `webapp_server.py`
+3. JavaScript робить запити до REST API (`/api/*`)
+4. Сервер читає дані з бази даних через `database.db_api`
+5. Дані повертаються у форматі JSON
 
 ---
 
-## 📦 Вимоги
+## Вимоги
 
-- **Python 3.11+**
-- Всі залежності з `requirements.txt` (aiohttp вже включено)
-- **HTTPS** для production (Telegram вимагає HTTPS для WebApp)
-- **Доменне ім'я** з SSL-сертифікатом
+- **Python** 3.10+
+- **Залежності**: aiohttp (вже є в `requirements.txt`)
+- **HTTPS** (обов'язково для Telegram WebApp)
+- **Домен** з SSL-сертифікатом (Let's Encrypt або інший)
+- База даних: SQLite або PostgreSQL (та ж, що і для бота)
 
-> ⚠️ Для локальної розробки можна використовувати HTTP, але Telegram Mini App вимагає HTTPS в production.
+> ⚠️ Telegram вимагає **HTTPS** для Mini App. HTTP працює тільки для локальної розробки.
 
 ---
 
-## 🛠 Встановлення
+## Встановлення
 
-### 1. Оновіть залежності
+### 1. Залежності вже встановлені
+
+Якщо бот вже працює — додаткових залежностей не потрібно. `aiohttp` входить до `requirements.txt`.
 
 ```bash
+# Якщо ще не встановлено
 pip install -r requirements.txt
 ```
 
-Нових залежностей не потрібно — `aiohttp` вже є в `requirements.txt`.
+### 2. Перевірте наявність файлів
 
-### 2. Налаштуйте `.env`
+```
+webapp/
+├── index.html      # Головна сторінка
+├── css/
+│   └── style.css   # Стилі
+└── js/
+    ├── api.js      # API-клієнт
+    └── app.js      # Логіка інтерфейсу
 
-Додайте параметри Mini App до вашого `.env` файлу:
+webapp_server.py    # Веб-сервер
+```
+
+---
+
+## Налаштування
+
+### Параметри в `.env`
 
 ```env
-# Mini App (Telegram WebApp)
-WEBAPP_URL=https://your-domain.com/webapp
-WEBAPP_HOST=0.0.0.0
+# URL для Mini App (обов'язково для кнопки в боті)
+WEBAPP_URL=https://your-domain.com
+
+# Порт веб-сервера (за замовчуванням: 8080)
 WEBAPP_PORT=8080
+
+# Хост (за замовчуванням: 0.0.0.0)
+WEBAPP_HOST=0.0.0.0
 ```
 
-### 3. Запустіть бота
+### Пояснення:
+
+| Параметр | За замовч. | Опис |
+|----------|-----------|------|
+| `WEBAPP_URL` | *(порожньо)* | Публічний HTTPS URL вашого Mini App. Якщо порожньо — кнопка не з'являється |
+| `WEBAPP_PORT` | `8080` | Порт для веб-сервера |
+| `WEBAPP_HOST` | `0.0.0.0` | Хост для прослуховування |
+
+---
+
+## Запуск
+
+### Локальна розробка
 
 ```bash
+# 1. Запустіть бота (в окремому терміналі)
 python main.py
+
+# 2. Запустіть Mini App сервер
+python webapp_server.py
 ```
 
-Веб-сервер Mini App запуститься автоматично разом з ботом.
+Mini App буде доступний за адресою: `http://localhost:8080`
+
+### Перевірка працездатності
+
+```bash
+# Перевірка статусу
+curl http://localhost:8080/api/status
+
+# Перевірка графіку
+curl http://localhost:8080/api/schedule
+
+# Перевірка подій
+curl http://localhost:8080/api/events
+
+# Перевірка ТО
+curl http://localhost:8080/api/maintenance
+```
 
 ---
 
-## ⚙️ Налаштування
+## Розгортання на сервері
 
-### Параметри `.env`
+### Варіант 1: systemd сервіс (рекомендовано)
 
-| Параметр | Опис | За замовчуванням |
-|----------|------|-----------------|
-| `WEBAPP_URL` | Публічний URL Mini App | `""` (вимкнено) |
-| `WEBAPP_HOST` | Адреса прослуховування веб-сервера | `0.0.0.0` |
-| `WEBAPP_PORT` | Порт веб-сервера | `8080` |
+Створіть файл сервісу `/etc/systemd/system/generator-webapp.service`:
 
-### Як працює:
+```ini
+[Unit]
+Description=Generator Bot Mini App
+After=network.target
 
-1. Якщо `WEBAPP_URL` задано — в дашборді бота з'являється кнопка "📱 Mini App"
-2. Веб-сервер запускається на `WEBAPP_HOST:WEBAPP_PORT`
-3. API ендпоінти доступні за шляхом `/api/*`
-4. Статичні файли (HTML/CSS/JS) обслуговуються з директорії `webapp/`
+[Service]
+Type=simple
+User=your_user
+WorkingDirectory=/path/to/generator_bot
+EnvironmentFile=/path/to/generator_bot/.env
+ExecStart=/path/to/generator_bot/venv/bin/python webapp_server.py
+Restart=always
+RestartSec=5
 
-### Налаштування BotFather:
+[Install]
+WantedBy=multi-user.target
+```
 
-Для коректної роботи Mini App налаштуйте бота через [@BotFather](https://t.me/BotFather):
+Активація:
 
-1. `/mybots` → Оберіть бота → Bot Settings → Menu Button
-2. Встановіть URL: `https://your-domain.com/webapp`
-3. Встановіть текст: `📱 Mini App`
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable generator-webapp
+sudo systemctl start generator-webapp
+sudo systemctl status generator-webapp
+```
+
+### Варіант 2: Запуск через shell-скрипт
+
+```bash
+# Запуск в фоні
+nohup python webapp_server.py > webapp.log 2>&1 &
+
+# Зупинка
+kill $(cat webapp.pid)
+```
 
 ---
 
-## 📡 API ендпоінти
+## HTTPS та домен
 
-Всі ендпоінти вимагають заголовок `X-Telegram-Init-Data` з валідними даними Telegram WebApp.
+### Варіант 1: Nginx reverse proxy (рекомендовано)
+
+Встановіть Nginx та налаштуйте проксі:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Отримання SSL-сертифіката (Let's Encrypt):
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d your-domain.com
+```
+
+### Варіант 2: Caddy (автоматичний HTTPS)
+
+```
+your-domain.com {
+    reverse_proxy localhost:8080
+}
+```
+
+---
+
+## Реєстрація Mini App в BotFather
+
+1. Відкрийте [@BotFather](https://t.me/BotFather) в Telegram
+2. Виберіть вашого бота
+3. Натисніть **Bot Settings** → **Menu Button** → **Configure menu button**
+4. Або використайте команди:
+
+```
+/setmenubutton
+```
+
+5. Введіть URL: `https://your-domain.com`
+6. Введіть назву кнопки: `📱 Mini App`
+
+### Додатково: Web App через BotFather
+
+```
+/newapp             # Створити нову Mini App
+                    # Вкажіть URL: https://your-domain.com
+                    # Вкажіть назву: Generator Dashboard
+```
+
+Після цього `WEBAPP_URL` у `.env` дозволить кнопку Mini App на дашборді бота.
+
+---
+
+## API ендпоінти
 
 ### `GET /api/status`
 
-Стан генератора.
+Поточний стан генератора.
 
 **Відповідь:**
 ```json
 {
     "status": "ON",
+    "generator": "main",
+    "generator_name": "Основний",
+    "current_fuel": 45.2,
+    "estimated_fuel": 42.1,
+    "fuel_rate": 0.8,
+    "total_hours": 156.3,
     "active_shift": "m_start",
-    "active_shift_name": "🌅 Зміна 1",
-    "start_time": "08:30",
-    "current_fuel": 85.5,
-    "total_hours": 1234.5,
-    "active_generator": "main",
-    "generator_name": "🔋 Основний",
     "completed_shifts": ["m"],
-    "is_admin": true,
-    "fuel_consumption": 5.3
+    "start_time": "2026-02-26T08:00:00",
+    "work_start": "07:30",
+    "work_end": "20:30"
 }
 ```
 
-### `GET /api/schedule`
+### `GET /api/schedule?date=YYYY-MM-DD`
 
-Графік відключень на сьогодні.
+Графік відключень на дату. Без параметра `date` — повертає сьогоднішній.
 
 **Відповідь:**
 ```json
 {
     "date": "2026-02-26",
     "hours": [
-        {"hour": 0, "label": "00:00", "is_off": false},
-        {"hour": 1, "label": "01:00", "is_off": true},
-        ...
+        {"hour": 0, "label": "00:00 — 01:00", "off": false},
+        {"hour": 1, "label": "01:00 — 02:00", "off": true}
     ]
 }
 ```
 
-### `GET /api/events`
+### `GET /api/schedule/week`
 
-Останні події. Параметр `limit` (за замовчуванням: 20, максимум: 50).
+Огляд графіку на тиждень.
+
+**Відповідь:**
+```json
+{
+    "days": [
+        {"date": "2026-02-26", "weekday": "Чт", "off_hours": 4},
+        {"date": "2026-02-27", "weekday": "Пт", "off_hours": 0}
+    ]
+}
+```
+
+### `GET /api/events?limit=N`
+
+Останні N подій (за замовчуванням 20, максимум 100).
 
 **Відповідь:**
 ```json
 {
     "events": [
         {
-            "type": "m_start",
-            "icon": "🌅",
-            "timestamp": "2026-02-26 08:30:00",
-            "user": "Іванов І.І.",
+            "event_type": "m_start",
+            "timestamp": "2026-02-26T08:00:00",
+            "actor": "Іванов І.І.",
             "value": "",
             "driver": "",
-            "receipt": "",
-            "generator": "main"
+            "receipt": ""
         }
-    ]
+    ],
+    "count": 1
 }
 ```
 
@@ -223,282 +374,134 @@ python main.py
 ```json
 {
     "generator": "main",
-    "generator_name": "🔋 Основний",
-    "oil_interval": 100,
-    "spark_interval": 100,
-    "maintenance_interval": 300,
-    "total_hours": 1234.5,
-    "oil_used": 45.2,
-    "oil_remaining": 54.8,
-    "spark_used": 45.2,
-    "spark_remaining": 54.8,
-    "maintenance_remaining": 165.5,
+    "stats": {
+        "oil_needed": 43.7,
+        "spark_needed": 93.7,
+        "maintenance_needed": 143.7,
+        "total_hours": 156.3,
+        "last_oil": 56.3,
+        "last_spark": 6.3,
+        "oil_interval": 100,
+        "spark_interval": 100,
+        "maintenance_interval": 300
+    },
     "history": [
         {
-            "date": "2026-02-20 10:00:00",
-            "type": "🛢 Мастило",
-            "hours": 1200.0,
-            "admin": "Адмін"
+            "id": 1,
+            "date": "2026-02-20T10:00:00",
+            "type": "oil",
+            "hours": 100.0,
+            "admin": "Петренко П.П."
         }
     ]
 }
 ```
 
-### `GET /api/generators`
+---
 
-Інформація про всі генератори.
+## Структура файлів
 
-**Відповідь:**
-```json
-{
-    "active": "main",
-    "generators": {
-        "main": {
-            "name": "🔋 Основний",
-            "total_hours": 1234.5,
-            "last_oil_change": 45.2,
-            "last_spark_change": 45.2,
-            "is_active": true
-        },
-        "emergency": {
-            "name": "⚠️ Аварійний",
-            "total_hours": 56.3,
-            "last_oil_change": 12.1,
-            "last_spark_change": 12.1,
-            "is_active": false
-        }
-    },
-    "current_fuel": 85.5,
-    "fuel_consumption": 5.3,
-    "emergency_fuel_consumption": 6.5
-}
+```
+generator_bot/
+├── webapp_server.py         # Веб-сервер (aiohttp)
+├── webapp/
+│   ├── index.html           # Головна HTML-сторінка
+│   ├── css/
+│   │   └── style.css        # Стилі (Telegram-тема, адаптивний)
+│   └── js/
+│       ├── api.js           # API-клієнт (fetch)
+│       └── app.js           # Логіка інтерфейсу
+├── docs/
+│   └── MINIAPP.md           # Ця документація
+└── .env                     # Конфігурація (WEBAPP_URL, WEBAPP_PORT)
 ```
 
 ---
 
-## 🔐 Безпека
+## Безпека
 
-### Аутентифікація
+### Валідація Telegram initData
 
-Mini App використовує [Telegram WebApp Init Data](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app) для аутентифікації:
+Сервер підтримує валідацію `initData` від Telegram WebApp через HMAC-SHA256:
 
-1. Telegram передає `initData` при відкритті Mini App
-2. Frontend надсилає `initData` в заголовку `X-Telegram-Init-Data`
-3. Backend перевіряє підпис HMAC-SHA256 з використанням `BOT_TOKEN`
-4. Перевіряється свіжість `auth_date` (не старше 24 годин)
+1. Клієнт надсилає `initData` у заголовку `X-Telegram-Init-Data`
+2. Сервер перевіряє підпис за алгоритмом Telegram
+3. Витягує інформацію про користувача
 
-### CORS
-
-API дозволяє запити з будь-якого джерела (`Access-Control-Allow-Origin: *`), оскільки аутентифікація здійснюється через Telegram initData, а не cookies.
+> ⚠️ Поточна версія — лише для читання (read-only). API не надає операцій запису, тому ризики мінімальні.
 
 ### Рекомендації:
 
-- ✅ Використовуйте HTTPS з валідним SSL-сертифікатом
-- ✅ Обмежте доступ до порту `WEBAPP_PORT` через firewall
-- ✅ Використовуйте reverse proxy (nginx) перед aiohttp
-- ❌ Не відкривайте `WEBAPP_PORT` напряму в інтернет
+- ✅ Завжди використовуйте **HTTPS**
+- ✅ Обмежте доступ через Nginx (IP whitelist, rate limiting)
+- ✅ Не зберігайте `BOT_TOKEN` у фронтенд-коді
+- ✅ Регулярно оновлюйте SSL-сертифікати
+- ❌ Не відкривайте порт `WEBAPP_PORT` напряму в інтернет — використовуйте reverse proxy
 
 ---
 
-## 🎨 Інтерфейс
+## Оновлення
 
-### Сторінки
-
-#### 🏠 Дашборд (Головна)
-- Індикатор стану генератора (ON/OFF з анімацією)
-- Інформація про активну зміну та час старту
-- Рівень палива з прогрес-баром
-- Мотогодини, витрата палива
-- Кількість завершених змін
-
-#### 📅 Графік відключень
-- 24-годинна сітка з кольоровим кодуванням
-- 🟢 Зелений — електрика є
-- 🔴 Червоний — відключення
-- Поточна година виділена рамкою
-
-#### 🕘 Останні події
-- Хронологічний список подій
-- Іконки для різних типів подій
-- Метадані: оператор, водій, чек
-
-#### 🛠 Технічне обслуговування
-- Прогрес-бари для мастила та свічок
-- Колір змінюється: 🔵 норма → 🟡 увага → 🔴 критично
-- Залишок годин до ТО
-- Історія виконаних ТО
-
-#### 🔄 Генератори
-- Картки основного та аварійного генераторів
-- Активний генератор виділений рамкою
-- Статистика: мотогодини, ТО
-- Спільний бак палива
-
-### Теми
-
-Mini App автоматично адаптується під тему Telegram (світла/темна) через CSS-змінні:
-
-```css
-var(--tg-theme-bg-color)        /* Колір фону */
-var(--tg-theme-text-color)      /* Колір тексту */
-var(--tg-theme-button-color)    /* Колір кнопок */
-var(--tg-theme-hint-color)      /* Колір підказок */
-```
-
-### Автооновлення
-
-Дашборд автоматично оновлюється кожні 30 секунд.
-
----
-
-## 🚀 Розгортання
-
-### Варіант 1: Прямий запуск (розробка)
+### Оновлення Mini App
 
 ```bash
-# 1. Налаштуйте .env
-WEBAPP_URL=http://localhost:8080/webapp
-WEBAPP_PORT=8080
+# 1. Оновіть файли (git pull або вручну)
+cd /path/to/generator_bot
+git pull
 
-# 2. Запустіть бота
-python main.py
+# 2. Перезапустіть веб-сервер
+sudo systemctl restart generator-webapp
 ```
 
-### Варіант 2: Nginx reverse proxy (production)
+### Оновлення без простою
 
-#### Конфігурація Nginx:
+Оскільки Mini App — це статичні файли + простий API, оновлення зазвичай миттєве:
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    # Mini App
-    location /webapp {
-        proxy_pass http://127.0.0.1:8080/webapp;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8080/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /css/ {
-        proxy_pass http://127.0.0.1:8080/css/;
-    }
-
-    location /js/ {
-        proxy_pass http://127.0.0.1:8080/js/;
-    }
-}
+```bash
+# Оновіть файли, потім
+sudo systemctl restart generator-webapp
 ```
 
-#### `.env` для production:
+---
+
+## Вирішення проблем
+
+### Mini App не відкривається в Telegram
+
+1. Перевірте що `WEBAPP_URL` вказує на HTTPS
+2. Перевірте що сертифікат SSL валідний
+3. Перевірте що веб-сервер доступний ззовні
+
+```bash
+curl -I https://your-domain.com
+```
+
+### Помилка "Завантаження даних..."
+
+1. Перевірте що `webapp_server.py` запущений
+2. Перевірте що база даних доступна
+3. Перегляньте логи:
+
+```bash
+sudo journalctl -u generator-webapp -f
+```
+
+### Кнопка Mini App не відображається
+
+Переконайтесь що `WEBAPP_URL` у `.env` не порожній і бот перезапущений:
 
 ```env
-WEBAPP_URL=https://your-domain.com/webapp
-WEBAPP_HOST=127.0.0.1
-WEBAPP_PORT=8080
+WEBAPP_URL=https://your-domain.com
 ```
 
-### Варіант 3: Systemd сервіс
+### CORS-помилки
 
-Створіть файл `/etc/systemd/system/generator-bot.service`:
-
-```ini
-[Unit]
-Description=Generator Bot
-After=network.target
-
-[Service]
-Type=simple
-User=botuser
-WorkingDirectory=/opt/generator_bot
-ExecStart=/opt/generator_bot/venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable generator-bot
-sudo systemctl start generator-bot
-```
-
-### Варіант 4: Використання shell-скриптів
-
-```bash
-# Запуск
-./start.sh
-
-# Зупинка
-./stop.sh
-
-# Перезапуск
-./restart.sh
-
-# Статус
-./status.sh
-```
+Сервер автоматично додає CORS-заголовки. Якщо проблеми залишаються — перевірте конфігурацію Nginx (не дублювати CORS-заголовки).
 
 ---
 
-## 🔧 Усунення проблем
+## Контакти
 
-### Mini App не відкривається
+Автор: [@imeromua](https://github.com/imeromua)
 
-1. Перевірте, що `WEBAPP_URL` в `.env` правильний
-2. Перевірте, що веб-сервер запущений (шукайте в логах `📱 Mini App веб-сервер запущено`)
-3. Перевірте HTTPS сертифікат (Telegram вимагає валідний SSL)
-4. Переконайтесь, що порт відкритий у firewall
-
-### Помилка авторизації (401)
-
-1. Відкривайте Mini App тільки через кнопку в Telegram боті
-2. Перевірте, що `BOT_TOKEN` правильний
-3. Переконайтесь, що час на сервері синхронізовано (NTP)
-
-### Дані не завантажуються
-
-1. Перевірте, що база даних ініціалізована
-2. Перевірте логи бота на помилки
-3. Відкрийте Dev Tools в браузері (F12) та перевірте Network вкладку
-
-### API повертає 500
-
-1. Перевірте логи бота (`./logs.sh`)
-2. Переконайтесь, що всі таблиці бази даних створені
-3. Перевірте з'єднання з базою даних
-
----
-
-## 📝 Структура файлів
-
-```
-webapp/
-├── index.html          # Головна сторінка SPA
-├── css/
-│   └── style.css       # Стилі (Telegram theme-aware)
-└── js/
-    └── app.js          # Логіка додатку
-
-handlers/
-└── webapp_api.py       # REST API ендпоінти
-
-docs/
-└── MINIAPP.md          # Ця документація
-```
-
----
-
-## 📄 Ліцензія
-
-MIT License
+Проєкт: [generator_bot](https://github.com/imeromua/generator_bot)

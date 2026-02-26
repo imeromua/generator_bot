@@ -9,198 +9,174 @@
 </head>
 <body>
     <div id="app">
-        <!-- Заголовок -->
-        <header class="app-header">
-            <h1 class="app-title">⚡ Генератор</h1>
-            <div id="generator-badge" class="gen-badge"></div>
-        </header>
-
-        <!-- Контент сторінок -->
-        <main id="main-content" class="content">
-            <!-- Завантаження -->
-            <div id="loading" class="loading-screen">
-                <div class="spinner"></div>
-                <p>Завантаження...</p>
-            </div>
-
-            <!-- Помилка авторизації -->
-            <div id="error-screen" class="error-screen hidden">
-                <div class="error-icon">🔒</div>
-                <h2>Немає доступу</h2>
-                <p>Відкрийте додаток через Telegram бот</p>
-            </div>
-
-            <!-- ===== ДАШБОРД ===== -->
-            <section id="page-dashboard" class="page hidden">
-                <div class="status-card" id="status-card">
-                    <div class="status-indicator" id="status-indicator">
-                        <span class="status-dot" id="status-dot"></span>
-                        <span class="status-text" id="status-text">OFF</span>
-                    </div>
-                    <div class="status-details">
-                        <div class="detail-row" id="shift-info">
-                            <span class="detail-label">Зміна:</span>
-                            <span class="detail-value" id="shift-value">—</span>
-                        </div>
-                        <div class="detail-row" id="start-time-row">
-                            <span class="detail-label">Старт:</span>
-                            <span class="detail-value" id="start-time-value">—</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="cards-grid">
-                    <div class="info-card fuel-card">
-                        <div class="card-icon">⛽</div>
-                        <div class="card-content">
-                            <div class="card-label">Паливо</div>
-                            <div class="card-value" id="fuel-value">0 л</div>
-                            <div class="progress-bar">
-                                <div class="progress-fill fuel-progress" id="fuel-progress"></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="info-card hours-card">
-                        <div class="card-icon">⏱</div>
-                        <div class="card-content">
-                            <div class="card-label">Мотогодини</div>
-                            <div class="card-value" id="hours-value">0</div>
-                        </div>
-                    </div>
-                    <div class="info-card consumption-card">
-                        <div class="card-icon">📊</div>
-                        <div class="card-content">
-                            <div class="card-label">Витрата</div>
-                            <div class="card-value" id="consumption-value">0 л/год</div>
-                        </div>
-                    </div>
-                    <div class="info-card shifts-card">
-                        <div class="card-icon">📋</div>
-                        <div class="card-content">
-                            <div class="card-label">Зміни сьогодні</div>
-                            <div class="card-value" id="shifts-completed">0 / 3</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- ===== ГРАФІК ===== -->
-            <section id="page-schedule" class="page hidden">
-                <h2 class="page-title">📅 Графік відключень</h2>
-                <div class="schedule-date" id="schedule-date"></div>
-                <div class="schedule-grid" id="schedule-grid">
-                    <!-- Генерується динамічно -->
-                </div>
-                <div class="schedule-legend">
-                    <span class="legend-item"><span class="legend-dot on"></span> Електрика є</span>
-                    <span class="legend-item"><span class="legend-dot off"></span> Відключення</span>
-                </div>
-            </section>
-
-            <!-- ===== ПОДІЇ ===== -->
-            <section id="page-events" class="page hidden">
-                <h2 class="page-title">🕘 Останні події</h2>
-                <div class="events-list" id="events-list">
-                    <!-- Генерується динамічно -->
-                </div>
-            </section>
-
-            <!-- ===== ТО ===== -->
-            <section id="page-maintenance" class="page hidden">
-                <h2 class="page-title">🛠 Технічне обслуговування</h2>
-                <div id="maint-generator" class="maint-gen-name"></div>
-
-                <div class="maint-cards">
-                    <div class="maint-card">
-                        <div class="maint-header">
-                            <span class="maint-icon">🛢</span>
-                            <span class="maint-name">Мастило</span>
-                        </div>
-                        <div class="maint-progress">
-                            <div class="progress-bar large">
-                                <div class="progress-fill oil-progress" id="oil-progress"></div>
-                            </div>
-                            <div class="maint-stats">
-                                <span id="oil-used">0</span> / <span id="oil-interval">100</span> год
-                            </div>
-                        </div>
-                        <div class="maint-remaining" id="oil-remaining">Залишилось: 0 год</div>
-                    </div>
-
-                    <div class="maint-card">
-                        <div class="maint-header">
-                            <span class="maint-icon">🕯</span>
-                            <span class="maint-name">Свічки</span>
-                        </div>
-                        <div class="maint-progress">
-                            <div class="progress-bar large">
-                                <div class="progress-fill spark-progress" id="spark-progress"></div>
-                            </div>
-                            <div class="maint-stats">
-                                <span id="spark-used">0</span> / <span id="spark-interval">100</span> год
-                            </div>
-                        </div>
-                        <div class="maint-remaining" id="spark-remaining">Залишилось: 0 год</div>
-                    </div>
-
-                    <div class="maint-card">
-                        <div class="maint-header">
-                            <span class="maint-icon">🔧</span>
-                            <span class="maint-name">Планове ТО</span>
-                        </div>
-                        <div class="maint-remaining large-remaining" id="maint-remaining">Залишилось: 0 год</div>
-                    </div>
-                </div>
-
-                <h3 class="section-title">📜 Історія ТО</h3>
-                <div class="maint-history" id="maint-history">
-                    <!-- Генерується динамічно -->
-                </div>
-            </section>
-
-            <!-- ===== ГЕНЕРАТОРИ ===== -->
-            <section id="page-generators" class="page hidden">
-                <h2 class="page-title">🔄 Генератори</h2>
-
-                <div class="gen-cards" id="gen-cards">
-                    <!-- Генерується динамічно -->
-                </div>
-
-                <div class="gen-fuel-section">
-                    <h3 class="section-title">⛽ Спільний бак палива</h3>
-                    <div class="gen-fuel-value" id="gen-fuel-value">0 л</div>
-                    <div class="progress-bar large">
-                        <div class="progress-fill fuel-progress" id="gen-fuel-progress"></div>
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <!-- Нижня навігація -->
-        <nav class="bottom-nav" id="bottom-nav">
-            <button class="nav-btn active" data-page="dashboard">
-                <span class="nav-icon">🏠</span>
-                <span class="nav-label">Головна</span>
-            </button>
-            <button class="nav-btn" data-page="schedule">
-                <span class="nav-icon">📅</span>
-                <span class="nav-label">Графік</span>
-            </button>
-            <button class="nav-btn" data-page="events">
-                <span class="nav-icon">🕘</span>
-                <span class="nav-label">Події</span>
-            </button>
-            <button class="nav-btn" data-page="maintenance">
-                <span class="nav-icon">🛠</span>
-                <span class="nav-label">ТО</span>
-            </button>
-            <button class="nav-btn" data-page="generators">
-                <span class="nav-icon">🔄</span>
-                <span class="nav-label">Генератори</span>
-            </button>
+        <!-- Навігація -->
+        <nav class="tabs" id="tabs">
+            <button class="tab active" data-tab="dashboard">🏠 Головна</button>
+            <button class="tab" data-tab="schedule">📅 Графік</button>
+            <button class="tab" data-tab="events">🕘 Події</button>
+            <button class="tab" data-tab="maintenance">🔧 ТО</button>
         </nav>
+
+        <!-- Статус-панель -->
+        <div class="status-bar" id="status-bar">
+            <span id="gen-indicator" class="indicator off"></span>
+            <span id="gen-label">Завантаження...</span>
+        </div>
+
+        <!-- Вкладка: Головна -->
+        <section class="page active" id="page-dashboard">
+            <!-- Статус генератора -->
+            <div class="card" id="card-status">
+                <div class="card-header">
+                    <h2>⚡ Стан генератора</h2>
+                    <span class="badge" id="badge-status">—</span>
+                </div>
+                <div class="card-body">
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <span class="stat-label">Генератор</span>
+                            <span class="stat-value" id="stat-generator">—</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Активна зміна</span>
+                            <span class="stat-value" id="stat-shift">—</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">⛽ Паливо</span>
+                            <span class="stat-value" id="stat-fuel">— л</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">⏱ Мотогодини</span>
+                            <span class="stat-value" id="stat-hours">— год</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🔥 Витрата</span>
+                            <span class="stat-value" id="stat-rate">— л/год</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🕐 Робочий час</span>
+                            <span class="stat-value" id="stat-work-hours">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Зміни сьогодні -->
+            <div class="card" id="card-shifts">
+                <div class="card-header">
+                    <h2>📋 Зміни сьогодні</h2>
+                </div>
+                <div class="card-body">
+                    <div class="shifts-grid" id="shifts-grid">
+                        <div class="shift-item" id="shift-m">
+                            <span class="shift-icon">🌅</span>
+                            <span class="shift-name">Зміна 1</span>
+                            <span class="shift-status" id="shift-m-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-d">
+                            <span class="shift-icon">☀️</span>
+                            <span class="shift-name">Зміна 2</span>
+                            <span class="shift-status" id="shift-d-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-e">
+                            <span class="shift-icon">🌙</span>
+                            <span class="shift-name">Зміна 3</span>
+                            <span class="shift-status" id="shift-e-status">—</span>
+                        </div>
+                        <div class="shift-item" id="shift-x">
+                            <span class="shift-icon">⚡</span>
+                            <span class="shift-name">Екстра</span>
+                            <span class="shift-status" id="shift-x-status">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Тижневий графік (мініатюра) -->
+            <div class="card" id="card-week">
+                <div class="card-header">
+                    <h2>📅 Тиждень</h2>
+                </div>
+                <div class="card-body">
+                    <div class="week-grid" id="week-grid">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Графік -->
+        <section class="page" id="page-schedule">
+            <div class="card">
+                <div class="card-header">
+                    <h2>📅 Графік відключень</h2>
+                    <div class="date-nav">
+                        <button class="btn-icon" id="sched-prev">◀</button>
+                        <span id="sched-date-label">—</span>
+                        <button class="btn-icon" id="sched-next">▶</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="legend">
+                        <span class="legend-item"><span class="dot green"></span> Є світло</span>
+                        <span class="legend-item"><span class="dot red"></span> Відключення</span>
+                    </div>
+                    <div class="schedule-grid" id="schedule-grid">
+                        <!-- Заповнюється JS -->
+                    </div>
+                    <div class="schedule-summary" id="schedule-summary"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Події -->
+        <section class="page" id="page-events">
+            <div class="card">
+                <div class="card-header">
+                    <h2>🕘 Останні події</h2>
+                    <button class="btn-sm" id="events-refresh">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="events-list" id="events-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Технічне обслуговування -->
+        <section class="page" id="page-maintenance">
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔧 Технічне обслуговування</h2>
+                </div>
+                <div class="card-body">
+                    <div class="mnt-stats" id="mnt-stats">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2>📜 Історія ТО</h2>
+                </div>
+                <div class="card-body">
+                    <div class="mnt-history" id="mnt-history">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Завантаження -->
+        <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <p>Завантаження даних...</p>
+        </div>
     </div>
 
+    <script src="/js/api.js"></script>
     <script src="/js/app.js"></script>
 </body>
 </html>

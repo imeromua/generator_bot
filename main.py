@@ -80,7 +80,7 @@ from handlers.admin_parts import dtek_parser
 
 # Імпорт сервісів
 from services.scheduler import scheduler_loop
-from handlers.webapp_api import create_webapp_app
+from webapp_server import create_app as create_webapp_app
 
 
 async def _run_blocking(func, *args, **kwargs):
