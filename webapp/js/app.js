@@ -187,11 +187,14 @@
     // -------------------------------------------------------------------
     function loadTabData(tab) {
         switch (tab) {
-            case "dashboard":   loadDashboard(); break;
-            case "schedule":    loadSchedule();  break;
-            case "events":      loadEvents();    break;
-            case "maintenance": loadMaintenance(); break;
-            case "admin":       loadAdmin();     break;
+            case "dashboard":     loadDashboard(); break;
+            case "schedule":      loadSchedule();  break;
+            case "events":        loadEvents();    break;
+            case "maintenance":   loadMaintenance(); break;
+            case "admin":         loadAdmin();     break;
+            case "fuel-orders":   loadFuelOrders(); break;
+            case "shifts":        loadShifts();    break;
+            case "notifications": loadNotifications(); break;
         }
     }
 
@@ -1034,6 +1037,127 @@
                 showError(e.message);
             }
         },
+
+        // Task 6: Fuel Orders
+        async refreshFuelOrders() { await loadFuelOrders(); },
+
+        async createFuelOrder() {
+            const amount = parseFloat($("order-amount").value);
+            if (!amount || amount <= 0) { showError("Введіть кількість літрів"); return; }
+            const supplier = ($("order-supplier").value || "").trim();
+            const price = parseFloat($("order-price").value) || null;
+            const delivery_date = ($("order-delivery-date").value || "").trim() || null;
+            const notes = ($("order-notes").value || "").trim() || null;
+            try {
+                const res = await API.createFuelOrder({ amount_liters: amount, supplier, price, delivery_date, notes });
+                showSuccess(res.message || "Замовлення створено");
+                await loadFuelOrders();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async setOrderStatus(order_id, status) {
+            const labels = { ordered: "позначити як Замовлено", confirmed: "підтвердити", delivered: "позначити як Доставлено", cancelled: "скасувати" };
+            if (!confirm(`Замовлення #${order_id}: ${labels[status] || status}?`)) return;
+            try {
+                const res = await API.updateFuelOrder({ order_id, status });
+                showSuccess(res.message || "Оновлено");
+                await loadFuelOrders();
+                if (status === "delivered") await loadDashboard();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // Task 8: Shift Planning
+        async loadShifts() { await loadShifts(); },
+
+        openShiftEdit(date) {
+            if (!userRole.is_admin) return;
+            const shifts = _shiftsData ? _shiftsData.shifts || [] : [];
+            const dayShifts = shifts.filter((s) => s.date === date);
+            const msg = `📅 ${date}\n` +
+                ["m","d","e"].map((st) => {
+                    const s = dayShifts.find((x) => x.shift_type === st);
+                    const labels = { m:"🌅 Зміна 1", d:"☀️ Зміна 2", e:"🌙 Зміна 3" };
+                    return `${labels[st]}: ${s ? (s.assigned_personnel_id || "—") : "—"}`;
+                }).join("\n");
+            const personnel = prompt(msg + "\n\nВведіть ім'я персоналу для Зміни 1 (або лишіть порожнім):");
+            if (personnel === null) return;
+            App.saveShift(date, "m", personnel.trim());
+        },
+
+        async saveShift(date, shift_type, assigned_personnel_id) {
+            try {
+                const res = await API.setShift({ date, shift_type, assigned_personnel_id: assigned_personnel_id || null });
+                showSuccess(res.message || "Зміну збережено");
+                await loadShifts();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async autoSchedulePreview() {
+            const month = _shiftsMonth || getCurrentMonth();
+            try {
+                const res = await API.autoSchedule(month, false);
+                _autoSchedulePreview = res.assignments || [];
+                showSuccess(`Згенеровано ${_autoSchedulePreview.length} змін. Натисніть "Зберегти" для підтвердження.`);
+                const previewDiv = $("auto-schedule-preview");
+                if (previewDiv) previewDiv.style.display = "";
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async autoScheduleSave() {
+            const month = _shiftsMonth || getCurrentMonth();
+            if (!confirm(`Зберегти авто-розклад на ${month}? Це замінить існуючі плановані зміни.`)) return;
+            try {
+                const res = await API.autoSchedule(month, true);
+                showSuccess(res.message || "Розклад збережено");
+                _autoSchedulePreview = null;
+                const previewDiv = $("auto-schedule-preview");
+                if (previewDiv) previewDiv.style.display = "none";
+                await loadShifts();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // Task 5: Notifications
+        async toggleNotification(type, enabled) {
+            try {
+                const res = await API.setNotificationPreference(type, enabled, null, null);
+                showSuccess(res.message || "Збережено");
+            } catch (e) {
+                showError(e.message);
+                // Re-render to restore state
+                await loadNotifications();
+            }
+        },
+
+        async saveQuietHours() {
+            const start = ($("quiet-start").value || "").trim();
+            const end = ($("quiet-end").value || "").trim();
+            try {
+                // Save quiet hours for all types (using a dummy type to trigger update)
+                const res = await API.setNotificationPreference("fuel_warning", true, start || null, end || null);
+                showSuccess(res.message || "Тихі години збережено");
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async testNotification() {
+            try {
+                const res = await API.testNotification();
+                showSuccess(res.message || "Тест відправлено");
+            } catch (e) {
+                showError(e.message);
+            }
+        },
     };
 
     // Прив'язуємо App до window для onclick у HTML
@@ -1108,6 +1232,25 @@
 
     $("btn-refuel-open").addEventListener("click", openRefuelModal);
 
+    // Shifts month navigation
+    (function () {
+        function shiftMonthStr(base, delta) {
+            const [y, m] = base.split("-").map(Number);
+            const d = new Date(y, m - 1 + delta, 1);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+        }
+        const prevBtn = $("shifts-prev");
+        const nextBtn = $("shifts-next");
+        if (prevBtn) prevBtn.addEventListener("click", () => {
+            _shiftsMonth = shiftMonthStr(_shiftsMonth || getCurrentMonth(), -1);
+            loadShifts();
+        });
+        if (nextBtn) nextBtn.addEventListener("click", () => {
+            _shiftsMonth = shiftMonthStr(_shiftsMonth || getCurrentMonth(), 1);
+            loadShifts();
+        });
+    })();
+
     // -------------------------------------------------------------------
     // Автооновлення
     // -------------------------------------------------------------------
@@ -1149,7 +1292,7 @@
         let touchStartX = 0;
         let touchStartY = 0;
         const SWIPE_THRESHOLD = 50; // мінімальна відстань свайпу (px)
-        const TAB_ORDER = ["dashboard", "schedule", "events", "maintenance", "admin"];
+        const TAB_ORDER = ["dashboard", "schedule", "events", "maintenance", "fuel-orders", "shifts", "notifications", "admin"];
 
         function getVisibleTabs() {
             return TAB_ORDER.filter((t) => {
@@ -1179,6 +1322,323 @@
     })();
 
     // -------------------------------------------------------------------
+    // Task 7: Dark Theme Manager
+    // -------------------------------------------------------------------
+    const ThemeManager = (function () {
+        const KEY = "app_theme";
+        const MODES = ["light", "dark", "auto"];
+
+        function apply(mode) {
+            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            const tg = window.Telegram && window.Telegram.WebApp;
+
+            let useDark;
+            if (mode === "dark") {
+                useDark = true;
+            } else if (mode === "light") {
+                useDark = false;
+            } else {
+                // auto: use Telegram theme if available, else system
+                if (tg && tg.themeParams && tg.themeParams.bg_color) {
+                    const bg = tg.themeParams.bg_color;
+                    const r = parseInt(bg.slice(1,3),16);
+                    const g = parseInt(bg.slice(3,5),16);
+                    const b = parseInt(bg.slice(5,7),16);
+                    useDark = (r + g + b) / 3 < 128;
+                } else {
+                    useDark = prefersDark;
+                }
+            }
+
+            document.documentElement.setAttribute("data-theme", useDark ? "dark" : "light");
+            MODES.forEach((m) => {
+                const btn = document.getElementById("theme-" + m);
+                if (btn) btn.classList.toggle("active", m === mode);
+            });
+        }
+
+        function set(mode) {
+            localStorage.setItem(KEY, mode);
+            apply(mode);
+        }
+
+        function init() {
+            const saved = localStorage.getItem(KEY) || "auto";
+            apply(saved);
+            MODES.forEach((m) => {
+                const btn = document.getElementById("theme-" + m);
+                if (btn) btn.classList.toggle("active", m === saved);
+            });
+            // Listen to system theme changes when in "auto" mode
+            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+                if ((localStorage.getItem(KEY) || "auto") === "auto") apply("auto");
+            });
+        }
+
+        return { set, init };
+    })();
+
+    window.ThemeManager = ThemeManager;
+    ThemeManager.init();
+
+    // -------------------------------------------------------------------
+    // Task 6: Fuel Orders
+    // -------------------------------------------------------------------
+    let _fuelOrdersData = null;
+
+    async function loadFuelOrders() {
+        const forecastEl = $("fuel-forecast-stats");
+        const listEl = $("fuel-orders-list");
+        const newOrderCard = $("card-new-order");
+
+        if (newOrderCard) newOrderCard.classList.toggle("hidden", !userRole.is_admin);
+
+        try {
+            const data = await API.getFuelOrders();
+            _fuelOrdersData = data;
+
+            // Render forecast stats
+            const stats = data.consumption_stats || {};
+            const status = currentStatus || {};
+            const fuel = parseFloat(status.current_fuel || 0);
+            const rate = stats.avg_rate_per_hour || 0;
+            const daysLeft = rate > 0 ? (fuel / (rate * 8)).toFixed(1) : "—";
+
+            if (forecastEl) {
+                forecastEl.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <span class="stat-label">⛽ Залишок</span>
+                            <span class="stat-value${fuel < 15 ? ' fuel-low' : fuel < 40 ? ' fuel-warn' : ''}">${fuel.toFixed(1)} л</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">⏳ Вистачить</span>
+                            <span class="stat-value">${daysLeft} дн.</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🔥 Витрата/год</span>
+                            <span class="stat-value">${rate.toFixed(2)} л/год</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">📅 За 30 дн.</span>
+                            <span class="stat-value">${stats.total_consumed || 0} л</span>
+                        </div>
+                    </div>`;
+            }
+
+            // Render orders list
+            const orders = data.orders || [];
+            if (listEl) {
+                if (orders.length === 0) {
+                    listEl.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div>Замовлень немає</div>`;
+                } else {
+                    listEl.innerHTML = orders.map((o) => renderOrderItem(o)).join("");
+                }
+            }
+        } catch (e) {
+            if (forecastEl) forecastEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+        }
+    }
+
+    function renderOrderItem(o) {
+        const statusLabel = { pending:"Очікує", ordered:"Замовлено", confirmed:"Підтверджено", delivered:"Доставлено", cancelled:"Скасовано" };
+        const date = o.created_at ? o.created_at.slice(0,10) : "—";
+        const adminActions = userRole.is_admin ? `
+            <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+                ${o.status === "pending" ? `<button class="btn btn-primary btn-sm" onclick="App.setOrderStatus(${o.id},'ordered')">📞 Замовлено</button>` : ""}
+                ${o.status === "ordered" ? `<button class="btn btn-secondary btn-sm" onclick="App.setOrderStatus(${o.id},'confirmed')">✅ Підтверджено</button>` : ""}
+                ${o.status === "confirmed" ? `<button class="btn btn-success btn-sm" onclick="App.setOrderStatus(${o.id},'delivered')">🚚 Доставлено</button>` : ""}
+                ${!["delivered","cancelled"].includes(o.status) ? `<button class="btn btn-danger btn-sm" onclick="App.setOrderStatus(${o.id},'cancelled')">❌ Скасувати</button>` : ""}
+            </div>` : "";
+        return `<div class="order-item">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div>
+                    <span class="order-status ${o.status}">${statusLabel[o.status] || o.status}</span>
+                    <span style="margin-left:8px;font-weight:600">${o.amount_liters} л</span>
+                </div>
+                <span class="hint-text" style="font-size:12px">${date}</span>
+            </div>
+            ${o.supplier ? `<div class="hint-text" style="margin-top:4px">🏢 ${escapeHtml(o.supplier)}</div>` : ""}
+            ${o.price ? `<div class="hint-text">💰 ${o.price.toFixed(2)} грн/л</div>` : ""}
+            ${o.delivery_date ? `<div class="hint-text">📅 Доставка: ${o.delivery_date}</div>` : ""}
+            ${o.notes ? `<div class="hint-text">💬 ${escapeHtml(o.notes)}</div>` : ""}
+            ${adminActions}
+        </div>`;
+    }
+
+    // -------------------------------------------------------------------
+    // Task 8: Shift Planning
+    // -------------------------------------------------------------------
+    let _shiftsMonth = null;
+    let _shiftsData = null;
+    let _autoSchedulePreview = null;
+
+    function getCurrentMonth() {
+        const now = new Date();
+        return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    }
+
+    async function loadShifts() {
+        if (!_shiftsMonth) _shiftsMonth = getCurrentMonth();
+        const [year, month] = _shiftsMonth.split("-").map(Number);
+
+        $("shifts-month-label").textContent = new Date(_shiftsMonth + "-01").toLocaleDateString("uk-UA", { month:"long", year:"numeric" });
+
+        const adminCard = $("card-auto-schedule");
+        if (adminCard) adminCard.classList.toggle("hidden", !userRole.is_admin);
+
+        const filterEl = $("shifts-filter-personnel");
+        if (filterEl && filterEl.options.length <= 1) {
+            try {
+                const data = await API.getShifts({ month: _shiftsMonth });
+                const people = new Set(
+                    (data.shifts || []).map((s) => s.assigned_personnel_id).filter(Boolean)
+                );
+                people.forEach((p) => {
+                    const opt = document.createElement("option");
+                    opt.value = p;
+                    opt.textContent = p;
+                    filterEl.appendChild(opt);
+                });
+            } catch (_) {}
+        }
+
+        try {
+            const [data, analytics] = await Promise.all([
+                API.getShifts({ month: _shiftsMonth }),
+                API.getShiftAnalytics(_shiftsMonth),
+            ]);
+            _shiftsData = data;
+            renderShiftCalendar(year, month, data.shifts || []);
+            renderShiftAnalytics(analytics);
+        } catch (e) {
+            const cal = $("shifts-calendar");
+            if (cal) cal.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+        }
+    }
+
+    function renderShiftCalendar(year, month, shifts) {
+        const cal = $("shifts-calendar");
+        if (!cal) return;
+
+        // Build map: date -> {m, d, e}
+        const map = {};
+        const filterPersonnel = ($("shifts-filter-personnel") || {}).value || "";
+        shifts.forEach((s) => {
+            if (filterPersonnel && s.assigned_personnel_id !== filterPersonnel) return;
+            if (!map[s.date]) map[s.date] = {};
+            map[s.date][s.shift_type] = s.assigned_personnel_id || "";
+        });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const firstDay = new Date(year, month - 1, 1).getDay(); // 0=Sun
+        // Convert to Mon-based (0=Mon)
+        const offset = (firstDay + 6) % 7;
+        const daysInMonth = new Date(year, month, 0).getDate();
+
+        let html = "";
+        // Padding for first week
+        for (let i = 0; i < offset; i++) {
+            html += `<div class="shift-cal-day" style="opacity:0;pointer-events:none"></div>`;
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+            const date = `${year}-${String(month).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+            const isToday = date === today;
+            const dayShifts = map[date] || {};
+            const shiftLabels = { m:"Зміна 1", d:"Зміна 2", e:"Зміна 3" };
+            const badges = ["m","d","e"].map((st) =>
+                dayShifts[st] !== undefined
+                    ? `<span class="shift-cal-badge shift-${st}" title="${shiftLabels[st]}">${escapeHtml((dayShifts[st] || "").split(" ")[0] || "?")}</span>`
+                    : ""
+            ).join("");
+            const onclick = userRole.is_admin ? ` onclick="App.openShiftEdit('${date}')"` : "";
+            html += `<div class="shift-cal-day${isToday ? " today" : ""}"${onclick}>
+                <span class="shift-cal-day-num">${d}</span>
+                ${badges}
+            </div>`;
+        }
+        cal.innerHTML = html;
+    }
+
+    function renderShiftAnalytics(analytics) {
+        const el = $("shifts-analytics");
+        if (!el) return;
+        const counts = analytics.personnel_counts || {};
+        const total = analytics.total_shifts || 0;
+        if (Object.keys(counts).length === 0) {
+            el.innerHTML = `<div class="empty-state">Даних немає</div>`;
+            return;
+        }
+        const maxCount = Math.max(...Object.values(counts), 1);
+        el.innerHTML = `<div style="margin-bottom:8px;font-size:13px;color:var(--tg-hint)">Всього змін: ${total}</div>` +
+            Object.entries(counts).sort((a,b) => b[1]-a[1]).map(([p, c]) => `
+            <div class="shift-analytics-bar">
+                <span class="shift-analytics-name">${escapeHtml(p)}</span>
+                <div class="shift-analytics-progress">
+                    <div class="shift-analytics-fill" style="width:${Math.round(c/maxCount*100)}%"></div>
+                </div>
+                <span class="shift-analytics-count">${c}</span>
+            </div>`).join("");
+    }
+
+    // -------------------------------------------------------------------
+    // Task 5: Notifications
+    // -------------------------------------------------------------------
+    async function loadNotifications() {
+        const listEl = $("notifications-list");
+        if (!listEl) return;
+        try {
+            const data = await API.getNotificationPreferences();
+            renderNotifications(data);
+            // Populate quiet hours
+            // (they're stored per-type, we read from first found)
+        } catch (e) {
+            listEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+        }
+    }
+
+    function renderNotifications(data) {
+        const listEl = $("notifications-list");
+        if (!listEl) return;
+
+        const prefs = data.preferences || {};
+        const types = data.types || {};
+
+        // Group by category
+        const categories = { critical: "🔴 Критичні", important: "⚠️ Важливі", info: "ℹ️ Інформаційні" };
+        const grouped = { critical: [], important: [], info: [] };
+
+        Object.entries(types).forEach(([k, v]) => {
+            const cat = v.category || "info";
+            grouped[cat] = grouped[cat] || [];
+            grouped[cat].push({ key: k, label: v.label, category: cat });
+        });
+
+        let html = "";
+        Object.entries(categories).forEach(([cat, catLabel]) => {
+            const items = grouped[cat] || [];
+            if (!items.length) return;
+            html += `<div class="notif-category">
+                <div class="notif-category-title">${catLabel}</div>`;
+            items.forEach((item) => {
+                const pref = prefs[item.key] || {};
+                const checked = pref.enabled !== false ? "checked" : "";
+                const disabled = item.category === "critical" ? "disabled" : "";
+                html += `<div class="notif-item">
+                    <span class="notif-item-label">${item.label}</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" ${checked} ${disabled}
+                            onchange="App.toggleNotification('${item.key}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>`;
+            });
+            html += `</div>`;
+        });
+        listEl.innerHTML = html;
+    }
+
+    // -------------------------------------------------------------------
     // Ініціалізація
     // -------------------------------------------------------------------
     async function init() {
@@ -1206,4 +1666,3 @@
     }
 
     init();
-})();

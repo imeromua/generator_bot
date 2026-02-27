@@ -1643,6 +1643,336 @@ async def api_admin_backup_download(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=500)
 
 
+
+# ---------------------------------------------------------------------------
+# Task 5: Notification preferences API
+# ---------------------------------------------------------------------------
+
+async def api_notifications_get(request: web.Request) -> web.Response:
+    """GET /api/notifications/preferences — get user notification preferences."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    try:
+        from database.api.notifications import get_user_preferences, NOTIFICATION_TYPES
+        user_id = int(user.get("id", 0))
+        prefs = get_user_preferences(user_id)
+        return web.json_response({
+            "preferences": prefs,
+            "types": {k: {"label": v["label"], "category": v["category"]}
+                      for k, v in NOTIFICATION_TYPES.items()},
+        })
+    except Exception as e:
+        logger.exception("api_notifications_get error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_notifications_set(request: web.Request) -> web.Response:
+    """POST /api/notifications/preferences — update user notification preference."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    notification_type = str(body.get("notification_type", "")).strip()
+    enabled = body.get("enabled")
+    quiet_hours_start = body.get("quiet_hours_start")
+    quiet_hours_end = body.get("quiet_hours_end")
+
+    if not notification_type:
+        return web.json_response({"error": "notification_type обов'язковий"}, status=400)
+
+    try:
+        from database.api.notifications import set_user_preference, NOTIFICATION_TYPES
+        if notification_type not in NOTIFICATION_TYPES:
+            return web.json_response({"error": "Невідомий тип сповіщення"}, status=400)
+        user_id = int(user.get("id", 0))
+        set_user_preference(
+            user_id,
+            notification_type,
+            bool(enabled) if enabled is not None else True,
+            quiet_hours_start or None,
+            quiet_hours_end or None,
+        )
+        return web.json_response({"ok": True, "message": "Налаштування збережено"})
+    except Exception as e:
+        logger.exception("api_notifications_set error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_notifications_test(request: web.Request) -> web.Response:
+    """POST /api/notifications/test — send a test notification to the user."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    # This endpoint is informational — the actual bot send happens via the Telegram bot
+    return web.json_response({
+        "ok": True,
+        "message": "🔔 Тест сповіщень. Якщо ви бачите це в webapp — система працює.",
+    })
+
+
+# ---------------------------------------------------------------------------
+# Task 6: Fuel orders API
+# ---------------------------------------------------------------------------
+
+async def api_fuel_orders_list(request: web.Request) -> web.Response:
+    """GET /api/fuel/orders — list fuel orders."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    try:
+        from database.api.fuel_orders import get_orders, get_fuel_consumption_stats
+        status_filter = request.query.get("status") or None
+        orders = get_orders(status=status_filter, limit=50)
+        stats = get_fuel_consumption_stats(days=30)
+        return web.json_response({"orders": orders, "consumption_stats": stats})
+    except Exception as e:
+        logger.exception("api_fuel_orders_list error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_fuel_orders_create(request: web.Request) -> web.Response:
+    """POST /api/fuel/orders — create a new fuel order."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    amount = body.get("amount_liters")
+    if amount is None:
+        return web.json_response({"error": "amount_liters обов'язковий"}, status=400)
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "Невірне значення кількості літрів"}, status=400)
+
+    if amount <= 0 or amount > 100000:
+        return web.json_response({"error": "Кількість літрів поза допустимим діапазоном"}, status=400)
+
+    try:
+        from database.api.fuel_orders import create_order
+        from utils.time import now_kiev
+        now = now_kiev()
+        user_id = int(user.get("id", 0))
+        order_id = create_order(
+            created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+            amount_liters=amount,
+            requested_by=user_id or None,
+            supplier=str(body.get("supplier", "")).strip() or None,
+            price=float(body["price"]) if body.get("price") else None,
+            delivery_date=str(body.get("delivery_date", "")).strip() or None,
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+        return web.json_response({"ok": True, "order_id": order_id, "message": "Замовлення створено"})
+    except Exception as e:
+        logger.exception("api_fuel_orders_create error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_fuel_orders_update(request: web.Request) -> web.Response:
+    """POST /api/fuel/orders/update — update a fuel order status."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    order_id = body.get("order_id")
+    if not order_id:
+        return web.json_response({"error": "order_id обов'язковий"}, status=400)
+
+    try:
+        from database.api.fuel_orders import update_order, update_order_status, VALID_STATUSES
+        new_status = str(body.get("status", "")).strip()
+        if new_status and new_status not in VALID_STATUSES:
+            return web.json_response({"error": f"Статус має бути одним із: {', '.join(VALID_STATUSES)}"}, status=400)
+
+        updated = update_order(
+            int(order_id),
+            supplier=str(body.get("supplier", "")).strip() or None,
+            price=float(body["price"]) if body.get("price") else None,
+            delivery_date=str(body.get("delivery_date", "")).strip() or None,
+            status=new_status or None,
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+        if not updated:
+            return web.json_response({"error": "Нічого не оновлено"}, status=400)
+
+        # If delivered, add fuel to current level
+        if new_status == "delivered":
+            from database.api.fuel_orders import get_order
+            order = get_order(int(order_id))
+            if order:
+                current_fuel = float(db.get_state_value("current_fuel", "0") or "0")
+                new_fuel = current_fuel + order["amount_liters"]
+                db.set_state("current_fuel", str(round(new_fuel, 1)))
+                user_id = int(user.get("id", 0))
+                user_info = db.get_user(user_id)
+                actor = user_info[1] if user_info else user.get("first_name", "Адмін")
+                db.add_log("refill", actor, str(order["amount_liters"]))
+
+        return web.json_response({"ok": True, "message": "Замовлення оновлено"})
+    except Exception as e:
+        logger.exception("api_fuel_orders_update error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Shift schedule API
+# ---------------------------------------------------------------------------
+
+async def api_shifts_get(request: web.Request) -> web.Response:
+    """GET /api/shifts/schedule — get shift schedule for a month or date."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    try:
+        from database.api.shift_schedule import get_month_schedule, get_date_schedule, get_personnel_shift_counts
+        date_param = request.query.get("date")
+        month_param = request.query.get("month")  # YYYY-MM
+
+        if date_param:
+            entries = get_date_schedule(date_param)
+            return web.json_response({"shifts": entries})
+        elif month_param:
+            year, month = int(month_param[:4]), int(month_param[5:7])
+            entries = get_month_schedule(year, month)
+            counts = get_personnel_shift_counts(month_param)
+            return web.json_response({"shifts": entries, "personnel_counts": counts, "month": month_param})
+        else:
+            from utils.time import now_kiev
+            now = now_kiev()
+            month_str = now.strftime("%Y-%m")
+            year, month = now.year, now.month
+            entries = get_month_schedule(year, month)
+            counts = get_personnel_shift_counts(month_str)
+            return web.json_response({"shifts": entries, "personnel_counts": counts, "month": month_str})
+    except Exception as e:
+        logger.exception("api_shifts_get error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_shifts_set(request: web.Request) -> web.Response:
+    """POST /api/shifts/schedule — create or update a shift assignment."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    date = str(body.get("date", "")).strip()
+    shift_type = str(body.get("shift_type", "")).strip()
+    if not date or not shift_type:
+        return web.json_response({"error": "date та shift_type обов'язкові"}, status=400)
+
+    try:
+        from database.api.shift_schedule import upsert_shift, VALID_SHIFT_TYPES
+        if shift_type not in VALID_SHIFT_TYPES:
+            return web.json_response({"error": f"shift_type має бути одним із: {', '.join(VALID_SHIFT_TYPES)}"}, status=400)
+
+        upsert_shift(
+            date=date,
+            shift_type=shift_type,
+            assigned_personnel_id=str(body.get("assigned_personnel_id", "")).strip() or None,
+            status=str(body.get("status", "planned")).strip() or "planned",
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+        return web.json_response({"ok": True, "message": "Зміну збережено"})
+    except Exception as e:
+        logger.exception("api_shifts_set error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_shifts_auto(request: web.Request) -> web.Response:
+    """POST /api/shifts/auto — generate auto schedule for a month."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    month_param = str(body.get("month", "")).strip()
+    save = bool(body.get("save", False))
+
+    if not month_param or len(month_param) < 7:
+        return web.json_response({"error": "month (YYYY-MM) обов'язковий"}, status=400)
+
+    try:
+        from database.api.shift_schedule import auto_schedule_month, upsert_shift
+        year, month = int(month_param[:4]), int(month_param[5:7])
+        # Get personnel list from DB
+        personnel_list = db.get_personnel_names()
+        if not personnel_list:
+            return web.json_response({"error": "Персонал не знайдено. Додайте персонал спочатку."}, status=400)
+
+        assignments = auto_schedule_month(year, month, personnel_list)
+
+        if save:
+            for a in assignments:
+                upsert_shift(
+                    date=a["date"],
+                    shift_type=a["shift_type"],
+                    assigned_personnel_id=a["assigned_personnel_id"],
+                    status=a["status"],
+                    notes=a["notes"],
+                )
+
+        return web.json_response({
+            "ok": True,
+            "assignments": assignments,
+            "saved": save,
+            "message": f"Згенеровано {len(assignments)} змін" + (" та збережено" if save else " (попередній перегляд)"),
+        })
+    except Exception as e:
+        logger.exception("api_shifts_auto error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_shifts_analytics(request: web.Request) -> web.Response:
+    """GET /api/shifts/analytics — shift load analytics."""
+    user = _extract_user(request)
+    if not user:
+        return web.json_response({"error": "Не авторизовано"}, status=401)
+    try:
+        from database.api.shift_schedule import get_personnel_shift_counts, get_month_schedule
+        from utils.time import now_kiev
+        now = now_kiev()
+        month_str = request.query.get("month") or now.strftime("%Y-%m")
+        year, month = int(month_str[:4]), int(month_str[5:7])
+
+        counts = get_personnel_shift_counts(month_str)
+        entries = get_month_schedule(year, month)
+
+        # Status breakdown
+        status_counts: dict = {}
+        for e in entries:
+            s = e.get("status", "planned")
+            status_counts[s] = status_counts.get(s, 0) + 1
+
+        return web.json_response({
+            "month": month_str,
+            "total_shifts": len(entries),
+            "personnel_counts": counts,
+            "status_breakdown": status_counts,
+        })
+    except Exception as e:
+        logger.exception("api_shifts_analytics error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 # ---------------------------------------------------------------------------
 # Статичні файли та додаток
 # ---------------------------------------------------------------------------
@@ -1688,6 +2018,19 @@ def create_app() -> web.Application:
     app.router.add_get("/api/admin/backups", api_admin_backups_list)
     app.router.add_post("/api/admin/backup", api_admin_backup_create)
     app.router.add_get("/api/admin/backup/download/{filename}", api_admin_backup_download)
+    # Task 5: Notification preferences endpoints
+    app.router.add_get("/api/notifications/preferences", api_notifications_get)
+    app.router.add_post("/api/notifications/preferences", api_notifications_set)
+    app.router.add_post("/api/notifications/test", api_notifications_test)
+    # Task 6: Fuel orders endpoints
+    app.router.add_get("/api/fuel/orders", api_fuel_orders_list)
+    app.router.add_post("/api/fuel/orders", api_fuel_orders_create)
+    app.router.add_post("/api/fuel/orders/update", api_fuel_orders_update)
+    # Task 8: Shift schedule endpoints
+    app.router.add_get("/api/shifts/schedule", api_shifts_get)
+    app.router.add_post("/api/shifts/schedule", api_shifts_set)
+    app.router.add_post("/api/shifts/auto", api_shifts_auto)
+    app.router.add_get("/api/shifts/analytics", api_shifts_analytics)
 
     # Статичні файли (CSS, JS)
     webapp_dir = _PROJECT_ROOT / "webapp"

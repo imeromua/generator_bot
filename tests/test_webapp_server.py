@@ -289,3 +289,102 @@ class TestInitDataValidation:
         """Init data with wrong hash should return None."""
         result = _validate_init_data("user=test&hash=invalidhash", "token")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 5: API /api/notifications
+# ---------------------------------------------------------------------------
+
+class TestApiNotifications:
+    """Tests for notification preferences endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_preferences_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/notifications/preferences")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_post_preferences_no_auth(self, client):
+        """Unauthenticated POST should return 401."""
+        resp = await (await client).post(
+            "/api/notifications/preferences",
+            json={"notification_type": "fuel_warning", "enabled": True},
+        )
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_test_notification_no_auth(self, client):
+        """Unauthenticated test notification should return 401."""
+        resp = await (await client).post("/api/notifications/test", json={})
+        assert resp.status == 401
+
+
+# ---------------------------------------------------------------------------
+# Task 6: API /api/fuel/orders
+# ---------------------------------------------------------------------------
+
+class TestApiFuelOrders:
+    """Tests for fuel orders endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_orders_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/fuel/orders")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_create_order_no_auth(self, client):
+        """Unauthenticated POST should return 401."""
+        resp = await (await client).post(
+            "/api/fuel/orders",
+            json={"amount_liters": 200},
+        )
+        assert resp.status == 403  # admin required → 403
+
+    @pytest.mark.asyncio
+    async def test_update_order_no_auth(self, client):
+        """Unauthenticated update should return 403."""
+        resp = await (await client).post(
+            "/api/fuel/orders/update",
+            json={"order_id": 1, "status": "ordered"},
+        )
+        assert resp.status == 403
+
+
+# ---------------------------------------------------------------------------
+# Task 8: API /api/shifts
+# ---------------------------------------------------------------------------
+
+class TestApiShifts:
+    """Tests for shift schedule endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_shifts_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/shifts/schedule")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_set_shift_no_auth(self, client):
+        """Unauthenticated POST should return 403."""
+        resp = await (await client).post(
+            "/api/shifts/schedule",
+            json={"date": "2025-01-01", "shift_type": "m"},
+        )
+        assert resp.status == 403
+
+    @pytest.mark.asyncio
+    async def test_auto_schedule_no_auth(self, client):
+        """Unauthenticated auto schedule should return 403."""
+        resp = await (await client).post(
+            "/api/shifts/auto",
+            json={"month": "2025-01"},
+        )
+        assert resp.status == 403
+
+    @pytest.mark.asyncio
+    async def test_analytics_no_auth(self, client):
+        """Unauthenticated analytics should return 401."""
+        resp = await (await client).get("/api/shifts/analytics")
+        assert resp.status == 401
