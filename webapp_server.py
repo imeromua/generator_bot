@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 # Константи
 # ---------------------------------------------------------------------------
 MAX_EVENTS_LIMIT = 100
+MAX_NAME_LENGTH = 100
 
 # ---------------------------------------------------------------------------
 # Telegram WebApp — валідація initData
@@ -118,14 +119,18 @@ async def cors_middleware(request: web.Request, handler):
     """Додає CORS-заголовки до всіх відповідей."""
     if request.method == "OPTIONS":
         resp = web.Response(status=204)
-    else:
-        try:
-            resp = await handler(request)
-        except web.HTTPException as exc:
-            resp = exc
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Telegram-Init-Data"
+        return resp
+
+    try:
+        resp = await handler(request)
+    except web.HTTPException as exc:
+        resp = exc
 
     resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Telegram-Init-Data"
     return resp
 
@@ -744,8 +749,275 @@ async def api_fuel_set(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=500)
 
 
+def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -> "Workbook":
+    """Будує Excel-книгу з детальним щоденним звітом для одного генератора.
+
+    Стовпці: Дата | Зміна 1 (поч/кін) | Зміна 2 | Зміна 3 | Екстра |
+             Залишок ранок | Витрата | Залишок вечір | Мотогодини |
+             Заправка (л) | Хто привіз | № чека
+    """
+    if not EXCEL_AVAILABLE:
+        raise RuntimeError("openpyxl не встановлено")
+
+    from collections import defaultdict
+
+    wb = Workbook()
+
+    gen_name = db.get_generator_name(generator_id)
+    end_date = now.strftime("%Y-%m-%d")
+    start_date = (now - timedelta(days=period_days)).strftime("%Y-%m-%d")
+
+    # --- Кольори ---
+    BLUE_FILL   = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
+    LBLUE_FILL  = PatternFill(start_color="D6E8FA", end_color="D6E8FA", fill_type="solid")
+    GREEN_FILL  = PatternFill(start_color="27AE60", end_color="27AE60", fill_type="solid")
+    ORANGE_FILL = PatternFill(start_color="F39C12", end_color="F39C12", fill_type="solid")
+    WHITE_FONT  = Font(bold=True, color="FFFFFF", size=11)
+    BOLD_FONT   = Font(bold=True, size=11)
+    BORDER_SIDE = None
+    try:
+        from openpyxl.styles import Border, Side
+        thin = Side(style="thin", color="AAAAAA")
+        BORDER_SIDE = Border(left=thin, right=thin, top=thin, bottom=thin)
+    except Exception:
+        pass
+
+    def _style_header(cell, fill=BLUE_FILL):
+        cell.font = WHITE_FONT
+        cell.fill = fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        if BORDER_SIDE:
+            cell.border = BORDER_SIDE
+
+    def _style_data(cell, bold=False, align="center"):
+        cell.alignment = Alignment(horizontal=align, vertical="center")
+        if bold:
+            cell.font = Font(bold=True)
+        if BORDER_SIDE:
+            cell.border = BORDER_SIDE
+
+    # ---- Аркуш «Щоденний звіт» ----
+    ws = wb.active
+    ws.title = "Щоденний звіт"
+
+    # Шапка
+    ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 18
+    ws.row_dimensions[3].height = 18
+
+    header_text = f"Звіт генератора «{gen_name}» за {period_days} днів | Сформовано: {now.strftime('%d.%m.%Y %H:%M')}"
+    ws["A1"] = header_text
+    ws["A1"].font = Font(bold=True, size=13, color="1A1A2E")
+    ws.merge_cells("A1:M1")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["A1"].fill = PatternFill(start_color="EAF2FB", end_color="EAF2FB", fill_type="solid")
+
+    # Рядки заголовків стовпців
+    col_headers_r2 = [
+        "Дата",
+        "Зміна 1\nпочаток", "Зміна 1\nкінець",
+        "Зміна 2\nпочаток", "Зміна 2\nкінець",
+        "Зміна 3\nпочаток", "Зміна 3\nкінець",
+        "Залишок\nранок, л", "Витрата\nза день, л", "Залишок\nвечір, л",
+        "Мотогодини\n(накопичено)", "Заправка\n(прихід), л",
+        "Хто привіз / № чека",
+    ]
+    for ci, h in enumerate(col_headers_r2, start=1):
+        c = ws.cell(row=2, column=ci, value=h)
+        if ci == 1:
+            _style_header(c, BLUE_FILL)
+        elif ci in (2, 3):
+            _style_header(c, PatternFill(start_color="1A7A44", end_color="1A7A44", fill_type="solid"))
+        elif ci in (4, 5):
+            _style_header(c, PatternFill(start_color="D4AC0D", end_color="D4AC0D", fill_type="solid"))
+        elif ci in (6, 7):
+            _style_header(c, PatternFill(start_color="1565C0", end_color="1565C0", fill_type="solid"))
+        elif ci in (8, 9, 10):
+            _style_header(c, PatternFill(start_color="6C3483", end_color="6C3483", fill_type="solid"))
+        elif ci == 11:
+            _style_header(c, PatternFill(start_color="2E86C1", end_color="2E86C1", fill_type="solid"))
+        elif ci in (12, 13):
+            _style_header(c, PatternFill(start_color="117A65", end_color="117A65", fill_type="solid"))
+        ws.row_dimensions[2].height = 40
+
+    # Ширини стовпців
+    col_widths = [12, 11, 11, 11, 11, 11, 11, 13, 13, 13, 15, 13, 30]
+    for ci, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+
+    # Отримуємо всі логи за період для цього генератора
+    logs = db.get_logs_for_period(start_date, end_date, generator_id)
+
+    # Агрегуємо по датах
+    days_data = defaultdict(lambda: {
+        "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
+        "refills": [],
+        "morning_fuel": None,
+        "evening_fuel": None,
+        "hours_start": None,
+        "hours_end": None,
+    })
+
+    for row_data in logs:
+        event_type, ts_str, user_name, value, driver_name, receipt_number, *_ = row_data
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+        date_str = ts.strftime("%Y-%m-%d")
+        day = days_data[date_str]
+
+        if event_type.endswith("_start"):
+            shift = event_type.split("_")[0]
+            if shift in day["shifts"]:
+                day["shifts"][shift]["start"] = ts.strftime("%H:%M")
+        elif event_type.endswith("_end"):
+            shift = event_type.split("_")[0]
+            if shift in day["shifts"]:
+                day["shifts"][shift]["end"] = ts.strftime("%H:%M")
+        elif event_type == "refill":
+            try:
+                liters = float(value or 0)
+            except Exception:
+                liters = 0.0
+            day["refills"].append((liters, (driver_name or "").strip(), (receipt_number or "").strip()))
+        elif event_type == "corr_fuel_set":
+            # Використовуємо останню корекцію дня як залишок
+            try:
+                day["evening_fuel"] = float(value or 0)
+            except Exception:
+                pass
+
+    # Рядок початку — отримуємо поточний стан
+    state = db.get_state()
+    current_fuel = float(state.get("current_fuel", 0))
+
+    # Генеруємо рядки за відсортованими датами
+    data_row = 3
+    prev_fuel = None
+    fuel_rate = db.get_fuel_consumption_rate()
+
+    for date_str in sorted(days_data.keys()):
+        day = days_data[date_str]
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            date_fmt = dt.strftime("%d.%m.%Y")
+        except Exception:
+            date_fmt = date_str
+
+        # Розраховуємо витрату
+        total_shift_mins = 0
+        for shift_data in day["shifts"].values():
+            s_str = shift_data.get("start")
+            e_str = shift_data.get("end")
+            if s_str and e_str:
+                try:
+                    s_t = datetime.strptime(s_str, "%H:%M")
+                    e_t = datetime.strptime(e_str, "%H:%M")
+                    diff = (e_t - s_t).total_seconds() / 60
+                    if diff < 0:
+                        diff += 24 * 60
+                    total_shift_mins += diff
+                except Exception:
+                    pass
+
+        total_hours = round(total_shift_mins / 60, 2)
+        consumption = round(total_hours * fuel_rate, 1) if total_hours > 0 else 0.0
+        refill_total = round(sum(r[0] for r in day["refills"]), 1) if day["refills"] else 0.0
+
+        morning_fuel = day.get("morning_fuel") or prev_fuel
+        if morning_fuel is not None:
+            evening_fuel = round(float(morning_fuel) + refill_total - consumption, 1)
+        else:
+            morning_fuel = ""
+            evening_fuel = ""
+
+        prev_fuel = evening_fuel if isinstance(evening_fuel, float) else None
+
+        drivers_str = ", ".join(
+            f"{drv} (чек {rec})" if rec else drv
+            for _, drv, rec in day["refills"] if drv
+        ) or "—"
+
+        row_vals = [
+            date_fmt,
+            day["shifts"]["m"].get("start", ""),
+            day["shifts"]["m"].get("end", ""),
+            day["shifts"]["d"].get("start", ""),
+            day["shifts"]["d"].get("end", ""),
+            day["shifts"]["e"].get("start", ""),
+            day["shifts"]["e"].get("end", ""),
+            morning_fuel if morning_fuel != "" else "—",
+            consumption if consumption > 0 else "—",
+            evening_fuel if evening_fuel != "" else "—",
+            total_hours if total_hours > 0 else "—",
+            refill_total if refill_total > 0 else "—",
+            drivers_str,
+        ]
+
+        for ci, val in enumerate(row_vals, start=1):
+            c = ws.cell(row=data_row, column=ci, value=val)
+            bold = ci == 1
+            align = "left" if ci == 13 else "center"
+            _style_data(c, bold=bold, align=align)
+            # Підсвітлення критичних залишків
+            if ci == 10 and isinstance(val, float):
+                if val < 15:
+                    c.fill = PatternFill(start_color="FADBD8", end_color="FADBD8", fill_type="solid")
+                elif val < 40:
+                    c.fill = PatternFill(start_color="FDEBD0", end_color="FDEBD0", fill_type="solid")
+
+        ws.row_dimensions[data_row].height = 18
+        data_row += 1
+
+    # ---- Аркуш ТО ----
+    ws_mnt = wb.create_sheet("Технічне обслуговування")
+    stats = db.get_maintenance_stats(generator_id)
+    mnt_history = db.get_maintenance_history(generator_id, 100)
+
+    ws_mnt["A1"] = f"Технічне обслуговування — {gen_name}"
+    ws_mnt["A1"].font = Font(bold=True, size=13)
+    ws_mnt.merge_cells("A1:E1")
+    ws_mnt["A1"].alignment = Alignment(horizontal="center")
+    ws_mnt["A1"].fill = PatternFill(start_color="EAF2FB", end_color="EAF2FB", fill_type="solid")
+
+    ws_mnt["A3"] = "Мотогодини (загалом):"
+    ws_mnt["B3"] = f"{float(stats.get('total_hours', 0)):.1f} год"
+    ws_mnt["A3"].font = BOLD_FONT
+    ws_mnt["B3"].font = Font(size=11)
+
+    mnt_col_hdrs = ["Дата", "Тип ТО", "Мотогодини на момент ТО", "Виконав", "Примітки"]
+    for ci, h in enumerate(mnt_col_hdrs, start=1):
+        c = ws_mnt.cell(row=5, column=ci, value=h)
+        _style_header(c)
+
+    ws_mnt.column_dimensions["A"].width = 14
+    ws_mnt.column_dimensions["B"].width = 22
+    ws_mnt.column_dimensions["C"].width = 26
+    ws_mnt.column_dimensions["D"].width = 20
+    ws_mnt.column_dimensions["E"].width = 20
+
+    mnt_map = {"oil": "Заміна мастила", "spark": "Заміна свічок", "maintenance": "Планове ТО"}
+    for ri, rec in enumerate(mnt_history, start=6):
+        rec_id, date_s, action, hours, admin_name, *_ = rec
+        ws_mnt.cell(row=ri, column=1, value=date_s)
+        ws_mnt.cell(row=ri, column=2, value=mnt_map.get(action, action))
+        ws_mnt.cell(row=ri, column=3, value=f"{float(hours):.1f} год")
+        ws_mnt.cell(row=ri, column=4, value=admin_name or "—")
+        for ci in range(1, 5):
+            _style_data(ws_mnt.cell(row=ri, column=ci))
+
+    return wb
+
+
 async def api_report_excel(request: web.Request) -> web.Response:
-    """GET /api/report/excel — завантаження Excel-звіту."""
+    """GET /api/report/excel?days=30&generator=main — завантаження Excel-звіту.
+
+    Параметр ``generator`` може бути ``main``, ``emergency`` або ``all``
+    (за замовчуванням — активний генератор).
+    """
     user = _extract_user(request)
     if not _is_admin(user):
         return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
@@ -762,133 +1034,21 @@ async def api_report_excel(request: web.Request) -> web.Response:
     except (ValueError, TypeError):
         period_days = 30
 
+    generator_param = (request.query.get("generator") or "").strip().lower()
+    if generator_param not in ("main", "emergency"):
+        generator_param = db.get_active_generator()
+
     try:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Журнал подій"
-
-        header_fill = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF")
-
-        # Заголовок звіту
         now = datetime.now(config.KYIV)
-        ws["A1"] = f"Звіт генератора — {now.strftime('%d.%m.%Y %H:%M')}"
-        ws["A1"].font = Font(bold=True, size=14)
-        ws.merge_cells("A1:F1")
-
-        # Загальний стан
-        state = db.get_state()
-        active_gen = db.get_active_generator()
-        gen_name = db.get_generator_name(active_gen)
-
-        ws["A3"] = "Активний генератор:"
-        ws["B3"] = gen_name
-        ws["A4"] = "Статус:"
-        ws["B4"] = state.get("status", "OFF")
-        ws["A5"] = "Залишок палива:"
-        ws["B5"] = f"{float(state.get('current_fuel', 0)):.1f} л"
-
-        # Заголовки таблиці
-        col_headers = ["Дата/Час", "Подія", "Користувач", "Значення", "Водій", "Чек"]
-        for col_idx, header in enumerate(col_headers, start=1):
-            cell = ws.cell(row=7, column=col_idx)
-            cell.value = header
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center")
-
-        event_names = {
-            "m_start": "🌅 Зміна 1 (початок)",
-            "m_end": "🌅 Зміна 1 (кінець)",
-            "d_start": "☀️ Зміна 2 (початок)",
-            "d_end": "☀️ Зміна 2 (кінець)",
-            "e_start": "🌙 Зміна 3 (початок)",
-            "e_end": "🌙 Зміна 3 (кінець)",
-            "x_start": "⚡ Екстра (початок)",
-            "x_end": "⚡ Екстра (кінець)",
-            "refill": "⛽ Прийом палива",
-            "corr_fuel_set": "🔧 Корекція палива",
-            "sync": "🔄 Синхронізація",
-            "mnt_oil": "🛢 Заміна мастила",
-            "mnt_spark": "🕯 Заміна свічок",
-            "mnt_maintenance": "🔧 Планове ТО",
-            "mnt_set_hours": "⏱ Корекція мотогодин",
-            "auto_stop": "⏰ Авто-зупинка",
-        }
-
-        end_date = now.strftime("%Y-%m-%d")
-        start_date = (now - timedelta(days=period_days)).strftime("%Y-%m-%d")
-        logs = db.get_logs_for_period(start_date, end_date)
-
-        row = 8
-        for log in logs:
-            event_type, timestamp, user_name, value, driver_name, receipt_number, *_ = log
-            ws.cell(row=row, column=1).value = timestamp
-            ws.cell(row=row, column=2).value = event_names.get(event_type, event_type)
-            ws.cell(row=row, column=3).value = user_name or "—"
-            ws.cell(row=row, column=4).value = value or "—"
-            ws.cell(row=row, column=5).value = driver_name or "—"
-            ws.cell(row=row, column=6).value = receipt_number or "—"
-            row += 1
-
-        # Аркуш ТО
-        ws2 = wb.create_sheet("ТО")
-        ws2["A1"] = "Технічне обслуговування"
-        ws2["A1"].font = Font(bold=True, size=14)
-        ws2.merge_cells("A1:E1")
-
-        for gen_id in ("main", "emergency"):
-            stats = db.get_maintenance_stats(gen_id)
-            gen_label = db.get_generator_name(gen_id)
-            history = db.get_maintenance_history(gen_id, 50)
-
-            row2 = ws2.max_row + 2
-            ws2.cell(row=row2, column=1).value = gen_label
-            ws2.cell(row=row2, column=1).font = Font(bold=True, size=12)
-            row2 += 1
-
-            ws2.cell(row=row2, column=1).value = "Мотогодини:"
-            ws2.cell(row=row2, column=2).value = f"{float(stats.get('total_hours', 0)):.1f} год"
-            row2 += 1
-
-            col_h2 = ["Дата", "Тип ТО", "Мотогодини", "Виконав"]
-            for ci, h in enumerate(col_h2, start=1):
-                c = ws2.cell(row=row2, column=ci)
-                c.value = h
-                c.fill = header_fill
-                c.font = header_font
-            row2 += 1
-
-            for rec in history:
-                rec_id, date_str, action, hours, admin, *_ = rec
-                ws2.cell(row=row2, column=1).value = date_str
-                ws2.cell(row=row2, column=2).value = {"oil": "Мастило", "spark": "Свічки", "maintenance": "Планове ТО"}.get(action, action)
-                ws2.cell(row=row2, column=3).value = f"{float(hours):.1f}"
-                ws2.cell(row=row2, column=4).value = admin or "—"
-                row2 += 1
-
-        # Автоширина (безпечно з MergedCell)
-        for ws_sheet in [ws, ws2]:
-            for col_idx in range(1, ws_sheet.max_column + 1):
-                max_len = 0
-                col_letter = get_column_letter(col_idx)
-                for row_idx in range(1, ws_sheet.max_row + 1):
-                    cell = ws_sheet.cell(row=row_idx, column=col_idx)
-                    if isinstance(cell, MergedCell):
-                        continue
-                    try:
-                        cell_len = len(str(cell.value or ""))
-                        if cell_len > max_len:
-                            max_len = cell_len
-                    except Exception:
-                        pass
-                ws_sheet.column_dimensions[col_letter].width = min(max_len + 2, 50)
+        gen_name = db.get_generator_name(generator_param)
+        wb = _build_daily_report_wb(generator_param, period_days, now)
 
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
 
-        filename = f"generator_report_{now.strftime('%Y%m%d_%H%M')}.xlsx"
+        safe_gen = "основний" if generator_param == "main" else "аварійний"
+        filename = f"звіт_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
         return web.Response(
             body=buf.read(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -897,6 +1057,196 @@ async def api_report_excel(request: web.Request) -> web.Response:
     except Exception as e:
         logger.exception("api_report_excel error")
         return web.json_response({"error": str(e)}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# Admin CRUD: drivers & personnel
+# ---------------------------------------------------------------------------
+
+async def api_admin_drivers_list(request: web.Request) -> web.Response:
+    """GET /api/admin/drivers — список водіїв (лише для адмінів)."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        drivers = db.get_drivers()
+        return web.json_response({"drivers": list(drivers) if drivers else []})
+    except Exception as e:
+        logger.exception("api_admin_drivers_list error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_drivers_add(request: web.Request) -> web.Response:
+    """POST /api/admin/drivers — додати водія."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > MAX_NAME_LENGTH:
+        return web.json_response({"error": "Невірне ім'я водія (1–100 символів)"}, status=400)
+
+    try:
+        ok = db.add_driver(name)
+        if not ok:
+            return web.json_response({"error": f"Водій «{name}» вже існує"}, status=409)
+        return web.json_response({"ok": True, "message": f"Водія «{name}» додано"})
+    except Exception as e:
+        logger.exception("api_admin_drivers_add error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_drivers_delete(request: web.Request) -> web.Response:
+    """DELETE /api/admin/drivers — видалити водія."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        return web.json_response({"error": "Ім'я водія обов'язкове"}, status=400)
+
+    try:
+        ok = db.delete_driver(name)
+        if not ok:
+            return web.json_response({"error": f"Водія «{name}» не знайдено"}, status=404)
+        return web.json_response({"ok": True, "message": f"Водія «{name}» видалено"})
+    except Exception as e:
+        logger.exception("api_admin_drivers_delete error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_personnel_list(request: web.Request) -> web.Response:
+    """GET /api/admin/personnel — список персоналу (лише для адмінів)."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+    try:
+        names = db.get_personnel_names()
+        users_with_p = db.get_all_users_with_personnel()
+        users_list = [
+            {"user_id": row[0], "full_name": row[1] or "", "personnel": row[2] or ""}
+            for row in users_with_p
+        ]
+        return web.json_response({"personnel": names, "users": users_list})
+    except Exception as e:
+        logger.exception("api_admin_personnel_list error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_personnel_add(request: web.Request) -> web.Response:
+    """POST /api/admin/personnel — додати ПІБ персоналу."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > MAX_NAME_LENGTH:
+        return web.json_response({"error": "Невірне ім'я (1–100 символів)"}, status=400)
+
+    try:
+        ok = db.add_personnel_name(name)
+        if not ok:
+            return web.json_response({"error": f"Персонал «{name}» вже існує"}, status=409)
+        return web.json_response({"ok": True, "message": f"Персонал «{name}» додано"})
+    except Exception as e:
+        logger.exception("api_admin_personnel_add error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_personnel_delete(request: web.Request) -> web.Response:
+    """DELETE /api/admin/personnel — видалити ПІБ персоналу."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        return web.json_response({"error": "Ім'я обов'язкове"}, status=400)
+
+    try:
+        ok = db.delete_personnel_name(name)
+        if not ok:
+            return web.json_response({"error": f"Персонал «{name}» не знайдено"}, status=404)
+        return web.json_response({"ok": True, "message": f"Персонал «{name}» видалено"})
+    except Exception as e:
+        logger.exception("api_admin_personnel_delete error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_personnel_assign(request: web.Request) -> web.Response:
+    """POST /api/admin/personnel/assign — прив'язати персонал до Telegram-користувача."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Невірний JSON"}, status=400)
+
+    try:
+        target_user_id = int(body.get("user_id", 0))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "Невірний user_id"}, status=400)
+
+    personnel_name = (body.get("personnel") or "").strip() or None
+
+    if not target_user_id:
+        return web.json_response({"error": "user_id обов'язковий"}, status=400)
+
+    try:
+        db.set_personnel_for_user(target_user_id, personnel_name)
+        if personnel_name:
+            msg = f"Прив'язано: user {target_user_id} → «{personnel_name}»"
+        else:
+            msg = f"Прив'язку для user {target_user_id} знято"
+        return web.json_response({"ok": True, "message": msg})
+    except Exception as e:
+        logger.exception("api_admin_personnel_assign error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_sync(request: web.Request) -> web.Response:
+    """POST /api/admin/sync — запуск синхронізації з Google Sheets (експорт)."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        from services.sheets_export import full_export
+        result = full_export()
+        updated = result.get("updated", [])
+        skipped = result.get("skipped", [])
+        return web.json_response({
+            "ok": True,
+            "message": f"Синхронізовано: {len(updated)} дн., пропущено: {len(skipped)} дн.",
+            "updated": updated,
+            "skipped": skipped,
+        })
+    except Exception as e:
+        logger.exception("api_admin_sync error")
+        return web.json_response({"error": f"Помилка синхронізації: {e}"}, status=500)
 
 
 # ---------------------------------------------------------------------------
@@ -928,6 +1278,15 @@ def create_app() -> web.Application:
     app.router.add_post("/api/maintenance/perform", api_maintenance_perform)
     app.router.add_post("/api/maintenance/set-hours", api_maintenance_set_hours)
     app.router.add_post("/api/fuel/set", api_fuel_set)
+    # Admin management endpoints
+    app.router.add_get("/api/admin/drivers", api_admin_drivers_list)
+    app.router.add_post("/api/admin/drivers", api_admin_drivers_add)
+    app.router.add_delete("/api/admin/drivers", api_admin_drivers_delete)
+    app.router.add_get("/api/admin/personnel", api_admin_personnel_list)
+    app.router.add_post("/api/admin/personnel", api_admin_personnel_add)
+    app.router.add_delete("/api/admin/personnel", api_admin_personnel_delete)
+    app.router.add_post("/api/admin/personnel/assign", api_admin_personnel_assign)
+    app.router.add_post("/api/admin/sync", api_admin_sync)
 
     # Статичні файли (CSS, JS)
     webapp_dir = _PROJECT_ROOT / "webapp"

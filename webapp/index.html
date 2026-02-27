@@ -274,7 +274,7 @@
             <!-- Звіт Excel -->
             <div class="card">
                 <div class="card-header">
-                    <h2>📊 Звіти</h2>
+                    <h2>📊 Звіти Excel</h2>
                 </div>
                 <div class="card-body">
                     <div class="form-row">
@@ -287,11 +287,78 @@
                             <option value="90">90 днів</option>
                         </select>
                     </div>
-                    <a id="btn-download-report" class="btn btn-primary btn-full"
-                        style="text-decoration:none;text-align:center;"
-                        onclick="App.downloadReport(event)">
-                        📥 Завантажити Excel звіт
-                    </a>
+                    <div class="action-grid" style="margin-top:8px">
+                        <button class="btn btn-primary" onclick="App.downloadReport('main')">
+                            🔋 Основний генератор
+                        </button>
+                        <button class="btn btn-warning" onclick="App.downloadReport('emergency')">
+                            ⚠️ Аварійний генератор
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Синхронізація з Google Sheets -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔄 Google Sheets</h2>
+                </div>
+                <div class="card-body">
+                    <p class="hint-text" style="margin-bottom:10px">Експорт даних з бази даних у таблицю Google Sheets</p>
+                    <button class="btn btn-secondary btn-full" id="btn-sync-sheets" onclick="App.syncSheets()">
+                        🔄 Синхронізувати з Sheets
+                    </button>
+                    <div id="sync-result" class="hint-text" style="margin-top:8px;display:none"></div>
+                </div>
+            </div>
+
+            <!-- Управління водіями -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🚗 Водії</h2>
+                    <button class="btn-sm" id="btn-refresh-drivers" onclick="App.refreshAdminDrivers()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-row" style="display:flex;gap:8px">
+                        <input type="text" id="new-driver-name" class="form-input"
+                            maxlength="100" placeholder="Ім'я водія" style="flex:1">
+                        <button class="btn btn-primary" onclick="App.adminAddDriver()">+ Додати</button>
+                    </div>
+                    <div id="admin-drivers-list" class="manage-list" style="margin-top:10px">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Управління персоналом -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>👥 Персонал</h2>
+                    <button class="btn-sm" id="btn-refresh-personnel" onclick="App.refreshAdminPersonnel()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-row" style="display:flex;gap:8px">
+                        <input type="text" id="new-personnel-name" class="form-input"
+                            maxlength="100" placeholder="ПІБ персоналу" style="flex:1">
+                        <button class="btn btn-primary" onclick="App.adminAddPersonnel()">+ Додати</button>
+                    </div>
+                    <div id="admin-personnel-list" class="manage-list" style="margin-top:10px">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Прив'язка персоналу до користувачів -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔗 Прив'язка персоналу</h2>
+                    <button class="btn-sm" onclick="App.refreshAdminUsers()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <p class="hint-text" style="margin-bottom:8px">Призначте персонал конкретному Telegram-користувачу</p>
+                    <div id="admin-users-list" class="manage-list">
+                        <!-- Заповнюється JS -->
+                    </div>
                 </div>
             </div>
         </section>

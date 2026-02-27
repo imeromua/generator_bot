@@ -53,6 +53,22 @@ const API = (() => {
         return resp.json();
     }
 
+    /**
+     * DELETE-запит до API.
+     */
+    async function _delete(path, data) {
+        const resp = await fetch(BASE + path, {
+            method: "DELETE",
+            headers: _headers(),
+            body: JSON.stringify(data || {}),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
     return {
         // --- GET ---
         /** Стан генератора */
@@ -74,7 +90,19 @@ const API = (() => {
         /** Персонал поточного користувача */
         getPersonnelMe: () => get("/api/personnel/me"),
         /** Завантаження Excel-звіту (повертає URL) */
-        getReportUrl: (days) => BASE + "/api/report/excel" + (days ? `?days=${days}` : ""),
+        getReportUrl: (days, generator) => {
+            let url = BASE + "/api/report/excel?days=" + (days || "30");
+            if (generator) url += "&generator=" + encodeURIComponent(generator);
+            return url;
+        },
+
+        // --- Admin CRUD ---
+        /** Список водіїв (адмін) */
+        adminGetDrivers: () => get("/api/admin/drivers"),
+        /** Список персоналу (адмін) */
+        adminGetPersonnel: () => get("/api/admin/personnel"),
+        /** Синхронізація з Google Sheets */
+        adminSync: () => post("/api/admin/sync", {}),
 
         // --- POST ---
         /** Старт зміни */
@@ -93,6 +121,16 @@ const API = (() => {
         setHours: (generator, hours) => post("/api/maintenance/set-hours", { generator, hours }),
         /** Встановлення рівня палива */
         setFuel: (fuel) => post("/api/fuel/set", { fuel }),
+        /** Додати водія */
+        adminAddDriver: (name) => post("/api/admin/drivers", { name }),
+        /** Видалити водія */
+        adminDeleteDriver: (name) => _delete("/api/admin/drivers", { name }),
+        /** Додати персонал */
+        adminAddPersonnel: (name) => post("/api/admin/personnel", { name }),
+        /** Видалити персонал */
+        adminDeletePersonnel: (name) => _delete("/api/admin/personnel", { name }),
+        /** Прив'язати персонал до користувача */
+        adminAssignPersonnel: (user_id, personnel) => post("/api/admin/personnel/assign", { user_id, personnel }),
     };
 })();
 
