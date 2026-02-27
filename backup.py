@@ -127,9 +127,8 @@ def apply_retention_policy(backup_dir: Path | None = None) -> list[Path]:
     backups: list[tuple[datetime, Path]] = []
     for f in backup_dir.glob("backup_*.sql.gz"):
         try:
-            # filename: backup_YYYY-MM-DD_HH-MM.sql.gz
-            stem = f.stem  # backup_YYYY-MM-DD_HH-MM.sql (before second .gz)
-            # actually stem of "backup_2024-01-01_03-00.sql.gz" → "backup_2024-01-01_03-00.sql"
+            # filename format: backup_YYYY-MM-DD_HH-MM.sql.gz
+            # strip the prefix and double extension to get the date part
             date_part = f.name[len("backup_"):].replace(".sql.gz", "")
             dt = datetime.strptime(date_part, "%Y-%m-%d_%H-%M")
             backups.append((dt, f))

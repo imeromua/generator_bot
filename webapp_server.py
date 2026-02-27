@@ -146,11 +146,15 @@ from collections import defaultdict
 _rate_limit_counts: dict = defaultdict(list)
 _RATE_LIMIT_MAX = 100
 _RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_CLEANUP_INTERVAL = 300  # clean stale IPs every 5 minutes
+_rate_limit_last_cleanup = 0.0
 
 
 @web.middleware
 async def rate_limit_middleware(request: web.Request, handler):
     """Simple in-memory rate limiter: 100 requests per minute per IP."""
+    global _rate_limit_last_cleanup
+
     if request.method == "OPTIONS":
         return await handler(request)
 
@@ -158,7 +162,14 @@ async def rate_limit_middleware(request: web.Request, handler):
     now = _time.monotonic()
     window_start = now - _RATE_LIMIT_WINDOW
 
-    # Remove old entries
+    # Periodically clean up IPs with no recent requests to prevent memory growth
+    if now - _rate_limit_last_cleanup > _RATE_LIMIT_CLEANUP_INTERVAL:
+        stale = [k for k, v in _rate_limit_counts.items() if not v or v[-1] < window_start]
+        for k in stale:
+            del _rate_limit_counts[k]
+        _rate_limit_last_cleanup = now
+
+    # Remove old entries for this IP
     _rate_limit_counts[ip] = [t for t in _rate_limit_counts[ip] if t > window_start]
 
     if len(_rate_limit_counts[ip]) >= _RATE_LIMIT_MAX:
@@ -1600,16 +1611,18 @@ async def api_admin_backup_create(request: web.Request) -> web.Response:
 
 async def api_admin_backup_download(request: web.Request) -> web.Response:
     """GET /api/admin/backup/download/{filename} — завантажити резервну копію."""
+    import re as _re
+
     user = _extract_user(request)
     if not _is_admin(user):
         return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
 
     filename = request.match_info.get("filename", "")
-    # Security: only allow safe filenames (no path traversal)
-    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+    # Security: strictly validate the expected filename pattern to prevent path traversal
+    # and injection attacks. Pattern: backup_YYYY-MM-DD_HH-MM.sql.gz
+    _BACKUP_FILENAME_RE = _re.compile(r'^backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}\.sql\.gz$')
+    if not filename or not _BACKUP_FILENAME_RE.match(filename):
         return web.json_response({"error": "Невірне ім'я файлу"}, status=400)
-    if not filename.startswith("backup_") or not filename.endswith(".sql.gz"):
-        return web.json_response({"error": "Невірний формат файлу"}, status=400)
 
     try:
         from backup import DEFAULT_BACKUP_DIR
