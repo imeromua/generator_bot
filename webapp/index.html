@@ -8,6 +8,10 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+    <!-- Офлайн-банер (прихований за замовчуванням) -->
+    <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#f39c12;color:#fff;text-align:center;padding:8px 16px;font-size:14px;font-weight:600;">
+        ⚠️ Офлайн-режим — показуються збережені дані. Зміни недоступні.
+    </div>
     <div id="app">
         <!-- Навігація -->
         <nav class="tabs" id="tabs">
@@ -486,6 +490,25 @@
 
     <script src="/js/api.js"></script>
     <script src="/js/app.js"></script>
+    <script>
+        // Register service worker for offline support
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js').catch(function(err) {
+                console.warn('Service Worker registration failed:', err);
+            });
+        }
+
+        // Offline / online detection
+        function updateOnlineStatus() {
+            var banner = document.getElementById('offline-banner');
+            if (banner) {
+                banner.style.display = navigator.onLine ? 'none' : 'block';
+            }
+        }
+        window.addEventListener('online', updateOnlineStatus);
+        window.addEventListener('offline', updateOnlineStatus);
+        updateOnlineStatus();
+    </script>
 </body>
 </html>
 
