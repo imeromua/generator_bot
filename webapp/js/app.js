@@ -29,6 +29,9 @@
 
     // Стан форми прийому палива
     const refuelState = { driver: null, liters: null, step: 1 };
+    // Вибраний водій / персонал в адмін-панелі
+    let selectedDriver = null;
+    let selectedPersonnel = null;
     // Стан форми ТО
     let pendingMnt = { action: null, generator: null };
     // Стан форми мотогодин
@@ -690,17 +693,17 @@
             const days = $("report-days-select").value || "30";
             let url = API.getReportUrl(days, generator || "");
             // initData передається як query-параметр для прямого завантаження
-            const initData = window.Telegram && window.Telegram.WebApp
-                ? window.Telegram.WebApp.initData : "";
+            const initData = window.Telegram?.WebApp?.initData;
             if (initData) {
                 url += (url.includes("?") ? "&" : "?") + "init_data=" + encodeURIComponent(initData);
             }
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "";
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
+            // Абсолютний URL для Telegram openLink
+            const absUrl = url.startsWith("http") ? url : (window.location.origin + url);
+            if (window.Telegram?.WebApp?.openLink) {
+                window.Telegram.WebApp.openLink(absUrl);
+            } else {
+                window.open(absUrl, "_blank");
+            }
         },
 
         // --- Sync Google Sheets ---
@@ -742,17 +745,12 @@
                 listEl.innerHTML = "";
                 drivers.forEach((d) => {
                     const row = document.createElement("div");
-                    row.className = "manage-item";
+                    row.className = "manage-item" + (selectedDriver === d ? " selected" : "");
                     const name = document.createElement("span");
                     name.className = "manage-item-name";
                     name.textContent = d;
-                    const del = document.createElement("button");
-                    del.className = "btn btn-danger btn-sm-icon";
-                    del.textContent = "✕";
-                    del.title = "Видалити";
-                    del.addEventListener("click", () => App.adminDeleteDriver(d));
                     row.appendChild(name);
-                    row.appendChild(del);
+                    row.addEventListener("click", () => App.selectDriver(d));
                     listEl.appendChild(row);
                 });
             } catch (e) {
@@ -785,6 +783,31 @@
             }
         },
 
+        selectDriver(name) {
+            selectedDriver = name;
+            $("selected-driver-name").textContent = name;
+            $("driver-actions-panel").classList.remove("hidden");
+            App.refreshAdminDrivers();
+        },
+        clearDriverSelection() {
+            selectedDriver = null;
+            $("driver-actions-panel").classList.add("hidden");
+            App.refreshAdminDrivers();
+        },
+        async adminDeleteSelectedDriver() {
+            if (!selectedDriver) return;
+            if (!confirm(`Видалити водія «${selectedDriver}»?`)) return;
+            try {
+                const res = await API.adminDeleteDriver(selectedDriver);
+                showSuccess(res.message || "Видалено");
+                selectedDriver = null;
+                $("driver-actions-panel").classList.add("hidden");
+                await App.refreshAdminDrivers();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
         // --- Personnel admin ---
         async refreshAdminPersonnel() {
             const listEl = $("admin-personnel-list");
@@ -800,17 +823,12 @@
                 listEl.innerHTML = "";
                 personnel.forEach((p) => {
                     const row = document.createElement("div");
-                    row.className = "manage-item";
+                    row.className = "manage-item" + (selectedPersonnel === p ? " selected" : "");
                     const name = document.createElement("span");
                     name.className = "manage-item-name";
                     name.textContent = p;
-                    const del = document.createElement("button");
-                    del.className = "btn btn-danger btn-sm-icon";
-                    del.textContent = "✕";
-                    del.title = "Видалити";
-                    del.addEventListener("click", () => App.adminDeletePersonnel(p));
                     row.appendChild(name);
-                    row.appendChild(del);
+                    row.addEventListener("click", () => App.selectPersonnel(p));
                     listEl.appendChild(row);
                 });
             } catch (e) {
@@ -837,6 +855,32 @@
             try {
                 const res = await API.adminDeletePersonnel(name);
                 showSuccess(res.message || "Видалено");
+                await App.refreshAdminPersonnel();
+                await App.refreshAdminUsers();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        selectPersonnel(name) {
+            selectedPersonnel = name;
+            $("selected-personnel-name").textContent = name;
+            $("personnel-actions-panel").classList.remove("hidden");
+            App.refreshAdminPersonnel();
+        },
+        clearPersonnelSelection() {
+            selectedPersonnel = null;
+            $("personnel-actions-panel").classList.add("hidden");
+            App.refreshAdminPersonnel();
+        },
+        async adminDeleteSelectedPersonnel() {
+            if (!selectedPersonnel) return;
+            if (!confirm(`Видалити персонал «${selectedPersonnel}»?`)) return;
+            try {
+                const res = await API.adminDeletePersonnel(selectedPersonnel);
+                showSuccess(res.message || "Видалено");
+                selectedPersonnel = null;
+                $("personnel-actions-panel").classList.add("hidden");
                 await App.refreshAdminPersonnel();
                 await App.refreshAdminUsers();
             } catch (e) {

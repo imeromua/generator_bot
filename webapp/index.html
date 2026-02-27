@@ -327,6 +327,16 @@
                     <div id="admin-drivers-list" class="manage-list" style="margin-top:10px">
                         <!-- Заповнюється JS -->
                     </div>
+                    <!-- Панель дій для обраного водія -->
+                    <div id="driver-actions-panel" class="actions-panel hidden" style="margin-top:10px; padding:10px; background:var(--color-surface); border-radius:8px; border:1px solid var(--color-border);">
+                        <div style="margin-bottom:8px; font-size:13px;">
+                            Обрано: <b id="selected-driver-name"></b>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-danger" onclick="App.adminDeleteSelectedDriver()">🗑 Видалити</button>
+                            <button class="btn btn-secondary" onclick="App.clearDriverSelection()">✕ Скасувати</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -344,6 +354,16 @@
                     </div>
                     <div id="admin-personnel-list" class="manage-list" style="margin-top:10px">
                         <!-- Заповнюється JS -->
+                    </div>
+                    <!-- Панель дій для обраного персоналу -->
+                    <div id="personnel-actions-panel" class="actions-panel hidden" style="margin-top:10px; padding:10px; background:var(--color-surface); border-radius:8px; border:1px solid var(--color-border);">
+                        <div style="margin-bottom:8px; font-size:13px;">
+                            Обрано: <b id="selected-personnel-name"></b>
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-danger" onclick="App.adminDeleteSelectedPersonnel()">🗑 Видалити</button>
+                            <button class="btn btn-secondary" onclick="App.clearPersonnelSelection()">✕ Скасувати</button>
+                        </div>
                     </div>
                 </div>
             </div>
