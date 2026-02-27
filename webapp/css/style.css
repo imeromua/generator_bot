@@ -613,7 +613,7 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* --- Error toast --- */
+/* --- Toasts --- */
 .toast {
     position: fixed;
     bottom: calc(20px + env(safe-area-inset-bottom, 0px));
@@ -630,6 +630,13 @@ body {
     animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s;
     opacity: 0;
     animation-fill-mode: forwards;
+    max-width: 90vw;
+    text-align: center;
+}
+
+.toast.toast-success {
+    background: var(--color-on);
+    box-shadow: 0 4px 16px rgba(39,174,96,0.4);
 }
 
 @keyframes toastIn {
@@ -655,3 +662,306 @@ body {
     background: var(--tg-hint);
     border-radius: 2px;
 }
+
+/* --- Utility --- */
+.hidden {
+    display: none !important;
+}
+
+.hint-text {
+    font-size: 12px;
+    color: var(--tg-hint);
+}
+
+.hint-banner {
+    background: rgba(36,129,204,0.08);
+    border: 1px solid rgba(36,129,204,0.2);
+    color: var(--tg-btn);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+/* --- Buttons --- */
+.btn {
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    display: inline-block;
+    text-align: center;
+}
+
+.btn-full {
+    width: 100%;
+    display: block;
+}
+
+.btn-primary {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+}
+
+.btn-primary:active {
+    opacity: 0.85;
+    transform: scale(0.98);
+}
+
+.btn-secondary {
+    background: var(--tg-secondary-bg);
+    color: var(--tg-text);
+    border: 1px solid rgba(0,0,0,0.06);
+}
+
+.btn-secondary:active {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+}
+
+.btn-success {
+    background: var(--color-on);
+    color: #fff;
+}
+
+.btn-success:active {
+    opacity: 0.85;
+}
+
+.btn-danger {
+    background: var(--color-danger);
+    color: #fff;
+}
+
+.btn-danger:active {
+    opacity: 0.85;
+}
+
+.btn-warning {
+    background: var(--color-warn);
+    color: #fff;
+}
+
+.btn-warning:active {
+    opacity: 0.85;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* --- Action Grid --- */
+.action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.action-grid .btn-full,
+.action-grid .btn:only-child {
+    grid-column: 1 / -1;
+}
+
+/* --- Form elements --- */
+.form-row {
+    margin-bottom: 12px;
+}
+
+.form-label {
+    display: block;
+    font-size: 12px;
+    color: var(--tg-hint);
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.form-input {
+    width: 100%;
+    background: var(--tg-secondary-bg);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 15px;
+    color: var(--tg-text);
+    outline: none;
+    transition: border-color var(--transition);
+    box-sizing: border-box;
+}
+
+.form-input:focus {
+    border-color: var(--tg-btn);
+}
+
+/* --- Modal overlay --- */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 500;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.modal {
+    background: var(--tg-section-bg);
+    border-radius: 18px 18px 0 0;
+    width: 100%;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--tg-secondary-bg);
+}
+
+.modal-header h3 {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.modal-close {
+    border: none;
+    background: var(--tg-secondary-bg);
+    color: var(--tg-hint);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.modal-footer {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--tg-secondary-bg);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.modal-step {
+    font-size: 13px;
+    color: var(--tg-hint);
+    margin-bottom: 12px;
+}
+
+.selected-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--tg-btn);
+    margin-bottom: 10px;
+}
+
+/* --- Drivers list --- */
+.drivers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.btn-driver {
+    background: var(--tg-secondary-bg);
+    border: none;
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background var(--transition);
+    color: var(--tg-text);
+}
+
+.btn-driver:active {
+    background: var(--tg-btn);
+    color: var(--tg-btn-text);
+}
+
+/* --- Quick amounts --- */
+.quick-amounts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+/* --- Generator stats (admin) --- */
+.gen-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.gen-card {
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 2px solid transparent;
+    transition: border-color var(--transition);
+}
+
+.gen-card.active {
+    border-color: var(--tg-btn);
+}
+
+.gen-card-header {
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 14px 8px;
+    background: rgba(0,0,0,0.04);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.gen-card-body {
+    padding: 8px 14px 12px;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--tg-hint);
+}
+
+.gen-card-body b {
+    color: var(--tg-text);
+}
+
+/* --- Badge warn --- */
+.badge.warn {
+    background: rgba(243,156,18,0.15);
+    color: var(--color-warn);
+}
+
+/* --- Spinner small --- */
+.spinner-small {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--tg-secondary-bg);
+    border-top-color: var(--tg-btn);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 16px auto;
+}
+

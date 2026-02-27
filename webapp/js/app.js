@@ -2,7 +2,8 @@
  * Mini App генератора — головний модуль інтерфейсу.
  *
  * Ініціалізація Telegram WebApp, навігація по вкладках,
- * рендеринг даних дашборду, графіку, подій та ТО.
+ * повний функціонал: управління зміни, прийом палива, графік,
+ * ТО, перемикання генераторів, звіти — все в одному WebApp.
  */
 
 (function () {
@@ -18,43 +19,46 @@
     }
 
     // -------------------------------------------------------------------
+    // Глобальний стан
+    // -------------------------------------------------------------------
+    let currentTab = "dashboard";
+    let userRole = { is_admin: false, personnel: null, has_personnel: false, user_id: null };
+    let currentStatus = null;   // останній стан з /api/status
+    let scheduleDate = null;
+    let isAdminScheduleEdit = false;
+
+    // Стан форми прийому палива
+    const refuelState = { driver: null, liters: null, step: 1 };
+    // Стан форми ТО
+    let pendingMnt = { action: null, generator: null };
+    // Стан форми мотогодин
+    let pendingHoursGen = null;
+
+    // -------------------------------------------------------------------
     // Допоміжні функції
     // -------------------------------------------------------------------
 
-    /** Повертає DOM-елемент за id. */
-    function $(id) {
-        return document.getElementById(id);
-    }
+    function $(id) { return document.getElementById(id); }
 
-    /** Назва типу зміни. */
     function shiftName(code) {
         return { m: "🌅 Зміна 1", d: "☀️ Зміна 2", e: "🌙 Зміна 3", x: "⚡ Екстра" }[code] || code;
     }
 
-    /** Назва типу події. */
     function eventLabel(type) {
         const map = {
-            m_start: "🌅 Старт зміни 1",
-            m_end: "🌅 Кінець зміни 1",
-            d_start: "☀️ Старт зміни 2",
-            d_end: "☀️ Кінець зміни 2",
-            e_start: "🌙 Старт зміни 3",
-            e_end: "🌙 Кінець зміни 3",
-            x_start: "⚡ Старт екстра",
-            x_end: "⚡ Кінець екстра",
-            refill: "⛽ Заправка",
-            corr_fuel_set: "🔧 Корекція палива",
-            sync: "🔄 Синхронізація",
-            mnt_oil: "🛢 Заміна мастила",
-            mnt_spark: "🕯 Заміна свічок",
-            mnt_maintenance: "🔧 Планове ТО",
-            mnt_set_hours: "⏱ Корекція мотогодин",
-            auto_stop: "⏰ Авто-зупинка",
+            m_start: "🌅 Старт зміни 1", m_end: "🌅 Кінець зміни 1",
+            d_start: "☀️ Старт зміни 2", d_end: "☀️ Кінець зміни 2",
+            e_start: "🌙 Старт зміни 3", e_end: "🌙 Кінець зміни 3",
+            x_start: "⚡ Старт екстра",  x_end: "⚡ Кінець екстра",
+            refill: "⛽ Прийом палива",   corr_fuel_set: "🔧 Корекція палива",
+            sync: "🔄 Синхронізація",    mnt_oil: "🛢 Заміна мастила",
+            mnt_spark: "🕯 Заміна свічок", mnt_maintenance: "🔧 Планове ТО",
+            mnt_set_hours: "⏱ Корекція мотогодин", auto_stop: "⏰ Авто-зупинка",
+            fuel_ordered: "📦 Паливо замовлено",
         };
         return map[type] || type;
     }
 
-    /** Іконка для типу події. */
     function eventIcon(type) {
         if (type.includes("start")) return "▶️";
         if (type.includes("end") || type === "auto_stop") return "⏹";
@@ -65,28 +69,31 @@
         return "📋";
     }
 
-    /** Іконка для типу ТО. */
     function mntIcon(type) {
         return { oil: "🛢", spark: "🕯", maintenance: "🔧" }[type] || "🔧";
     }
 
-    /** Назва типу ТО. */
     function mntLabel(type) {
         return { oil: "Заміна мастила", spark: "Заміна свічок", maintenance: "Планове ТО" }[type] || type;
     }
 
-    /** Форматує дату в зручний вигляд. */
     function formatDate(dateStr) {
         if (!dateStr) return "—";
         try {
             const d = new Date(dateStr);
             return d.toLocaleDateString("uk-UA", { day: "2-digit", month: "2-digit" });
-        } catch {
-            return dateStr;
-        }
+        } catch { return dateStr; }
     }
 
-    /** Форматує timestamp. */
+    function formatDateLong(dateStr) {
+        if (!dateStr) return "—";
+        try {
+            const d = new Date(dateStr + "T00:00:00");
+            const days = ["неділя","понеділок","вівторок","середа","четвер","п'ятниця","субота"];
+            return `${d.getDate().toString().padStart(2,"0")}.${(d.getMonth()+1).toString().padStart(2,"0")} (${days[d.getDay()]})`;
+        } catch { return dateStr; }
+    }
+
     function formatTime(ts) {
         if (!ts) return "";
         try {
@@ -95,37 +102,45 @@
                 day: "2-digit", month: "2-digit",
                 hour: "2-digit", minute: "2-digit",
             });
-        } catch {
-            return ts;
-        }
+        } catch { return ts; }
     }
 
-    /** Показати тост-повідомлення про помилку. */
-    function showToast(msg) {
+    function showToast(msg, type) {
         const el = document.createElement("div");
-        el.className = "toast";
+        el.className = "toast" + (type === "success" ? " toast-success" : "");
         el.textContent = msg;
         document.body.appendChild(el);
-        setTimeout(() => el.remove(), 3200);
+        setTimeout(() => el.remove(), 3500);
+    }
+
+    function showSuccess(msg) { showToast(msg, "success"); }
+    function showError(msg)   { showToast(msg, "error"); }
+
+    function setLoading(show) {
+        const loader = $("loader");
+        if (show) loader.classList.add("visible");
+        else loader.classList.remove("visible");
+    }
+
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
     }
 
     // -------------------------------------------------------------------
     // Навігація по вкладках
     // -------------------------------------------------------------------
-    let currentTab = "dashboard";
-
     function switchTab(tab) {
         if (currentTab === tab) return;
         currentTab = tab;
-
         document.querySelectorAll(".tab").forEach((btn) => {
             btn.classList.toggle("active", btn.dataset.tab === tab);
         });
         document.querySelectorAll(".page").forEach((page) => {
             page.classList.toggle("active", page.id === "page-" + tab);
         });
-
-        // Завантажити дані для вкладки
         loadTabData(tab);
     }
 
@@ -136,13 +151,13 @@
     // -------------------------------------------------------------------
     // Завантаження даних
     // -------------------------------------------------------------------
-
     function loadTabData(tab) {
         switch (tab) {
-            case "dashboard": loadDashboard(); break;
-            case "schedule": loadSchedule(); break;
-            case "events": loadEvents(); break;
+            case "dashboard":   loadDashboard(); break;
+            case "schedule":    loadSchedule();  break;
+            case "events":      loadEvents();    break;
             case "maintenance": loadMaintenance(); break;
+            case "admin":       loadAdmin();     break;
         }
     }
 
@@ -153,32 +168,28 @@
                 API.getStatus(),
                 API.getWeek(),
             ]);
+            currentStatus = status;
             renderStatus(status);
             renderWeek(week);
+            renderActionButtons(status);
         } catch (e) {
-            showToast("Помилка завантаження: " + e.message);
+            showError("Помилка завантаження: " + e.message);
         }
     }
 
     function renderStatus(data) {
-        // Статус-бар
         const indicator = $("gen-indicator");
-        const label = $("gen-label");
-        const badge = $("badge-status");
+        const label     = $("gen-label");
+        const badge     = $("badge-status");
 
         const isOn = data.status === "ON";
         indicator.className = "indicator " + (isOn ? "on" : "off");
-        label.textContent = isOn
-            ? "Генератор працює"
-            : "Генератор вимкнено";
-
+        label.textContent = isOn ? "Генератор працює" : "Генератор вимкнено";
         badge.className = "badge " + (isOn ? "on" : "off");
         badge.textContent = isOn ? "ON" : "OFF";
 
-        // Статистика
         $("stat-generator").textContent = data.generator_name || data.generator;
 
-        // Зміна
         if (data.active_shift && data.active_shift !== "none") {
             const code = data.active_shift.split("_")[0];
             $("stat-shift").textContent = shiftName(code);
@@ -186,39 +197,27 @@
             $("stat-shift").textContent = "Немає";
         }
 
-        // Паливо
         const fuelEl = $("stat-fuel");
         const fuel = isOn ? data.estimated_fuel : data.current_fuel;
         let fuelText = fuel + " л";
-        if (isOn && data.estimated_fuel !== data.current_fuel) {
-            fuelText += " (оцінка)";
-        }
+        if (isOn && data.estimated_fuel !== data.current_fuel) fuelText += " (оцінка)";
         fuelEl.textContent = fuelText;
         fuelEl.className = "stat-value";
         if (fuel < 15) fuelEl.classList.add("fuel-low");
         else if (fuel < 40) fuelEl.classList.add("fuel-warn");
 
-        // Мотогодини
         $("stat-hours").textContent = data.total_hours + " год";
-
-        // Витрата
-        $("stat-rate").textContent = data.fuel_rate + " л/год";
-
-        // Робочий час
+        $("stat-rate").textContent  = data.fuel_rate + " л/год";
         $("stat-work-hours").textContent = data.work_start + " — " + data.work_end;
 
-        // Зміни
         const shifts = ["m", "d", "e", "x"];
         const completed = new Set(data.completed_shifts || []);
-        const activeCode = data.active_shift !== "none"
-            ? data.active_shift.split("_")[0]
-            : null;
+        const activeCode = data.active_shift !== "none" ? data.active_shift.split("_")[0] : null;
 
         shifts.forEach((s) => {
             const item = $("shift-" + s);
             const statusEl = $("shift-" + s + "-status");
             item.className = "shift-item";
-
             if (activeCode === s) {
                 item.classList.add("active");
                 statusEl.textContent = "Працює";
@@ -234,13 +233,104 @@
         });
     }
 
+    function renderActionButtons(data) {
+        const body = $("actions-body");
+        const noPers = $("actions-no-personnel");
+        const btnsDiv = $("actions-buttons");
+        const userLabel = $("user-name-label");
+        const refuelCard = $("card-refuel");
+
+        if (!userRole.has_personnel) {
+            noPers.classList.remove("hidden");
+            btnsDiv.classList.add("hidden");
+            refuelCard.classList.add("hidden");
+            return;
+        }
+
+        noPers.classList.add("hidden");
+        btnsDiv.classList.remove("hidden");
+        if (userRole.personnel) {
+            userLabel.textContent = "👤 " + userRole.personnel;
+        }
+
+        // Показуємо кнопку прийому палива
+        refuelCard.classList.remove("hidden");
+
+        const isOn = data.status === "ON";
+        const completed = new Set(data.completed_shifts || []);
+        const activeCode = isOn ? data.active_shift.split("_")[0] : null;
+
+        btnsDiv.innerHTML = "";
+
+        if (isOn && activeCode) {
+            // Кнопка СТОП
+            const btn = el("button", "btn btn-danger btn-full");
+            btn.textContent = `🏁 ${shiftName(activeCode)} — СТОП`;
+            btn.onclick = () => doStopShift(activeCode);
+            btnsDiv.appendChild(btn);
+        } else {
+            // Кнопки СТАРТ
+            const order = ["m", "d", "e"];
+            let nextStart = null;
+            for (const s of order) {
+                if (!completed.has(s)) { nextStart = s; break; }
+            }
+
+            if (nextStart) {
+                const btn = el("button", "btn btn-success btn-full");
+                btn.textContent = `▶ ${shiftName(nextStart)} — СТАРТ`;
+                btn.onclick = () => doStartShift(nextStart);
+                btnsDiv.appendChild(btn);
+            }
+
+            // Екстра-зміна — якщо всі три виконані
+            if (["m","d","e"].every(s => completed.has(s)) && !completed.has("x")) {
+                const btnX = el("button", "btn btn-primary btn-full");
+                btnX.textContent = `▶ ${shiftName("x")} — СТАРТ`;
+                btnX.onclick = () => doStartShift("x");
+                btnsDiv.appendChild(btnX);
+            }
+
+            if (btnsDiv.children.length === 0) {
+                btnsDiv.innerHTML = `<div class="empty-state"><div class="empty-state-icon">✅</div>Всі зміни сьогодні виконано</div>`;
+            }
+        }
+    }
+
+    async function doStartShift(shift) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = "⏳ Запуск...";
+        try {
+            const res = await API.startShift(shift);
+            showSuccess(res.message || "Зміну запущено");
+            await loadDashboard();
+        } catch (e) {
+            showError(e.message);
+            await loadDashboard();
+        }
+    }
+
+    async function doStopShift(shift) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = "⏳ Зупинка...";
+        try {
+            const res = await API.stopShift(shift);
+            showSuccess(res.message || `Зміна закрита. Тривалість: ${res.duration}, витрата: ${res.fuel_consumed} л`);
+            await loadDashboard();
+        } catch (e) {
+            showError(e.message);
+            await loadDashboard();
+        }
+    }
+
     function renderWeek(data) {
         const grid = $("week-grid");
         if (!data || !data.days) {
             grid.innerHTML = '<div class="empty-state">Немає даних</div>';
             return;
         }
-
         const today = new Date().toISOString().slice(0, 10);
         grid.innerHTML = data.days.map((day) => {
             const dateNum = day.date.slice(8, 10);
@@ -255,7 +345,6 @@
             </div>`;
         }).join("");
 
-        // Клік по дню → перехід на графік
         grid.querySelectorAll(".week-day").forEach((el) => {
             el.addEventListener("click", () => {
                 scheduleDate = el.dataset.date;
@@ -265,35 +354,29 @@
     }
 
     // --- Schedule ---
-    let scheduleDate = null;
-
     function getToday() {
         const now = new Date();
-        const y = now.getFullYear();
-        const m = String(now.getMonth() + 1).padStart(2, "0");
-        const d = String(now.getDate()).padStart(2, "0");
-        return `${y}-${m}-${d}`;
+        return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
     }
 
-    function shiftDate(dateStr, days) {
+    function shiftDateStr(dateStr, days) {
         const d = new Date(dateStr + "T00:00:00");
         d.setDate(d.getDate() + days);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const dd = String(d.getDate()).padStart(2, "0");
-        return `${y}-${m}-${dd}`;
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
     }
 
     async function loadSchedule() {
         if (!scheduleDate) scheduleDate = getToday();
-
-        $("sched-date-label").textContent = formatDate(scheduleDate);
+        $("sched-date-label").textContent = formatDateLong(scheduleDate);
+        const adminHint = $("sched-admin-hint");
+        if (userRole.is_admin) adminHint.classList.remove("hidden");
+        else adminHint.classList.add("hidden");
 
         try {
             const data = await API.getSchedule(scheduleDate);
             renderSchedule(data);
         } catch (e) {
-            showToast("Помилка: " + e.message);
+            showError("Помилка: " + e.message);
         }
     }
 
@@ -312,61 +395,78 @@
             if (h.off) offCount++;
             const cls = h.off ? "off" : "on";
             const icon = h.off ? "🔴" : "🟢";
-            return `<div class="sched-hour ${cls}">
+            const editAttr = userRole.is_admin ? ` data-edit="1" data-hour="${h.hour}" style="cursor:pointer"` : "";
+            return `<div class="sched-hour ${cls}"${editAttr}>
                 <span>${h.label}</span>
                 <span class="sched-hour-icon">${icon}</span>
             </div>`;
         }).join("");
 
-        const onCount = 24 - offCount;
+        // Адмін: кліки для редагування
+        if (userRole.is_admin) {
+            grid.querySelectorAll("[data-edit]").forEach((cell) => {
+                cell.addEventListener("click", async () => {
+                    const hour = parseInt(cell.dataset.hour);
+                    try {
+                        const res = await API.toggleSchedule(scheduleDate, hour);
+                        // Оновлюємо конкретну клітинку
+                        const isOff = res.off;
+                        cell.className = "sched-hour " + (isOff ? "off" : "on");
+                        cell.querySelector(".sched-hour-icon").textContent = isOff ? "🔴" : "🟢";
+                        // Оновлюємо підсумок
+                        const allOff = Object.values(res.schedule || {}).filter(v => v).length;
+                        updateScheduleSummary(24 - allOff, allOff, summary);
+                    } catch (e) {
+                        showError(e.message);
+                    }
+                });
+            });
+        }
+
+        updateScheduleSummary(24 - offCount, offCount, summary);
+    }
+
+    function updateScheduleSummary(onCount, offCount, el) {
         if (offCount === 0) {
-            summary.textContent = "✅ Відключень немає — електроенергія є цілий день";
+            el.textContent = "✅ Відключень немає — електроенергія є цілий день";
         } else {
-            summary.textContent = `⚡ Є світло: ${onCount} год  •  🔴 Відключення: ${offCount} год`;
+            el.textContent = `⚡ Є світло: ${onCount} год  •  🔴 Відключення: ${offCount} год`;
         }
     }
 
     $("sched-prev").addEventListener("click", () => {
-        scheduleDate = shiftDate(scheduleDate || getToday(), -1);
+        scheduleDate = shiftDateStr(scheduleDate || getToday(), -1);
         loadSchedule();
     });
-
     $("sched-next").addEventListener("click", () => {
-        scheduleDate = shiftDate(scheduleDate || getToday(), 1);
+        scheduleDate = shiftDateStr(scheduleDate || getToday(), 1);
         loadSchedule();
     });
 
     // --- Events ---
     async function loadEvents() {
         try {
-            const data = await API.getEvents(30);
+            const data = await API.getEvents(50);
             renderEvents(data);
         } catch (e) {
-            showToast("Помилка: " + e.message);
+            showError("Помилка: " + e.message);
         }
     }
 
     function renderEvents(data) {
         const list = $("events-list");
-
         if (!data || !data.events || data.events.length === 0) {
-            list.innerHTML = `<div class="empty-state">
-                <div class="empty-state-icon">📭</div>
-                Подій поки немає
-            </div>`;
+            list.innerHTML = `<div class="empty-state"><div class="empty-state-icon">📭</div>Подій поки немає</div>`;
             return;
         }
-
         list.innerHTML = data.events.map((ev) => {
             const icon = eventIcon(ev.event_type);
             const label = eventLabel(ev.event_type);
             const time = formatTime(ev.timestamp);
-
             let meta = time;
-            if (ev.actor) meta += ` • ${ev.actor}`;
-            if (ev.driver) meta += ` • Водій: ${ev.driver}`;
+            if (ev.actor)   meta += ` • ${ev.actor}`;
+            if (ev.driver)  meta += ` • Водій: ${ev.driver}`;
             if (ev.receipt) meta += ` • Чек: ${ev.receipt}`;
-
             return `<div class="event-item">
                 <span class="event-icon">${icon}</span>
                 <div class="event-body">
@@ -385,33 +485,32 @@
         try {
             const data = await API.getMaintenance();
             renderMaintenance(data);
+            // Показуємо кнопки ТО тільки для адмінів
+            $("card-mnt-actions-main").style.display  = userRole.is_admin ? "" : "none";
+            $("card-mnt-actions-emerg").style.display = userRole.is_admin ? "" : "none";
         } catch (e) {
-            showToast("Помилка: " + e.message);
+            showError("Помилка: " + e.message);
         }
     }
 
     function renderMaintenance(data) {
-        const statsEl = $("mnt-stats");
+        const statsEl   = $("mnt-stats");
         const historyEl = $("mnt-history");
 
         if (!data || !data.stats) {
-            statsEl.innerHTML = `<div class="empty-state">
-                <div class="empty-state-icon">🔧</div>
-                Дані ТО недоступні
-            </div>`;
+            statsEl.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🔧</div>Дані ТО недоступні</div>`;
             historyEl.innerHTML = "";
             return;
         }
 
         const stats = data.stats;
         const items = [
-            { label: "🛢 Заміна мастила", key: "oil_needed", intervalKey: "oil_interval" },
-            { label: "🕯 Заміна свічок", key: "spark_needed", intervalKey: "spark_interval" },
-            { label: "🔧 Планове ТО", key: "maintenance_needed", intervalKey: "maintenance_interval" },
+            { label: "🛢 Заміна мастила",  key: "oil_needed",         intervalKey: "oil_interval" },
+            { label: "🕯 Заміна свічок",   key: "spark_needed",       intervalKey: "spark_interval" },
+            { label: "🔧 Планове ТО",      key: "maintenance_needed", intervalKey: "maintenance_interval" },
         ];
 
         const totalHours = stats.total_hours || 0;
-
         statsEl.innerHTML = `
             <div class="mnt-item">
                 <span class="mnt-item-label">⏱ Мотогодини (${data.generator})</span>
@@ -420,13 +519,11 @@
         ` + items.map((item) => {
             const remaining = stats[item.key];
             if (remaining === undefined || remaining === null) return "";
-
             const interval = stats[item.intervalKey] || 100;
             const pct = Math.max(0, Math.min(100, (remaining / interval) * 100));
             let cls = "ok";
             if (pct < 15) cls = "danger";
             else if (pct < 40) cls = "warn";
-
             return `<div class="mnt-item" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;">
                     <span class="mnt-item-label">${item.label}</span>
@@ -438,25 +535,281 @@
             </div>`;
         }).join("");
 
-        // Історія
         if (!data.history || data.history.length === 0) {
             historyEl.innerHTML = `<div class="empty-state">Записів ТО ще немає</div>`;
             return;
         }
-
         historyEl.innerHTML = data.history.map((h) => {
-            const icon = mntIcon(h.type);
-            const label = mntLabel(h.type);
-            const date = formatTime(h.date);
             return `<div class="mnt-history-item">
-                <span class="mnt-history-icon">${icon}</span>
+                <span class="mnt-history-icon">${mntIcon(h.type)}</span>
                 <div class="mnt-history-body">
-                    <div class="mnt-history-type">${label}</div>
-                    <div class="mnt-history-meta">${date} • ${h.admin || "—"} • ${h.hours} год</div>
+                    <div class="mnt-history-type">${mntLabel(h.type)}</div>
+                    <div class="mnt-history-meta">${formatTime(h.date)} • ${h.admin || "—"} • ${h.hours} год</div>
                 </div>
             </div>`;
         }).join("");
     }
+
+    // --- Admin panel ---
+    async function loadAdmin() {
+        if (!userRole.is_admin) return;
+        try {
+            const [genData, status] = await Promise.all([
+                API.getGenerators(),
+                API.getStatus(),
+            ]);
+            renderGenStats(genData, status);
+            const fuelInput = $("admin-fuel-input");
+            if (fuelInput && status) fuelInput.value = status.current_fuel || "";
+        } catch (e) {
+            showError("Помилка: " + e.message);
+        }
+    }
+
+    function renderGenStats(data, status) {
+        const el = $("gen-stats");
+        if (!data) { el.innerHTML = ""; return; }
+
+        const active = data.active;
+        el.innerHTML = `
+            <div class="gen-card ${active === 'main' ? 'active' : ''}">
+                <div class="gen-card-header">🔋 Основний${active === 'main' ? ' <span class="badge on">АКТИВНИЙ</span>' : ''}</div>
+                <div class="gen-card-body">
+                    <div>⏱ Мотогодини: <b>${data.main.total_hours} год</b></div>
+                    <div>🛢 Від заміни мастила: <b>${data.main.last_oil_change} год</b></div>
+                    <div>🕯 Від заміни свічок: <b>${data.main.last_spark_change} год</b></div>
+                </div>
+            </div>
+            <div class="gen-card ${active === 'emergency' ? 'active' : ''}">
+                <div class="gen-card-header">⚠️ Аварійний${active === 'emergency' ? ' <span class="badge warn">АКТИВНИЙ</span>' : ''}</div>
+                <div class="gen-card-body">
+                    <div>⏱ Мотогодини: <b>${data.emergency.total_hours} год</b></div>
+                    <div>🛢 Від заміни мастила: <b>${data.emergency.last_oil_change} год</b></div>
+                    <div>🕯 Від заміни свічок: <b>${data.emergency.last_spark_change} год</b></div>
+                </div>
+            </div>
+        `;
+
+        // Оновлюємо кнопки переключення
+        const btnMain  = $("btn-switch-main");
+        const btnEmerg = $("btn-switch-emergency");
+        if (btnMain)  btnMain.disabled  = (active === "main");
+        if (btnEmerg) btnEmerg.disabled = (active === "emergency");
+    }
+
+    // -------------------------------------------------------------------
+    // Публічний API додатку (для onclick у HTML)
+    // -------------------------------------------------------------------
+    const App = {
+        // --- Генератор ---
+        async switchGenerator(target) {
+            if (!confirm(`Перемкнути на ${target === "main" ? "ОСНОВНИЙ" : "АВАРІЙНИЙ"} генератор?`)) return;
+            try {
+                const res = await API.switchGenerator(target);
+                showSuccess(res.message || "Генератор перемкнено");
+                await loadAdmin();
+                await loadDashboard();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // --- ТО ---
+        mntPerform(action, generator) {
+            pendingMnt = { action, generator };
+            const actionNames = { oil: "Заміну мастила", spark: "Заміну свічок", maintenance: "Планове ТО" };
+            const genNames    = { main: "🔋 Основний", emergency: "⚠️ Аварійний" };
+            $("confirm-mnt-text").textContent =
+                `Виконати "${actionNames[action]}" для генератора "${genNames[generator]}"?`;
+            openModal("modal-confirm-mnt");
+        },
+
+        async confirmMnt() {
+            closeModal("modal-confirm-mnt");
+            try {
+                const res = await API.performMaintenance(pendingMnt.action, pendingMnt.generator);
+                showSuccess(res.message || "ТО виконано");
+                await loadMaintenance();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        mntSetHoursDialog(generator) {
+            pendingHoursGen = generator;
+            const genNames = { main: "🔋 Основний", emergency: "⚠️ Аварійний" };
+            $("set-hours-gen-name").textContent = genNames[generator] || generator;
+            $("set-hours-input").value = "";
+            openModal("modal-set-hours");
+            // Показуємо поточне значення
+            API.getGenerators().then(data => {
+                const stats = data[generator];
+                if (stats) {
+                    $("set-hours-current").textContent = `Поточне значення: ${stats.total_hours} год`;
+                }
+            }).catch(() => {});
+        },
+
+        async submitSetHours() {
+            const val = parseFloat($("set-hours-input").value);
+            if (isNaN(val) || val < 0 || val > 100000) {
+                showError("Введіть коректне значення (0 – 100000)");
+                return;
+            }
+            closeModal("modal-set-hours");
+            try {
+                const res = await API.setHours(pendingHoursGen, val);
+                showSuccess(res.message || "Мотогодини оновлено");
+                await loadMaintenance();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // --- Паливо (адмін) ---
+        async adminSetFuel() {
+            const val = parseFloat($("admin-fuel-input").value);
+            if (isNaN(val) || val < 0) {
+                showError("Введіть коректне значення");
+                return;
+            }
+            if (!confirm(`Встановити рівень палива: ${val.toFixed(1)} л?`)) return;
+            try {
+                const res = await API.setFuel(val);
+                showSuccess(res.message || "Паливо оновлено");
+                await loadDashboard();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // --- Звіти ---
+        downloadReport(evt) {
+            const days = $("report-days-select").value || "30";
+            const url  = API.getReportUrl(days);
+            // Встановлюємо X-Telegram-Init-Data через URL не можливо,
+            // тому відкриваємо пряме завантаження (сервер перевірить через initData)
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "";
+            // Додаємо initData як query-параметр якщо не через заголовок
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+                link.href = url + (url.includes("?") ? "&" : "?") +
+                    "init_data=" + encodeURIComponent(window.Telegram.WebApp.initData);
+            }
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        },
+
+        // --- Прийом палива (модальне вікно) ---
+        openRefuel() { openRefuelModal(); },
+        closeModal,
+
+        selectFuelAmount(liters) {
+            $("refuel-liters").value = liters;
+        },
+
+        refuelNextStep() {
+            const liters = parseFloat($("refuel-liters").value);
+            if (!liters || liters <= 0 || liters > 500) {
+                showError("Введіть кількість літрів (1 – 500)");
+                return;
+            }
+            refuelState.liters = liters;
+            $("refuel-summary").textContent = `Водій: ${refuelState.driver} • Літри: ${liters.toFixed(1)} л`;
+            $("refuel-receipt").value = "";
+
+            showRefuelStep(3);
+        },
+
+        refuelPrevStep() {
+            if (refuelState.step === 2) showRefuelStep(1);
+            else if (refuelState.step === 3) showRefuelStep(2);
+        },
+
+        async submitRefuel() {
+            const receipt = ($("refuel-receipt").value || "").trim();
+            if (!receipt || receipt.length > 50) {
+                showError("Введіть номер чека (1–50 символів)");
+                return;
+            }
+            closeModal("modal-refuel");
+            try {
+                const res = await API.refuel(refuelState.driver, refuelState.liters, receipt);
+                showSuccess(res.message || "Паливо прийнято");
+                await loadDashboard();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+    };
+
+    // Прив'язуємо App до window для onclick у HTML
+    window.App = App;
+
+    // -------------------------------------------------------------------
+    // Модальні вікна
+    // -------------------------------------------------------------------
+    function openModal(id) {
+        const el = $(id);
+        if (el) el.classList.remove("hidden");
+    }
+
+    function closeModal(id) {
+        const el = $(id);
+        if (el) el.classList.add("hidden");
+    }
+
+    // Закриття по кліку поза модальним вікном
+    document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay) {
+                overlay.classList.add("hidden");
+            }
+        });
+    });
+
+    // --- Прийом палива ---
+    function showRefuelStep(step) {
+        refuelState.step = step;
+        $("refuel-step-driver").classList.toggle("hidden", step !== 1);
+        $("refuel-step-liters").classList.toggle("hidden", step !== 2);
+        $("refuel-step-receipt").classList.toggle("hidden", step !== 3);
+        $("refuel-back-btn").style.display = step > 1 ? "" : "none";
+    }
+
+    async function openRefuelModal() {
+        showRefuelStep(1);
+        refuelState.driver = null;
+        refuelState.liters = null;
+
+        const driversList = $("drivers-list");
+        driversList.innerHTML = `<div class="spinner-small"></div>`;
+        openModal("modal-refuel");
+
+        try {
+            const data = await API.getDrivers();
+            const drivers = data.drivers || [];
+            if (drivers.length === 0) {
+                driversList.innerHTML = `<div class="empty-state">Водіїв не знайдено.<br>Зверніться до адміністратора.</div>`;
+                return;
+            }
+            driversList.innerHTML = drivers.map((d) =>
+                `<button class="btn btn-driver" onclick="App._selectDriver('${d.replace(/'/g, "\\'")}')">${d}</button>`
+            ).join("");
+        } catch (e) {
+            driversList.innerHTML = `<div class="empty-state">Помилка завантаження водіїв</div>`;
+        }
+    }
+
+    App._selectDriver = function(driverName) {
+        refuelState.driver = driverName;
+        $("refuel-driver-name").textContent = "Водій: " + driverName;
+        showRefuelStep(2);
+    };
+
+    $("btn-refuel-open").addEventListener("click", openRefuelModal);
 
     // -------------------------------------------------------------------
     // Автооновлення
@@ -471,17 +824,29 @@
     // Ініціалізація
     // -------------------------------------------------------------------
     async function init() {
-        const loader = $("loader");
-        loader.classList.add("visible");
-
+        setLoading(true);
         try {
+            // Отримуємо роль користувача
+            try {
+                userRole = await API.getUserRole();
+            } catch (e) {
+                userRole = { is_admin: false, personnel: null, has_personnel: false };
+            }
+
+            // Показуємо вкладку Адмін тільки для адмінів
+            if (userRole.is_admin) {
+                const tabAdmin = $("tab-admin");
+                if (tabAdmin) tabAdmin.classList.remove("hidden");
+            }
+
             await loadDashboard();
         } catch {
             // Ігноруємо — помилка вже показана через toast
         } finally {
-            loader.classList.remove("visible");
+            setLoading(false);
         }
     }
 
     init();
 })();
+

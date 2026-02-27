@@ -10,10 +10,18 @@ const API = (() => {
     const BASE = "";
 
     /**
-     * Виконати GET-запит до API.
-     * @param {string} path — шлях (наприклад, "/api/status")
-     * @param {Object} [params] — query-параметри
-     * @returns {Promise<Object>} — JSON-відповідь
+     * Повертає заголовки для запиту (включно з Telegram initData).
+     */
+    function _headers() {
+        const h = { "Content-Type": "application/json" };
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
+            h["X-Telegram-Init-Data"] = window.Telegram.WebApp.initData;
+        }
+        return h;
+    }
+
+    /**
+     * GET-запит до API.
      */
     async function get(path, params) {
         let url = BASE + path;
@@ -21,38 +29,70 @@ const API = (() => {
             const qs = new URLSearchParams(params).toString();
             if (qs) url += "?" + qs;
         }
-
-        const headers = {};
-
-        // Telegram WebApp initData для авторизації
-        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
-            headers["X-Telegram-Init-Data"] = window.Telegram.WebApp.initData;
-        }
-
-        const resp = await fetch(url, { headers });
-
+        const resp = await fetch(url, { headers: _headers() });
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
             throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
         }
+        return resp.json();
+    }
 
+    /**
+     * POST-запит до API.
+     */
+    async function post(path, data) {
+        const resp = await fetch(BASE + path, {
+            method: "POST",
+            headers: _headers(),
+            body: JSON.stringify(data || {}),
+        });
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
+        }
         return resp.json();
     }
 
     return {
+        // --- GET ---
         /** Стан генератора */
         getStatus: () => get("/api/status"),
-
         /** Графік відключень на дату */
         getSchedule: (date) => get("/api/schedule", date ? { date } : undefined),
-
         /** Тижневий огляд */
         getWeek: () => get("/api/schedule/week"),
-
         /** Останні події */
         getEvents: (limit) => get("/api/events", limit ? { limit } : undefined),
-
         /** Стан ТО */
         getMaintenance: () => get("/api/maintenance"),
+        /** Роль поточного користувача */
+        getUserRole: () => get("/api/user/role"),
+        /** Список водіїв */
+        getDrivers: () => get("/api/drivers"),
+        /** Статистика генераторів */
+        getGenerators: () => get("/api/generators"),
+        /** Персонал поточного користувача */
+        getPersonnelMe: () => get("/api/personnel/me"),
+        /** Завантаження Excel-звіту (повертає URL) */
+        getReportUrl: (days) => BASE + "/api/report/excel" + (days ? `?days=${days}` : ""),
+
+        // --- POST ---
+        /** Старт зміни */
+        startShift: (shift) => post("/api/action/start", { shift }),
+        /** Зупинка зміни */
+        stopShift: (shift) => post("/api/action/stop", { shift }),
+        /** Прийом палива */
+        refuel: (driver, liters, receipt) => post("/api/action/refill", { driver, liters, receipt }),
+        /** Перемикання години графіка */
+        toggleSchedule: (date, hour) => post("/api/schedule/toggle", { date, hour }),
+        /** Перемикання генератора */
+        switchGenerator: (target) => post("/api/generator/switch", { target }),
+        /** Виконання ТО */
+        performMaintenance: (action, generator) => post("/api/maintenance/perform", { action, generator }),
+        /** Встановлення мотогодин */
+        setHours: (generator, hours) => post("/api/maintenance/set-hours", { generator, hours }),
+        /** Встановлення рівня палива */
+        setFuel: (fuel) => post("/api/fuel/set", { fuel }),
     };
 })();
+

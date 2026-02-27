@@ -15,6 +15,7 @@
             <button class="tab" data-tab="schedule">📅 Графік</button>
             <button class="tab" data-tab="events">🕘 Події</button>
             <button class="tab" data-tab="maintenance">🔧 ТО</button>
+            <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️ Адмін</button>
         </nav>
 
         <!-- Статус-панель -->
@@ -58,6 +59,35 @@
                             <span class="stat-value" id="stat-work-hours">—</span>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Кнопки управління зміною -->
+            <div class="card" id="card-actions">
+                <div class="card-header">
+                    <h2>🎮 Управління</h2>
+                    <span id="user-name-label" class="hint-text"></span>
+                </div>
+                <div class="card-body" id="actions-body">
+                    <div class="empty-state" id="actions-no-personnel">
+                        <div class="empty-state-icon">👤</div>
+                        <p>Немає прив'язки до персоналу.<br>Зверніться до адміністратора.</p>
+                    </div>
+                    <div id="actions-buttons" class="hidden">
+                        <!-- Кнопки генеруються JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Прийом палива -->
+            <div class="card hidden" id="card-refuel">
+                <div class="card-header">
+                    <h2>📥 Прийом палива</h2>
+                </div>
+                <div class="card-body">
+                    <button class="btn btn-primary btn-full" id="btn-refuel-open">
+                        ⛽ Прийняти паливо
+                    </button>
                 </div>
             </div>
 
@@ -121,6 +151,9 @@
                         <span class="legend-item"><span class="dot green"></span> Є світло</span>
                         <span class="legend-item"><span class="dot red"></span> Відключення</span>
                     </div>
+                    <div id="sched-admin-hint" class="hint-banner hidden">
+                        ✏️ Натискайте на години, щоб змінити графік
+                    </div>
                     <div class="schedule-grid" id="schedule-grid">
                         <!-- Заповнюється JS -->
                     </div>
@@ -157,6 +190,34 @@
                 </div>
             </div>
 
+            <div class="card" id="card-mnt-actions-main" style="display:none">
+                <div class="card-header">
+                    <h2>🔋 ТО: Основний</h2>
+                </div>
+                <div class="card-body">
+                    <div class="action-grid">
+                        <button class="btn btn-warning" onclick="App.mntPerform('oil','main')">🛢 Мастило</button>
+                        <button class="btn btn-warning" onclick="App.mntPerform('spark','main')">🕯 Свічки</button>
+                        <button class="btn btn-primary" onclick="App.mntPerform('maintenance','main')">🔧 Планове ТО</button>
+                        <button class="btn btn-secondary" onclick="App.mntSetHoursDialog('main')">⏱ Мотогодини</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" id="card-mnt-actions-emerg" style="display:none">
+                <div class="card-header">
+                    <h2>⚠️ ТО: Аварійний</h2>
+                </div>
+                <div class="card-body">
+                    <div class="action-grid">
+                        <button class="btn btn-warning" onclick="App.mntPerform('oil','emergency')">🛢 Мастило</button>
+                        <button class="btn btn-warning" onclick="App.mntPerform('spark','emergency')">🕯 Свічки</button>
+                        <button class="btn btn-primary" onclick="App.mntPerform('maintenance','emergency')">🔧 Планове ТО</button>
+                        <button class="btn btn-secondary" onclick="App.mntSetHoursDialog('emergency')">⏱ Мотогодини</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-header">
                     <h2>📜 Історія ТО</h2>
@@ -169,6 +230,72 @@
             </div>
         </section>
 
+        <!-- Вкладка: Адмін-панель -->
+        <section class="page" id="page-admin">
+            <!-- Генератори -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔌 Генератори</h2>
+                </div>
+                <div class="card-body">
+                    <div class="gen-stats" id="gen-stats">
+                        <!-- Заповнюється JS -->
+                    </div>
+                    <div class="action-grid" style="margin-top:12px">
+                        <button class="btn btn-secondary" id="btn-switch-main"
+                            onclick="App.switchGenerator('main')">
+                            🔋 Перемкнути на ОСНОВНИЙ
+                        </button>
+                        <button class="btn btn-warning" id="btn-switch-emergency"
+                            onclick="App.switchGenerator('emergency')">
+                            ⚠️ Перемкнути на АВАРІЙНИЙ
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Паливо (адмін) -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>⛽ Паливо</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <label class="form-label">Встановити рівень (л)</label>
+                        <input type="number" id="admin-fuel-input" class="form-input"
+                            min="0" max="10000" step="0.1" placeholder="Літри">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="App.adminSetFuel()">
+                        💾 Зберегти рівень палива
+                    </button>
+                </div>
+            </div>
+
+            <!-- Звіт Excel -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Звіти</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <label class="form-label">Період (днів)</label>
+                        <select id="report-days-select" class="form-input">
+                            <option value="7">7 днів</option>
+                            <option value="14">14 днів</option>
+                            <option value="30" selected>30 днів</option>
+                            <option value="60">60 днів</option>
+                            <option value="90">90 днів</option>
+                        </select>
+                    </div>
+                    <a id="btn-download-report" class="btn btn-primary btn-full"
+                        style="text-decoration:none;text-align:center;"
+                        onclick="App.downloadReport(event)">
+                        📥 Завантажити Excel звіт
+                    </a>
+                </div>
+            </div>
+        </section>
+
         <!-- Завантаження -->
         <div class="loader" id="loader">
             <div class="spinner"></div>
@@ -176,7 +303,102 @@
         </div>
     </div>
 
+    <!-- Модальне вікно: Прийом палива -->
+    <div class="modal-overlay hidden" id="modal-refuel">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>📥 Прийом палива</h3>
+                <button class="modal-close" onclick="App.closeModal('modal-refuel')">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- Крок 1: Водій -->
+                <div id="refuel-step-driver">
+                    <p class="modal-step">Крок 1/3: Хто привіз паливо?</p>
+                    <div id="drivers-list" class="drivers-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+                <!-- Крок 2: Літри -->
+                <div id="refuel-step-liters" class="hidden">
+                    <p class="modal-step">Крок 2/3: Кількість літрів</p>
+                    <p id="refuel-driver-name" class="selected-value"></p>
+                    <div class="quick-amounts">
+                        <button class="btn btn-secondary" onclick="App.selectFuelAmount(20)">20 л</button>
+                        <button class="btn btn-secondary" onclick="App.selectFuelAmount(40)">40 л</button>
+                        <button class="btn btn-secondary" onclick="App.selectFuelAmount(60)">60 л</button>
+                        <button class="btn btn-secondary" onclick="App.selectFuelAmount(80)">80 л</button>
+                    </div>
+                    <div class="form-row" style="margin-top:10px">
+                        <input type="number" id="refuel-liters" class="form-input"
+                            min="1" max="500" step="0.1" placeholder="Або введіть вручну">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="App.refuelNextStep()">
+                        Далі ▶
+                    </button>
+                </div>
+                <!-- Крок 3: Чек -->
+                <div id="refuel-step-receipt" class="hidden">
+                    <p class="modal-step">Крок 3/3: Номер чека</p>
+                    <p id="refuel-summary" class="selected-value"></p>
+                    <div class="form-row">
+                        <input type="text" id="refuel-receipt" class="form-input"
+                            maxlength="50" placeholder="Номер чека">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="App.submitRefuel()">
+                        ✅ Підтвердити прийом
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="refuel-back-btn"
+                    onclick="App.refuelPrevStep()" style="display:none">
+                    ◀ Назад
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно: Встановлення мотогодин -->
+    <div class="modal-overlay hidden" id="modal-set-hours">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>⏱ Мотогодини</h3>
+                <button class="modal-close" onclick="App.closeModal('modal-set-hours')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="set-hours-gen-name" class="selected-value"></p>
+                <p id="set-hours-current" class="hint-text"></p>
+                <div class="form-row">
+                    <input type="number" id="set-hours-input" class="form-input"
+                        min="0" max="100000" step="0.1" placeholder="Нове значення (год)">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="App.closeModal('modal-set-hours')">Скасувати</button>
+                <button class="btn btn-primary" onclick="App.submitSetHours()">💾 Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно: Підтвердження ТО -->
+    <div class="modal-overlay hidden" id="modal-confirm-mnt">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>🔧 Підтвердження ТО</h3>
+                <button class="modal-close" onclick="App.closeModal('modal-confirm-mnt')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-mnt-text"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="App.closeModal('modal-confirm-mnt')">Скасувати</button>
+                <button class="btn btn-primary" id="confirm-mnt-ok" onclick="App.confirmMnt()">✅ Підтвердити</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/api.js"></script>
     <script src="/js/app.js"></script>
 </body>
 </html>
+
