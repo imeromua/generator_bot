@@ -10,9 +10,22 @@
     "use strict";
 
     // -------------------------------------------------------------------
-    // Telegram WebApp SDK
+    // Перевірка доступу через Telegram
     // -------------------------------------------------------------------
     const tg = window.Telegram && window.Telegram.WebApp;
+    
+    // Якщо відсутній Telegram WebApp або initData — показуємо заглушку
+    if (!tg || !tg.initData) {
+        // Редирект на заглушку
+        if (!window.location.pathname.includes('block.html')) {
+            window.location.href = '/block.html';
+        }
+        return; // Зупиняємо виконання скрипта
+    }
+
+    // -------------------------------------------------------------------
+    // Telegram WebApp SDK
+    // -------------------------------------------------------------------
     if (tg) {
         tg.ready();
         tg.expand();
@@ -1194,4 +1207,3 @@
 
     init();
 })();
-
