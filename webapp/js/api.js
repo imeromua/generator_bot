@@ -29,7 +29,15 @@ const API = (() => {
             const qs = new URLSearchParams(params).toString();
             if (qs) url += "?" + qs;
         }
-        const resp = await fetch(url, { headers: _headers() });
+        let resp;
+        try {
+            resp = await fetch(url, { headers: _headers() });
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error("Немає з'єднання з сервером. Перевірте інтернет.");
+            }
+            throw e;
+        }
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
             throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
@@ -41,11 +49,19 @@ const API = (() => {
      * POST-запит до API.
      */
     async function post(path, data) {
-        const resp = await fetch(BASE + path, {
-            method: "POST",
-            headers: _headers(),
-            body: JSON.stringify(data || {}),
-        });
+        let resp;
+        try {
+            resp = await fetch(BASE + path, {
+                method: "POST",
+                headers: _headers(),
+                body: JSON.stringify(data || {}),
+            });
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error("Немає з'єднання з сервером. Перевірте інтернет.");
+            }
+            throw e;
+        }
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
             throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
@@ -57,11 +73,19 @@ const API = (() => {
      * DELETE-запит до API.
      */
     async function _delete(path, data) {
-        const resp = await fetch(BASE + path, {
-            method: "DELETE",
-            headers: _headers(),
-            body: JSON.stringify(data || {}),
-        });
+        let resp;
+        try {
+            resp = await fetch(BASE + path, {
+                method: "DELETE",
+                headers: _headers(),
+                body: JSON.stringify(data || {}),
+            });
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error("Немає з'єднання з сервером. Перевірте інтернет.");
+            }
+            throw e;
+        }
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({}));
             throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);

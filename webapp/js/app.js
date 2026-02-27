@@ -26,6 +26,8 @@
     let currentStatus = null;   // останній стан з /api/status
     let scheduleDate = null;
     let isAdminScheduleEdit = false;
+    // Захист від паралельних завантажень дашборду (напр. при швидких свайпах)
+    let dashboardLoadInProgress = false;
 
     // Стан форми прийому палива
     const refuelState = { driver: null, liters: null, step: 1 };
@@ -38,10 +40,26 @@
     let pendingHoursGen = null;
 
     // -------------------------------------------------------------------
+    // Константи
+    // -------------------------------------------------------------------
+    const FUEL_CRITICAL = 15;   // поріг критичного рівня палива (л)
+    const FUEL_WARNING  = 40;   // поріг попереджувального рівня палива (л)
+
+    // -------------------------------------------------------------------
     // Допоміжні функції
     // -------------------------------------------------------------------
 
     function $(id) { return document.getElementById(id); }
+
+    /**
+     * Екранує рядок для безпечного вставляння у innerHTML (захист від XSS).
+     */
+    function escapeHtml(str) {
+        if (!str) return "";
+        const div = document.createElement("div");
+        div.textContent = str;
+        return div.innerHTML;
+    }
 
     function shiftName(code) {
         return { m: "🌅 Зміна 1", d: "☀️ Зміна 2", e: "🌙 Зміна 3", x: "⚡ Екстра" }[code] || code;
@@ -166,6 +184,8 @@
 
     // --- Dashboard ---
     async function loadDashboard() {
+        if (dashboardLoadInProgress) return;
+        dashboardLoadInProgress = true;
         try {
             const [status, week] = await Promise.all([
                 API.getStatus(),
@@ -177,6 +197,8 @@
             renderActionButtons(status);
         } catch (e) {
             showError("Помилка завантаження: " + e.message);
+        } finally {
+            dashboardLoadInProgress = false;
         }
     }
 
@@ -206,8 +228,8 @@
         if (isOn && data.estimated_fuel !== data.current_fuel) fuelText += " (оцінка)";
         fuelEl.textContent = fuelText;
         fuelEl.className = "stat-value";
-        if (fuel < 15) fuelEl.classList.add("fuel-low");
-        else if (fuel < 40) fuelEl.classList.add("fuel-warn");
+        if (fuel < FUEL_CRITICAL) fuelEl.classList.add("fuel-low");
+        else if (fuel < FUEL_WARNING) fuelEl.classList.add("fuel-warn");
 
         $("stat-hours").textContent = data.total_hours + " год";
         $("stat-rate").textContent  = data.fuel_rate + " л/год";
@@ -463,15 +485,15 @@
             const label = eventLabel(ev.event_type);
             const time = formatTime(ev.timestamp);
             let meta = time;
-            if (ev.actor)   meta += ` • ${ev.actor}`;
-            if (ev.driver)  meta += ` • Водій: ${ev.driver}`;
-            if (ev.receipt) meta += ` • Чек: ${ev.receipt}`;
+            if (ev.actor)   meta += ` • ${escapeHtml(ev.actor)}`;
+            if (ev.driver)  meta += ` • Водій: ${escapeHtml(ev.driver)}`;
+            if (ev.receipt) meta += ` • Чек: ${escapeHtml(ev.receipt)}`;
             return `<div class="event-item">
                 <span class="event-icon">${icon}</span>
                 <div class="event-body">
                     <div class="event-type">${label}</div>
                     <div class="event-meta">${meta}</div>
-                    ${ev.value ? `<div class="event-value">${ev.value}</div>` : ""}
+                    ${ev.value ? `<div class="event-value">${escapeHtml(ev.value)}</div>` : ""}
                 </div>
             </div>`;
         }).join("");
@@ -1099,8 +1121,8 @@
                     const fuel = data.estimated_fuel;
                     fuelEl.textContent = fuel + " л (оцінка)";
                     fuelEl.className = "stat-value";
-                    if (fuel < 15) fuelEl.classList.add("fuel-low");
-                    else if (fuel < 40) fuelEl.classList.add("fuel-warn");
+                    if (fuel < FUEL_CRITICAL) fuelEl.classList.add("fuel-low");
+                    else if (fuel < FUEL_WARNING) fuelEl.classList.add("fuel-warn");
                 }
             }
         }).catch(() => {});
