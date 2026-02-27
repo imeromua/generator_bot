@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
@@ -136,6 +137,29 @@ async def cors_middleware(request: web.Request, handler):
 
 
 # ---------------------------------------------------------------------------
+# Утиліти для роботи з БД
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def atomic_transaction():
+    """Context manager для безпечної роботи з транзакцією БД.
+
+    Відкриває з'єднання, починає транзакцію, при успіху виконує commit,
+    при помилці — rollback. З'єднання закривається у будь-якому випадку.
+    """
+    conn = db_models.get_connection()
+    try:
+        db_models.begin_transaction(conn)
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # API — endpoints
 # ---------------------------------------------------------------------------
 
@@ -163,6 +187,10 @@ async def api_status(request: web.Request) -> web.Response:
                             f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M"
                         )
                     else:
+                        logger.warning(
+                            f"start_date_str відсутній для активної зміни {state.get('active_shift')}! "
+                            f"Використовую поточну дату."
+                        )
                         start_dt = datetime.strptime(
                             f"{datetime.now(config.KYIV).strftime('%Y-%m-%d')} {start_time_str}",
                             "%Y-%m-%d %H:%M",
@@ -207,11 +235,16 @@ async def api_schedule(request: web.Request) -> web.Response:
             now = datetime.now(config.KYIV)
             date_str = now.strftime("%Y-%m-%d")
 
-        # Валідація формату дати
+        # Валідація формату та реальності дати
         try:
-            datetime.strptime(date_str, "%Y-%m-%d")
+            parsed = datetime.strptime(date_str, "%Y-%m-%d")
+            if parsed.year < 2000 or parsed.year > 2100:
+                raise ValueError("Дата поза допустимим діапазоном")
         except ValueError:
-            return web.json_response({"error": "Невірний формат дати. Використовуйте YYYY-MM-DD"}, status=400)
+            return web.json_response(
+                {"error": "Невірний формат або нереальна дата. Використовуйте YYYY-MM-DD"},
+                status=400,
+            )
 
         schedule = db.get_schedule(date_str)
         hours = []
@@ -549,24 +582,9 @@ async def api_action_refill(request: web.Request) -> web.Response:
         pass
 
     try:
-        from database.models import get_connection, begin_transaction
-        conn = get_connection()
-        try:
-            begin_transaction(conn)
+        with atomic_transaction() as conn:
             db.add_log("refill", personnel, str(liters), driver, receipt=receipt, conn=conn)
             db.update_fuel(liters, conn=conn)
-            conn.commit()
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            raise
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
     except Exception as e:
         logger.exception("api_action_refill error")
         return web.json_response({"error": str(e)}, status=500)
