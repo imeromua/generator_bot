@@ -155,6 +155,33 @@ const API = (() => {
         adminDeletePersonnel: (name) => _delete("/api/admin/personnel", { name }),
         /** Прив'язати персонал до користувача */
         adminAssignPersonnel: (user_id, personnel) => post("/api/admin/personnel/assign", { user_id, personnel }),
+
+        // Task 5: Notification preferences
+        /** Отримати налаштування сповіщень */
+        getNotificationPreferences: () => get("/api/notifications/preferences"),
+        /** Зберегти налаштування сповіщення */
+        setNotificationPreference: (notification_type, enabled, quiet_hours_start, quiet_hours_end) =>
+            post("/api/notifications/preferences", { notification_type, enabled, quiet_hours_start, quiet_hours_end }),
+        /** Тест сповіщення */
+        testNotification: () => post("/api/notifications/test", {}),
+
+        // Task 6: Fuel orders
+        /** Список замовлень палива */
+        getFuelOrders: (status) => get("/api/fuel/orders", status ? { status } : undefined),
+        /** Створити замовлення палива */
+        createFuelOrder: (data) => post("/api/fuel/orders", data),
+        /** Оновити статус замовлення */
+        updateFuelOrder: (data) => post("/api/fuel/orders/update", data),
+
+        // Task 8: Shift schedule
+        /** Отримати розклад змін */
+        getShifts: (params) => get("/api/shifts/schedule", params),
+        /** Зберегти зміну */
+        setShift: (data) => post("/api/shifts/schedule", data),
+        /** Авто-планування */
+        autoSchedule: (month, save) => post("/api/shifts/auto", { month, save }),
+        /** Аналітика змін */
+        getShiftAnalytics: (month) => get("/api/shifts/analytics", month ? { month } : undefined),
     };
 })();
 

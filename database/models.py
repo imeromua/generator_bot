@@ -408,6 +408,38 @@ def init_db():
             new_value TEXT,
             success INTEGER NOT NULL DEFAULT 1
         )''')
+        # Task 5: Push notifications preferences
+        c.execute('''CREATE TABLE IF NOT EXISTS notification_preferences (
+            user_id INTEGER NOT NULL,
+            notification_type TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            quiet_hours_start TEXT DEFAULT NULL,
+            quiet_hours_end TEXT DEFAULT NULL,
+            delivery_method TEXT NOT NULL DEFAULT 'telegram',
+            PRIMARY KEY (user_id, notification_type)
+        )''')
+        # Task 6: Fuel orders
+        c.execute('''CREATE TABLE IF NOT EXISTS fuel_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            requested_by INTEGER,
+            amount_liters REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            supplier TEXT,
+            price REAL,
+            delivery_date TEXT,
+            notes TEXT
+        )''')
+        # Task 8: Shift schedule
+        c.execute('''CREATE TABLE IF NOT EXISTS shift_schedule (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            shift_type TEXT NOT NULL,
+            assigned_personnel_id TEXT,
+            status TEXT NOT NULL DEFAULT 'planned',
+            notes TEXT,
+            UNIQUE(date, shift_type)
+        )''')
 
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
@@ -454,6 +486,38 @@ def init_db():
             old_value TEXT,
             new_value TEXT,
             success INTEGER NOT NULL DEFAULT 1
+        )''')
+        # Task 5: Push notifications preferences
+        c.execute('''CREATE TABLE IF NOT EXISTS notification_preferences (
+            user_id BIGINT NOT NULL,
+            notification_type TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            quiet_hours_start TEXT DEFAULT NULL,
+            quiet_hours_end TEXT DEFAULT NULL,
+            delivery_method TEXT NOT NULL DEFAULT 'telegram',
+            PRIMARY KEY (user_id, notification_type)
+        )''')
+        # Task 6: Fuel orders
+        c.execute('''CREATE TABLE IF NOT EXISTS fuel_orders (
+            id BIGSERIAL PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            requested_by BIGINT,
+            amount_liters DOUBLE PRECISION NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            supplier TEXT,
+            price DOUBLE PRECISION,
+            delivery_date TEXT,
+            notes TEXT
+        )''')
+        # Task 8: Shift schedule
+        c.execute('''CREATE TABLE IF NOT EXISTS shift_schedule (
+            id BIGSERIAL PRIMARY KEY,
+            date TEXT NOT NULL,
+            shift_type TEXT NOT NULL,
+            assigned_personnel_id TEXT,
+            status TEXT NOT NULL DEFAULT 'planned',
+            notes TEXT,
+            UNIQUE(date, shift_type)
         )''')
 
     # Міграція: додавання receipt_number (старий код)
@@ -539,6 +603,11 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON admin_audit_log(timestamp)",
         "CREATE INDEX IF NOT EXISTS idx_audit_log_admin ON admin_audit_log(admin_user_id)",
         "CREATE INDEX IF NOT EXISTS idx_audit_log_action_type ON admin_audit_log(action_type)",
+        "CREATE INDEX IF NOT EXISTS idx_notif_prefs_user ON notification_preferences(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_fuel_orders_status ON fuel_orders(status)",
+        "CREATE INDEX IF NOT EXISTS idx_fuel_orders_created ON fuel_orders(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_shift_schedule_date ON shift_schedule(date)",
+        "CREATE INDEX IF NOT EXISTS idx_shift_schedule_personnel ON shift_schedule(assigned_personnel_id)",
     ]
     
     # PostgreSQL-specific optimized indexes

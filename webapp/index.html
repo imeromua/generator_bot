@@ -8,6 +8,12 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
+    <!-- Task 7: Dark Theme Switcher -->
+    <div class="theme-switcher" id="theme-switcher" title="Тема оформлення">
+        <button class="theme-btn" id="theme-light" onclick="ThemeManager.set('light')" title="Світла">🌞</button>
+        <button class="theme-btn" id="theme-dark"  onclick="ThemeManager.set('dark')"  title="Темна">🌙</button>
+        <button class="theme-btn active" id="theme-auto" onclick="ThemeManager.set('auto')" title="Авто">🔄</button>
+    </div>
     <!-- Офлайн-банер (прихований за замовчуванням) -->
     <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#f39c12;color:#fff;text-align:center;padding:8px 16px;font-size:14px;font-weight:600;">
         ⚠️ Офлайн-режим — показуються збережені дані. Зміни недоступні.
@@ -19,6 +25,9 @@
             <button class="tab" data-tab="schedule">📅 Графік</button>
             <button class="tab" data-tab="events">🕘 Події</button>
             <button class="tab" data-tab="maintenance">🔧 ТО</button>
+            <button class="tab" data-tab="fuel-orders">⛽ Паливо</button>
+            <button class="tab" data-tab="shifts">📆 Зміни</button>
+            <button class="tab" data-tab="notifications">🔔 Сповіщення</button>
             <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️ Адмін</button>
         </nav>
 
@@ -382,6 +391,163 @@
                     <p class="hint-text" style="margin-bottom:8px">Призначте персонал конкретному Telegram-користувачу</p>
                     <div id="admin-users-list" class="manage-list">
                         <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Task 6: Вкладка: Управління паливом -->
+        <section class="page" id="page-fuel-orders">
+            <!-- Поточний стан та прогноз -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>⛽ Рівень палива</h2>
+                    <button class="btn-sm" id="btn-refresh-orders" onclick="App.refreshFuelOrders()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div id="fuel-forecast-stats">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Нове замовлення (адмін) -->
+            <div class="card hidden" id="card-new-order">
+                <div class="card-header">
+                    <h2>📦 Нове замовлення</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <label class="form-label">Кількість (л)</label>
+                        <input type="number" id="order-amount" class="form-input" min="1" max="10000" step="1" placeholder="Літри" value="200">
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Постачальник</label>
+                        <input type="text" id="order-supplier" class="form-input" maxlength="100" placeholder="Назва постачальника">
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Ціна за літр (грн)</label>
+                        <input type="number" id="order-price" class="form-input" min="0" step="0.01" placeholder="Ціна">
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Дата доставки</label>
+                        <input type="date" id="order-delivery-date" class="form-input">
+                    </div>
+                    <div class="form-row">
+                        <label class="form-label">Примітки</label>
+                        <input type="text" id="order-notes" class="form-input" maxlength="200" placeholder="Необов'язково">
+                    </div>
+                    <button class="btn btn-primary btn-full" onclick="App.createFuelOrder()">
+                        ✅ Замовити паливо
+                    </button>
+                </div>
+            </div>
+
+            <!-- Список замовлень -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📋 Замовлення</h2>
+                </div>
+                <div class="card-body">
+                    <div id="fuel-orders-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Task 8: Вкладка: Планування змін -->
+        <section class="page" id="page-shifts">
+            <!-- Місячний календар -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📆 Розклад змін</h2>
+                    <div class="date-nav">
+                        <button class="btn-icon" id="shifts-prev">◀</button>
+                        <span id="shifts-month-label">—</span>
+                        <button class="btn-icon" id="shifts-next">▶</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Фільтр по персоналу -->
+                    <div class="form-row" style="margin-bottom:8px">
+                        <select id="shifts-filter-personnel" class="form-input" onchange="App.loadShifts()">
+                            <option value="">— Всі —</option>
+                        </select>
+                    </div>
+                    <!-- Заголовки днів тижня -->
+                    <div class="shift-calendar" id="shifts-cal-headers">
+                        <div class="shift-cal-header">Пн</div>
+                        <div class="shift-cal-header">Вт</div>
+                        <div class="shift-cal-header">Ср</div>
+                        <div class="shift-cal-header">Чт</div>
+                        <div class="shift-cal-header">Пт</div>
+                        <div class="shift-cal-header">Сб</div>
+                        <div class="shift-cal-header">Нд</div>
+                    </div>
+                    <div class="shift-calendar" id="shifts-calendar">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Авто-планування (адмін) -->
+            <div class="card hidden" id="card-auto-schedule">
+                <div class="card-header">
+                    <h2>🤖 Авто-планування</h2>
+                </div>
+                <div class="card-body">
+                    <p class="hint-text" style="margin-bottom:10px">Автоматично розподілити зміни на місяць з рівним навантаженням</p>
+                    <button class="btn btn-secondary btn-full" id="btn-auto-preview" onclick="App.autoSchedulePreview()">
+                        👁 Попередній перегляд
+                    </button>
+                    <div id="auto-schedule-preview" style="margin-top:10px;display:none">
+                        <button class="btn btn-primary btn-full" onclick="App.autoScheduleSave()">
+                            💾 Зберегти розклад
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Аналітика -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Навантаження персоналу</h2>
+                </div>
+                <div class="card-body">
+                    <div id="shifts-analytics">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Task 5: Вкладка: Сповіщення -->
+        <section class="page" id="page-notifications">
+            <!-- Критичні -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔔 Сповіщення</h2>
+                    <button class="btn-sm" onclick="App.testNotification()">🧪 Тест</button>
+                </div>
+                <div class="card-body">
+                    <p class="hint-text" style="margin-bottom:12px">Критичні сповіщення завжди активні і не залежать від налаштувань.</p>
+                    <div id="notifications-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+
+                    <!-- Тихі години -->
+                    <div style="margin-top:16px;border-top:1px solid var(--color-border,#e0e0e8);padding-top:12px">
+                        <div style="font-weight:600;margin-bottom:8px">🌙 Тихі години (не турбувати)</div>
+                        <div class="quiet-hours-row">
+                            <label>З:</label>
+                            <input type="time" id="quiet-start" value="22:00">
+                            <label>До:</label>
+                            <input type="time" id="quiet-end" value="08:00">
+                        </div>
+                        <button class="btn btn-secondary btn-full" style="margin-top:10px" onclick="App.saveQuietHours()">
+                            💾 Зберегти тихі години
+                        </button>
                     </div>
                 </div>
             </div>
