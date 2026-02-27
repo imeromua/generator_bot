@@ -560,6 +560,12 @@
         } catch (e) {
             showError("Помилка: " + e.message);
         }
+        // Load management lists in parallel (errors non-fatal)
+        Promise.all([
+            App.refreshAdminDrivers(),
+            App.refreshAdminPersonnel(),
+            App.refreshAdminUsers(),
+        ]).catch(() => {});
     }
 
     function renderGenStats(data, status) {
@@ -680,15 +686,14 @@
         },
 
         // --- Звіти ---
-        downloadReport() {
+        downloadReport(generator) {
             const days = $("report-days-select").value || "30";
-            let url  = API.getReportUrl(days);
+            let url = API.getReportUrl(days, generator || "");
             // initData передається як query-параметр для прямого завантаження
             const initData = window.Telegram && window.Telegram.WebApp
                 ? window.Telegram.WebApp.initData : "";
             if (initData) {
-                url += (url.includes("?") ? "&" : "?") +
-                    "init_data=" + encodeURIComponent(initData);
+                url += (url.includes("?") ? "&" : "?") + "init_data=" + encodeURIComponent(initData);
             }
             const link = document.createElement("a");
             link.href = url;
@@ -696,6 +701,217 @@
             document.body.appendChild(link);
             link.click();
             link.remove();
+        },
+
+        // --- Sync Google Sheets ---
+        async syncSheets() {
+            const btn = $("btn-sync-sheets");
+            const resultEl = $("sync-result");
+            if (btn) { btn.disabled = true; btn.textContent = "⏳ Синхронізація..."; }
+            if (resultEl) resultEl.style.display = "none";
+            try {
+                const res = await API.adminSync();
+                showSuccess(res.message || "Синхронізацію виконано");
+                if (resultEl) {
+                    resultEl.textContent = res.message || "Готово";
+                    resultEl.style.display = "";
+                }
+            } catch (e) {
+                showError("Помилка синхронізації: " + e.message);
+                if (resultEl) {
+                    resultEl.textContent = "Помилка: " + e.message;
+                    resultEl.style.display = "";
+                }
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = "🔄 Синхронізувати з Sheets"; }
+            }
+        },
+
+        // --- Drivers admin ---
+        async refreshAdminDrivers() {
+            const listEl = $("admin-drivers-list");
+            if (!listEl) return;
+            listEl.innerHTML = '<div class="spinner-small"></div>';
+            try {
+                const data = await API.adminGetDrivers();
+                const drivers = data.drivers || [];
+                if (drivers.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state">Водіїв немає</div>';
+                    return;
+                }
+                listEl.innerHTML = "";
+                drivers.forEach((d) => {
+                    const row = document.createElement("div");
+                    row.className = "manage-item";
+                    const name = document.createElement("span");
+                    name.className = "manage-item-name";
+                    name.textContent = d;
+                    const del = document.createElement("button");
+                    del.className = "btn btn-danger btn-sm-icon";
+                    del.textContent = "✕";
+                    del.title = "Видалити";
+                    del.addEventListener("click", () => App.adminDeleteDriver(d));
+                    row.appendChild(name);
+                    row.appendChild(del);
+                    listEl.appendChild(row);
+                });
+            } catch (e) {
+                listEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+            }
+        },
+
+        async adminAddDriver() {
+            const inp = $("new-driver-name");
+            const name = (inp ? inp.value : "").trim();
+            if (!name) { showError("Введіть ім'я водія"); return; }
+            try {
+                const res = await API.adminAddDriver(name);
+                showSuccess(res.message || "Додано");
+                if (inp) inp.value = "";
+                await App.refreshAdminDrivers();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async adminDeleteDriver(name) {
+            if (!confirm(`Видалити водія «${name}»?`)) return;
+            try {
+                const res = await API.adminDeleteDriver(name);
+                showSuccess(res.message || "Видалено");
+                await App.refreshAdminDrivers();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // --- Personnel admin ---
+        async refreshAdminPersonnel() {
+            const listEl = $("admin-personnel-list");
+            if (!listEl) return;
+            listEl.innerHTML = '<div class="spinner-small"></div>';
+            try {
+                const data = await API.adminGetPersonnel();
+                const personnel = data.personnel || [];
+                if (personnel.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state">Персоналу немає</div>';
+                    return;
+                }
+                listEl.innerHTML = "";
+                personnel.forEach((p) => {
+                    const row = document.createElement("div");
+                    row.className = "manage-item";
+                    const name = document.createElement("span");
+                    name.className = "manage-item-name";
+                    name.textContent = p;
+                    const del = document.createElement("button");
+                    del.className = "btn btn-danger btn-sm-icon";
+                    del.textContent = "✕";
+                    del.title = "Видалити";
+                    del.addEventListener("click", () => App.adminDeletePersonnel(p));
+                    row.appendChild(name);
+                    row.appendChild(del);
+                    listEl.appendChild(row);
+                });
+            } catch (e) {
+                listEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+            }
+        },
+
+        async adminAddPersonnel() {
+            const inp = $("new-personnel-name");
+            const name = (inp ? inp.value : "").trim();
+            if (!name) { showError("Введіть ПІБ персоналу"); return; }
+            try {
+                const res = await API.adminAddPersonnel(name);
+                showSuccess(res.message || "Додано");
+                if (inp) inp.value = "";
+                await App.refreshAdminPersonnel();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        async adminDeletePersonnel(name) {
+            if (!confirm(`Видалити персонал «${name}»?`)) return;
+            try {
+                const res = await API.adminDeletePersonnel(name);
+                showSuccess(res.message || "Видалено");
+                await App.refreshAdminPersonnel();
+                await App.refreshAdminUsers();
+            } catch (e) {
+                showError(e.message);
+            }
+        },
+
+        // --- Users + personnel assignment ---
+        async refreshAdminUsers() {
+            const listEl = $("admin-users-list");
+            if (!listEl) return;
+            listEl.innerHTML = '<div class="spinner-small"></div>';
+            try {
+                const data = await API.adminGetPersonnel();
+                const users = data.users || [];
+                const personnelNames = data.personnel || [];
+                if (users.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state">Зареєстрованих користувачів немає</div>';
+                    return;
+                }
+                listEl.innerHTML = "";
+                users.forEach((u) => {
+                    const row = document.createElement("div");
+                    row.className = "manage-item";
+                    const info = document.createElement("div");
+                    info.style.flex = "1";
+                    const nameSpan = document.createElement("div");
+                    nameSpan.className = "manage-item-name";
+                    nameSpan.textContent = u.full_name || `User ${u.user_id}`;
+                    const idSpan = document.createElement("div");
+                    idSpan.className = "hint-text";
+                    idSpan.style.fontSize = "11px";
+                    idSpan.textContent = `ID: ${u.user_id}`;
+                    info.appendChild(nameSpan);
+                    info.appendChild(idSpan);
+
+                    const sel = document.createElement("select");
+                    sel.className = "form-input";
+                    sel.style.width = "auto";
+                    sel.style.fontSize = "12px";
+                    sel.style.padding = "4px 6px";
+                    const optNone = document.createElement("option");
+                    optNone.value = "";
+                    optNone.textContent = "— без прив'язки —";
+                    sel.appendChild(optNone);
+                    personnelNames.forEach((p) => {
+                        const opt = document.createElement("option");
+                        opt.value = p;
+                        opt.textContent = p;
+                        if (u.personnel === p) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+
+                    const saveBtn = document.createElement("button");
+                    saveBtn.className = "btn btn-primary btn-sm-icon";
+                    saveBtn.textContent = "💾";
+                    saveBtn.title = "Зберегти";
+                    saveBtn.addEventListener("click", async () => {
+                        const chosen = sel.value || null;
+                        try {
+                            const res = await API.adminAssignPersonnel(u.user_id, chosen);
+                            showSuccess(res.message || "Збережено");
+                        } catch (e) {
+                            showError(e.message);
+                        }
+                    });
+
+                    row.appendChild(info);
+                    row.appendChild(sel);
+                    row.appendChild(saveBtn);
+                    listEl.appendChild(row);
+                });
+            } catch (e) {
+                listEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
+            }
         },
 
         // --- Прийом палива (модальне вікно) ---
@@ -816,11 +1032,72 @@
     // -------------------------------------------------------------------
     // Автооновлення
     // -------------------------------------------------------------------
-    const REFRESH_INTERVAL = 30000; // 30 секунд
+    const REFRESH_INTERVAL_ON  = 10000; // 10 сек — поки генератор працює
+    const REFRESH_INTERVAL_OFF = 30000; // 30 сек — в стані спокою
 
     setInterval(() => {
-        if (currentTab === "dashboard") loadDashboard();
-    }, REFRESH_INTERVAL);
+        if (currentTab === "dashboard") {
+            loadDashboard();
+        }
+    }, REFRESH_INTERVAL_OFF);
+
+    // Швидке оновлення показників (паливо, мотогодини) під час роботи генератора
+    setInterval(() => {
+        if (currentTab !== "dashboard") return;
+        if (!currentStatus || currentStatus.status !== "ON") return;
+        // Оновлюємо лише числові показники без повного перезавантаження
+        API.getStatus().then((data) => {
+            currentStatus = data;
+            // Оновлюємо лише паливо та мотогодини (уникаємо мерехтіння)
+            if (data.status === "ON") {
+                const fuelEl = $("stat-fuel");
+                if (fuelEl) {
+                    const fuel = data.estimated_fuel;
+                    fuelEl.textContent = fuel + " л (оцінка)";
+                    fuelEl.className = "stat-value";
+                    if (fuel < 15) fuelEl.classList.add("fuel-low");
+                    else if (fuel < 40) fuelEl.classList.add("fuel-warn");
+                }
+            }
+        }).catch(() => {});
+    }, REFRESH_INTERVAL_ON);
+
+    // -------------------------------------------------------------------
+    // Свайп між вкладками
+    // -------------------------------------------------------------------
+    (function initSwipe() {
+        const pages = document.getElementById("app");
+        let touchStartX = 0;
+        let touchStartY = 0;
+        const SWIPE_THRESHOLD = 50; // мінімальна відстань свайпу (px)
+        const TAB_ORDER = ["dashboard", "schedule", "events", "maintenance", "admin"];
+
+        function getVisibleTabs() {
+            return TAB_ORDER.filter((t) => {
+                const btn = document.querySelector(`.tab[data-tab="${t}"]`);
+                return btn && !btn.classList.contains("hidden");
+            });
+        }
+
+        pages.addEventListener("touchstart", (e) => {
+            touchStartX = e.changedTouches[0].clientX;
+            touchStartY = e.changedTouches[0].clientY;
+        }, { passive: true });
+
+        pages.addEventListener("touchend", (e) => {
+            const dx = e.changedTouches[0].clientX - touchStartX;
+            const dy = e.changedTouches[0].clientY - touchStartY;
+            // Ігноруємо вертикальні свайпи та занадто короткі
+            if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < SWIPE_THRESHOLD) return;
+            const tabs = getVisibleTabs();
+            const idx = tabs.indexOf(currentTab);
+            if (dx < 0 && idx < tabs.length - 1) {
+                switchTab(tabs[idx + 1]);
+            } else if (dx > 0 && idx > 0) {
+                switchTab(tabs[idx - 1]);
+            }
+        }, { passive: true });
+    })();
 
     // -------------------------------------------------------------------
     // Ініціалізація

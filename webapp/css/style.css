@@ -965,3 +965,76 @@ body {
     margin: 16px auto;
 }
 
+/* --- Admin management lists --- */
+.manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.manage-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+}
+
+.manage-item-name {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn-sm-icon {
+    border: none;
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: opacity var(--transition);
+    flex-shrink: 0;
+}
+
+.btn-sm-icon:active {
+    opacity: 0.75;
+}
+
+/* Swipe hint dots (bottom nav indicator) */
+.swipe-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 0 4px;
+}
+
+.swipe-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--tg-hint);
+    opacity: 0.3;
+    transition: opacity var(--transition), background var(--transition);
+}
+
+.swipe-dot.active {
+    background: var(--tg-btn);
+    opacity: 1;
+}
+
+/* Page transition on swipe */
+.page.active {
+    animation: slideIn 0.2s ease;
+}
+
+@keyframes slideIn {
+    from { opacity: 0.7; transform: translateX(8px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
