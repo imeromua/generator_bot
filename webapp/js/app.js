@@ -266,7 +266,7 @@
             // Кнопка СТОП
             const btn = el("button", "btn btn-danger btn-full");
             btn.textContent = `🏁 ${shiftName(activeCode)} — СТОП`;
-            btn.onclick = () => doStopShift(activeCode);
+            btn.onclick = function() { doStopShift(activeCode, this); };
             btnsDiv.appendChild(btn);
         } else {
             // Кнопки СТАРТ
@@ -279,7 +279,7 @@
             if (nextStart) {
                 const btn = el("button", "btn btn-success btn-full");
                 btn.textContent = `▶ ${shiftName(nextStart)} — СТАРТ`;
-                btn.onclick = () => doStartShift(nextStart);
+                btn.onclick = function() { doStartShift(nextStart, this); };
                 btnsDiv.appendChild(btn);
             }
 
@@ -287,7 +287,7 @@
             if (["m","d","e"].every(s => completed.has(s)) && !completed.has("x")) {
                 const btnX = el("button", "btn btn-primary btn-full");
                 btnX.textContent = `▶ ${shiftName("x")} — СТАРТ`;
-                btnX.onclick = () => doStartShift("x");
+                btnX.onclick = function() { doStartShift("x", this); };
                 btnsDiv.appendChild(btnX);
             }
 
@@ -297,10 +297,8 @@
         }
     }
 
-    async function doStartShift(shift) {
-        const btn = event.target;
-        btn.disabled = true;
-        btn.textContent = "⏳ Запуск...";
+    async function doStartShift(shift, btn) {
+        if (btn) { btn.disabled = true; btn.textContent = "⏳ Запуск..."; }
         try {
             const res = await API.startShift(shift);
             showSuccess(res.message || "Зміну запущено");
@@ -311,10 +309,8 @@
         }
     }
 
-    async function doStopShift(shift) {
-        const btn = event.target;
-        btn.disabled = true;
-        btn.textContent = "⏳ Зупинка...";
+    async function doStopShift(shift, btn) {
+        if (btn) { btn.disabled = true; btn.textContent = "⏳ Зупинка..."; }
         try {
             const res = await API.stopShift(shift);
             showSuccess(res.message || `Зміна закрита. Тривалість: ${res.duration}, витрата: ${res.fuel_consumed} л`);
@@ -684,19 +680,19 @@
         },
 
         // --- Звіти ---
-        downloadReport(evt) {
+        downloadReport() {
             const days = $("report-days-select").value || "30";
-            const url  = API.getReportUrl(days);
-            // Встановлюємо X-Telegram-Init-Data через URL не можливо,
-            // тому відкриваємо пряме завантаження (сервер перевірить через initData)
+            let url  = API.getReportUrl(days);
+            // initData передається як query-параметр для прямого завантаження
+            const initData = window.Telegram && window.Telegram.WebApp
+                ? window.Telegram.WebApp.initData : "";
+            if (initData) {
+                url += (url.includes("?") ? "&" : "?") +
+                    "init_data=" + encodeURIComponent(initData);
+            }
             const link = document.createElement("a");
             link.href = url;
             link.download = "";
-            // Додаємо initData як query-параметр якщо не через заголовок
-            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) {
-                link.href = url + (url.includes("?") ? "&" : "?") +
-                    "init_data=" + encodeURIComponent(window.Telegram.WebApp.initData);
-            }
             document.body.appendChild(link);
             link.click();
             link.remove();
@@ -795,19 +791,25 @@
                 driversList.innerHTML = `<div class="empty-state">Водіїв не знайдено.<br>Зверніться до адміністратора.</div>`;
                 return;
             }
-            driversList.innerHTML = drivers.map((d) =>
-                `<button class="btn btn-driver" onclick="App._selectDriver('${d.replace(/'/g, "\\'")}')">${d}</button>`
-            ).join("");
+            // Будуємо кнопки без onclick-рядків (уникаємо XSS)
+            driversList.innerHTML = "";
+            drivers.forEach((d) => {
+                const btn = document.createElement("button");
+                btn.className = "btn btn-driver";
+                btn.textContent = d;
+                btn.addEventListener("click", () => selectDriver(d));
+                driversList.appendChild(btn);
+            });
         } catch (e) {
             driversList.innerHTML = `<div class="empty-state">Помилка завантаження водіїв</div>`;
         }
     }
 
-    App._selectDriver = function(driverName) {
+    function selectDriver(driverName) {
         refuelState.driver = driverName;
         $("refuel-driver-name").textContent = "Водій: " + driverName;
         showRefuelStep(2);
-    };
+    }
 
     $("btn-refuel-open").addEventListener("click", openRefuelModal);
 

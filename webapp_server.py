@@ -310,8 +310,11 @@ def _is_admin(user: dict | None) -> bool:
     """Перевіряє чи є користувач адміністратором."""
     if not user:
         return False
-    user_id = user.get("id")
-    return bool(user_id and int(user_id) in config.ADMIN_IDS)
+    try:
+        user_id = int(user.get("id", 0))
+    except (TypeError, ValueError):
+        return False
+    return bool(user_id and user_id in config.ADMIN_IDS)
 
 
 def _within_work_window(now_t, start_t, end_t) -> bool:
@@ -324,9 +327,12 @@ def _within_work_window(now_t, start_t, end_t) -> bool:
 async def api_user_role(request: web.Request) -> web.Response:
     """GET /api/user/role — роль поточного користувача."""
     user = _extract_user(request)
-    user_id = int(user.get("id", 0)) if user else None
+    try:
+        user_id = int(user.get("id", 0)) if user else None
+    except (TypeError, ValueError):
+        user_id = None
 
-    is_admin = bool(user_id and user_id in config.ADMIN_IDS)
+    is_admin = _is_admin(user)
     personnel = db.get_personnel_for_user(user_id) if user_id else None
 
     return web.json_response({
@@ -540,22 +546,25 @@ async def api_action_refill(request: web.Request) -> web.Response:
     try:
         from database.models import get_connection, begin_transaction
         conn = get_connection()
-        begin_transaction(conn)
-        db.add_log("refill", personnel, str(liters), driver, receipt=receipt, conn=conn)
-        db.update_fuel(liters, conn=conn)
-        conn.commit()
-    except Exception as e:
         try:
-            conn.rollback()
-        except Exception:
-            pass
+            begin_transaction(conn)
+            db.add_log("refill", personnel, str(liters), driver, receipt=receipt, conn=conn)
+            db.update_fuel(liters, conn=conn)
+            conn.commit()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
         logger.exception("api_action_refill error")
         return web.json_response({"error": str(e)}, status=500)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
     return web.json_response({
         "ok": True,
@@ -865,7 +874,7 @@ async def api_report_excel(request: web.Request) -> web.Response:
                 col_letter = get_column_letter(col_idx)
                 for row_idx in range(1, ws_sheet.max_row + 1):
                     cell = ws_sheet.cell(row=row_idx, column=col_idx)
-                    if MergedCell and isinstance(cell, MergedCell):
+                    if isinstance(cell, MergedCell):
                         continue
                     try:
                         cell_len = len(str(cell.value or ""))
