@@ -137,6 +137,53 @@ async def cors_middleware(request: web.Request, handler):
 
 
 # ---------------------------------------------------------------------------
+# Rate limiting (in-memory, per-IP, 100 req/min)
+# ---------------------------------------------------------------------------
+
+import time as _time
+from collections import defaultdict
+
+_rate_limit_counts: dict = defaultdict(list)
+_RATE_LIMIT_MAX = 100
+_RATE_LIMIT_WINDOW = 60  # seconds
+_RATE_LIMIT_CLEANUP_INTERVAL = 300  # clean stale IPs every 5 minutes
+_rate_limit_last_cleanup = 0.0
+
+
+@web.middleware
+async def rate_limit_middleware(request: web.Request, handler):
+    """Simple in-memory rate limiter: 100 requests per minute per IP."""
+    global _rate_limit_last_cleanup
+
+    if request.method == "OPTIONS":
+        return await handler(request)
+
+    ip = request.remote or "unknown"
+    now = _time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW
+
+    # Periodically clean up IPs with no recent requests to prevent memory growth
+    if now - _rate_limit_last_cleanup > _RATE_LIMIT_CLEANUP_INTERVAL:
+        stale = [k for k, v in _rate_limit_counts.items() if not v or v[-1] < window_start]
+        for k in stale:
+            del _rate_limit_counts[k]
+        _rate_limit_last_cleanup = now
+
+    # Remove old entries for this IP
+    _rate_limit_counts[ip] = [t for t in _rate_limit_counts[ip] if t > window_start]
+
+    if len(_rate_limit_counts[ip]) >= _RATE_LIMIT_MAX:
+        logger.warning(f"⚠️ Rate limit exceeded for IP {ip}")
+        return web.json_response(
+            {"error": "Забагато запитів. Спробуйте пізніше."},
+            status=429,
+        )
+
+    _rate_limit_counts[ip].append(now)
+    return await handler(request)
+
+
+# ---------------------------------------------------------------------------
 # Утиліти для роботи з БД
 # ---------------------------------------------------------------------------
 
@@ -157,6 +204,17 @@ def atomic_transaction():
         raise
     finally:
         conn.close()
+
+
+def _get_admin_info(user: dict) -> tuple[int, str]:
+    """Extract (user_id, admin_name) from validated user dict."""
+    try:
+        user_id = int(user.get("id", 0))
+    except (TypeError, ValueError):
+        user_id = 0
+    user_info = db.get_user(user_id) if user_id else None
+    admin_name = user_info[1] if user_info else user.get("first_name", "Адмін")
+    return user_id, admin_name
 
 
 # ---------------------------------------------------------------------------
@@ -626,11 +684,19 @@ async def api_schedule_toggle(request: web.Request) -> web.Response:
     try:
         db.toggle_schedule(date_str, hour)
         schedule = db.get_schedule(date_str)
+        new_state = bool(schedule.get(hour, 0))
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "schedule_toggle",
+            f"Перемикання графіка {date_str} {hour:02d}:00 → {'відключення' if new_state else 'подача'}",
+            target_entity=f"schedule:{date_str}:{hour}",
+            new_value={"off": new_state},
+        )
         return web.json_response({
             "ok": True,
             "date": date_str,
             "hour": hour,
-            "off": bool(schedule.get(hour, 0)),
+            "off": new_state,
             "schedule": {str(h): bool(v) for h, v in schedule.items()},
         })
     except Exception as e:
@@ -658,7 +724,16 @@ async def api_generator_switch(request: web.Request) -> web.Response:
     admin_name = user_info[1] if user_info else user.get("first_name", "Адмін")
 
     try:
+        prev_gen = db.get_active_generator()
         success, message = db.switch_generator(target, admin_name)
+        db.log_admin_action(
+            user_id, admin_name, "gen_switch",
+            f"Перемикання генератора: {prev_gen} → {target}",
+            target_entity=f"generator:{target}",
+            old_value=prev_gen,
+            new_value=target,
+            success=success,
+        )
         if success:
             return web.json_response({"ok": True, "message": message, "active": target})
         return web.json_response({"error": message}, status=400)
@@ -693,6 +768,12 @@ async def api_maintenance_perform(request: web.Request) -> web.Response:
     try:
         db.record_maintenance(action, actor, generator_id)
         action_names = {"oil": "Заміна мастила", "spark": "Заміна свічок", "maintenance": "Планове ТО"}
+        db.log_admin_action(
+            user_id, actor, "maintenance_perform",
+            f"{action_names.get(action, action)} на генераторі {generator_id}",
+            target_entity=f"generator:{generator_id}",
+            new_value={"action": action, "generator": generator_id},
+        )
         return web.json_response({
             "ok": True,
             "message": f"{action_names.get(action, action)} виконано",
@@ -725,7 +806,17 @@ async def api_maintenance_set_hours(request: web.Request) -> web.Response:
         return web.json_response({"error": "Значення мотогодин поза допустимим діапазоном (0–100000)"}, status=400)
 
     try:
+        old_stats = db.get_generator_stats(generator_id)
+        old_hours = float(old_stats.get("total_hours", 0))
         db.set_total_hours(hours, generator_id)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "mnt_set_hours",
+            f"Корекція мотогодин генератора {generator_id}: {old_hours:.1f} → {hours:.1f} год",
+            target_entity=f"generator:{generator_id}",
+            old_value=old_hours,
+            new_value=hours,
+        )
         return web.json_response({
             "ok": True,
             "message": f"Мотогодини встановлено: {hours:.1f} год",
@@ -756,11 +847,20 @@ async def api_fuel_set(request: web.Request) -> web.Response:
         return web.json_response({"error": "Значення палива поза допустимим діапазоном"}, status=400)
 
     try:
+        old_state = db.get_state()
+        old_fuel = float(old_state.get("current_fuel", 0))
         db.set_state("current_fuel", str(fuel))
         user_id = int(user.get("id", 0))
         user_info = db.get_user(user_id)
         actor = user_info[1] if user_info else user.get("first_name", "Адмін")
         db.add_log("corr_fuel_set", actor, str(fuel))
+        db.log_admin_action(
+            user_id, actor, "fuel_set",
+            f"Корекція палива: {old_fuel:.1f} → {fuel:.1f} л",
+            target_entity="fuel",
+            old_value=old_fuel,
+            new_value=fuel,
+        )
         return web.json_response({"ok": True, "message": f"Паливо встановлено: {fuel:.1f} л"})
     except Exception as e:
         logger.exception("api_fuel_set error")
@@ -1067,6 +1167,13 @@ async def api_report_excel(request: web.Request) -> web.Response:
 
         safe_gen = "основний" if generator_param == "main" else "аварійний"
         filename = f"звіт_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "export_excel",
+            f"Експорт Excel-звіту: {gen_name} за {period_days} дн.",
+            target_entity=f"generator:{generator_param}",
+            new_value={"days": period_days, "generator": generator_param},
+        )
         return web.Response(
             body=buf.read(),
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1113,6 +1220,13 @@ async def api_admin_drivers_add(request: web.Request) -> web.Response:
         ok = db.add_driver(name)
         if not ok:
             return web.json_response({"error": f"Водій «{name}» вже існує"}, status=409)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "driver_add",
+            f"Додано водія «{name}»",
+            target_entity=f"driver:{name}",
+            new_value=name,
+        )
         return web.json_response({"ok": True, "message": f"Водія «{name}» додано"})
     except Exception as e:
         logger.exception("api_admin_drivers_add error")
@@ -1138,6 +1252,13 @@ async def api_admin_drivers_delete(request: web.Request) -> web.Response:
         ok = db.delete_driver(name)
         if not ok:
             return web.json_response({"error": f"Водія «{name}» не знайдено"}, status=404)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "driver_delete",
+            f"Видалено водія «{name}»",
+            target_entity=f"driver:{name}",
+            old_value=name,
+        )
         return web.json_response({"ok": True, "message": f"Водія «{name}» видалено"})
     except Exception as e:
         logger.exception("api_admin_drivers_delete error")
@@ -1181,6 +1302,13 @@ async def api_admin_personnel_add(request: web.Request) -> web.Response:
         ok = db.add_personnel_name(name)
         if not ok:
             return web.json_response({"error": f"Персонал «{name}» вже існує"}, status=409)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "personnel_add",
+            f"Додано персонал «{name}»",
+            target_entity=f"personnel:{name}",
+            new_value=name,
+        )
         return web.json_response({"ok": True, "message": f"Персонал «{name}» додано"})
     except Exception as e:
         logger.exception("api_admin_personnel_add error")
@@ -1206,6 +1334,13 @@ async def api_admin_personnel_delete(request: web.Request) -> web.Response:
         ok = db.delete_personnel_name(name)
         if not ok:
             return web.json_response({"error": f"Персонал «{name}» не знайдено"}, status=404)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "personnel_delete",
+            f"Видалено персонал «{name}»",
+            target_entity=f"personnel:{name}",
+            old_value=name,
+        )
         return web.json_response({"ok": True, "message": f"Персонал «{name}» видалено"})
     except Exception as e:
         logger.exception("api_admin_personnel_delete error")
@@ -1234,11 +1369,20 @@ async def api_admin_personnel_assign(request: web.Request) -> web.Response:
         return web.json_response({"error": "user_id обов'язковий"}, status=400)
 
     try:
+        old_personnel = db.get_personnel_for_user(target_user_id)
         db.set_personnel_for_user(target_user_id, personnel_name)
+        admin_id, admin_name = _get_admin_info(user)
         if personnel_name:
             msg = f"Прив'язано: user {target_user_id} → «{personnel_name}»"
         else:
             msg = f"Прив'язку для user {target_user_id} знято"
+        db.log_admin_action(
+            admin_id, admin_name, "personnel_assign",
+            msg,
+            target_entity=f"user:{target_user_id}",
+            old_value=old_personnel,
+            new_value=personnel_name,
+        )
         return web.json_response({"ok": True, "message": msg})
     except Exception as e:
         logger.exception("api_admin_personnel_assign error")
@@ -1256,6 +1400,12 @@ async def api_admin_sync(request: web.Request) -> web.Response:
         result = full_export()
         updated = result.get("updated", [])
         skipped = result.get("skipped", [])
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "export_sheets",
+            f"Синхронізація з Google Sheets: {len(updated)} дн. оновлено",
+            new_value={"updated": len(updated), "skipped": len(skipped)},
+        )
         return web.json_response({
             "ok": True,
             "message": f"Синхронізовано: {len(updated)} дн., пропущено: {len(skipped)} дн.",
@@ -1268,12 +1418,238 @@ async def api_admin_sync(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
+# Admin Audit Log endpoints
+# ---------------------------------------------------------------------------
+
+async def api_admin_audit(request: web.Request) -> web.Response:
+    """GET /api/admin/audit — журнал дій адміністраторів.
+
+    Query params:
+        limit      (int, default 50, max 200)
+        offset     (int, default 0)
+        action_type (str, optional filter)
+        admin_id   (int, optional filter by admin user ID)
+        date_from  (str YYYY-MM-DD, optional)
+        date_to    (str YYYY-MM-DD, optional)
+    """
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        limit = min(int(request.query.get("limit", "50")), 200)
+    except (TypeError, ValueError):
+        limit = 50
+    try:
+        offset = max(int(request.query.get("offset", "0")), 0)
+    except (TypeError, ValueError):
+        offset = 0
+
+    action_type = request.query.get("action_type", "").strip()
+    date_from = request.query.get("date_from", "").strip()
+    date_to = request.query.get("date_to", "").strip()
+    try:
+        admin_filter = int(request.query.get("admin_id", "0"))
+    except (TypeError, ValueError):
+        admin_filter = 0
+
+    try:
+        rows = db.get_audit_logs(
+            limit=limit, offset=offset,
+            action_type=action_type, admin_user_id=admin_filter,
+            date_from=date_from, date_to=date_to,
+        )
+        total = db.count_audit_logs(
+            action_type=action_type, admin_user_id=admin_filter,
+            date_from=date_from, date_to=date_to,
+        )
+        entries = [
+            {
+                "id": r[0],
+                "timestamp": r[1],
+                "admin_user_id": r[2],
+                "admin_name": r[3],
+                "action_type": r[4],
+                "action_description": r[5],
+                "target_entity": r[6],
+                "old_value": r[7],
+                "new_value": r[8],
+                "success": bool(r[9]),
+            }
+            for r in rows
+        ]
+        return web.json_response({
+            "entries": entries,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        })
+    except Exception as e:
+        logger.exception("api_admin_audit error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_audit_export(request: web.Request) -> web.Response:
+    """GET /api/admin/audit/export — експорт журналу дій у Excel."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    if not EXCEL_AVAILABLE:
+        return web.json_response({"error": "Модуль openpyxl не встановлено"}, status=500)
+
+    action_type = request.query.get("action_type", "").strip()
+    date_from = request.query.get("date_from", "").strip()
+    date_to = request.query.get("date_to", "").strip()
+    try:
+        admin_filter = int(request.query.get("admin_id", "0"))
+    except (TypeError, ValueError):
+        admin_filter = 0
+
+    try:
+        rows = db.get_audit_logs(
+            limit=5000, offset=0,
+            action_type=action_type, admin_user_id=admin_filter,
+            date_from=date_from, date_to=date_to,
+        )
+
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Журнал дій"
+
+        headers = ["#", "Час", "Адмін ID", "Адмін", "Тип дії",
+                   "Опис", "Об'єкт", "Старе значення", "Нове значення", "Успішно"]
+        header_fill = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
+        for ci, h in enumerate(headers, start=1):
+            c = ws.cell(row=1, column=ci, value=h)
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = header_fill
+            c.alignment = Alignment(horizontal="center")
+
+        col_widths = [6, 20, 12, 20, 18, 40, 25, 20, 20, 10]
+        from openpyxl.utils import get_column_letter as _gcl
+        for ci, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[_gcl(ci)].width = w
+
+        for ri, r in enumerate(rows, start=2):
+            ws.cell(row=ri, column=1, value=r[0])
+            ws.cell(row=ri, column=2, value=r[1])
+            ws.cell(row=ri, column=3, value=r[2])
+            ws.cell(row=ri, column=4, value=r[3] or "")
+            ws.cell(row=ri, column=5, value=r[4] or "")
+            ws.cell(row=ri, column=6, value=r[5] or "")
+            ws.cell(row=ri, column=7, value=r[6] or "")
+            ws.cell(row=ri, column=8, value=r[7] or "")
+            ws.cell(row=ri, column=9, value=r[8] or "")
+            ws.cell(row=ri, column=10, value="✅" if r[9] else "❌")
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        now = datetime.now(config.KYIV)
+        filename = f"audit_log_{now.strftime('%Y%m%d_%H%M')}.xlsx"
+        return web.Response(
+            body=buf.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.exception("api_admin_audit_export error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# ---------------------------------------------------------------------------
+# Backup endpoints
+# ---------------------------------------------------------------------------
+
+async def api_admin_backups_list(request: web.Request) -> web.Response:
+    """GET /api/admin/backups — список резервних копій."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        from backup import list_backups, DEFAULT_BACKUP_DIR
+        backups = list_backups()
+        return web.json_response({"backups": backups, "count": len(backups)})
+    except Exception as e:
+        logger.exception("api_admin_backups_list error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_backup_create(request: web.Request) -> web.Response:
+    """POST /api/admin/backup — створити резервну копію вручну."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    try:
+        from backup import create_backup
+        backup_path = create_backup()
+        size_kb = round(backup_path.stat().st_size / 1024, 1)
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id, admin_name, "backup_create",
+            f"Створено резервну копію вручну: {backup_path.name} ({size_kb} KB)",
+            target_entity=backup_path.name,
+            new_value={"filename": backup_path.name, "size_kb": size_kb},
+        )
+        return web.json_response({
+            "ok": True,
+            "filename": backup_path.name,
+            "size_kb": size_kb,
+            "message": f"Резервну копію створено: {backup_path.name}",
+        })
+    except Exception as e:
+        logger.exception("api_admin_backup_create error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def api_admin_backup_download(request: web.Request) -> web.Response:
+    """GET /api/admin/backup/download/{filename} — завантажити резервну копію."""
+    import re as _re
+
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+
+    filename = request.match_info.get("filename", "")
+    # Security: strictly validate the expected filename pattern to prevent path traversal
+    # and injection attacks. Pattern: backup_YYYY-MM-DD_HH-MM.sql.gz
+    _BACKUP_FILENAME_RE = _re.compile(r'^backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}\.sql\.gz$')
+    if not filename or not _BACKUP_FILENAME_RE.match(filename):
+        return web.json_response({"error": "Невірне ім'я файлу"}, status=400)
+
+    try:
+        from backup import DEFAULT_BACKUP_DIR
+        backup_path = DEFAULT_BACKUP_DIR / filename
+        if not backup_path.exists():
+            return web.json_response({"error": "Файл не знайдено"}, status=404)
+
+        with open(backup_path, "rb") as f:
+            data = f.read()
+
+        return web.Response(
+            body=data,
+            content_type="application/gzip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.exception("api_admin_backup_download error")
+        return web.json_response({"error": str(e)}, status=500)
+
+
+# ---------------------------------------------------------------------------
 # Статичні файли та додаток
 # ---------------------------------------------------------------------------
 
 def create_app() -> web.Application:
     """Створює aiohttp-додаток з API та статичними файлами."""
-    app = web.Application(middlewares=[cors_middleware])
+    app = web.Application(middlewares=[rate_limit_middleware, cors_middleware])
 
     # API маршрути (читання)
     app.router.add_get("/api/status", api_status)
@@ -1305,6 +1681,13 @@ def create_app() -> web.Application:
     app.router.add_delete("/api/admin/personnel", api_admin_personnel_delete)
     app.router.add_post("/api/admin/personnel/assign", api_admin_personnel_assign)
     app.router.add_post("/api/admin/sync", api_admin_sync)
+    # Audit log endpoints
+    app.router.add_get("/api/admin/audit", api_admin_audit)
+    app.router.add_get("/api/admin/audit/export", api_admin_audit_export)
+    # Backup endpoints
+    app.router.add_get("/api/admin/backups", api_admin_backups_list)
+    app.router.add_post("/api/admin/backup", api_admin_backup_create)
+    app.router.add_get("/api/admin/backup/download/{filename}", api_admin_backup_download)
 
     # Статичні файли (CSS, JS)
     webapp_dir = _PROJECT_ROOT / "webapp"
@@ -1316,7 +1699,18 @@ def create_app() -> web.Application:
         async def index_handler(request: web.Request) -> web.FileResponse:
             return web.FileResponse(webapp_dir / "index.html")
 
+        async def block_handler(request: web.Request) -> web.FileResponse:
+            return web.FileResponse(webapp_dir / "block.html")
+
+        async def sw_handler(request: web.Request) -> web.FileResponse:
+            return web.FileResponse(
+                webapp_dir / "service-worker.js",
+                headers={"Content-Type": "application/javascript"},
+            )
+
         app.router.add_get("/", index_handler)
+        app.router.add_get("/block.html", block_handler)
+        app.router.add_get("/service-worker.js", sw_handler)
 
     return app
 

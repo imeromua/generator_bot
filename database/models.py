@@ -396,6 +396,18 @@ def init_db():
             timestamp TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS admin_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            admin_user_id INTEGER NOT NULL,
+            admin_name TEXT,
+            action_type TEXT NOT NULL,
+            action_description TEXT,
+            target_entity TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            success INTEGER NOT NULL DEFAULT 1
+        )''')
 
     else:
         c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
@@ -430,6 +442,18 @@ def init_db():
             message_text TEXT NOT NULL,
             message_type TEXT NOT NULL,
             timestamp TEXT NOT NULL
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS admin_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            admin_user_id BIGINT NOT NULL,
+            admin_name TEXT,
+            action_type TEXT NOT NULL,
+            action_description TEXT,
+            target_entity TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            success INTEGER NOT NULL DEFAULT 1
         )''')
 
     # Міграція: додавання receipt_number (старий код)
@@ -512,6 +536,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_logs_generator_id ON logs(generator_id)",
         "CREATE INDEX IF NOT EXISTS idx_maintenance_generator_id ON maintenance(generator_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_messages_user_ts ON user_messages(user_id, timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON admin_audit_log(timestamp)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_admin ON admin_audit_log(admin_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_action_type ON admin_audit_log(action_type)",
     ]
     
     # PostgreSQL-specific optimized indexes

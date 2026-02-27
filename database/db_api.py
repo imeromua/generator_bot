@@ -83,6 +83,11 @@ from database.api.generator import (
     is_emergency_active,
     get_generator_name,
 )
+from database.api.audit import (
+    log_admin_action,
+    get_audit_logs,
+    count_audit_logs,
+)
 
 
 __all__ = [
@@ -165,4 +170,8 @@ __all__ = [
     "update_generator_maintenance",
     "is_emergency_active",
     "get_generator_name",
+    # audit log
+    "log_admin_action",
+    "get_audit_logs",
+    "count_audit_logs",
 ]

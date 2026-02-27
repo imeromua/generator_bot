@@ -156,10 +156,25 @@
         <div class="info-box">
             <p>
                 <strong>📱 Як відкрити додаток:</strong><br>
-                1. Відкрийте Telegram<br>
-                2. Знайдіть бота <strong>@YourGeneratorBot</strong><br>
+                1. Відкрийте <strong>Telegram</strong><br>
+                2. Знайдіть бота або перейдіть за посиланням нижче<br>
                 3. Натисніть кнопку <strong>"Відкрити додаток"</strong>
             </p>
+        </div>
+
+        <a class="telegram-btn" href="https://t.me/YourGeneratorBot?start=open" target="_blank" rel="noopener">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.93 6.93l-1.68 7.93c-.12.56-.46.7-.93.43l-2.57-1.89-1.24 1.19c-.14.14-.25.25-.51.25l.18-2.6 4.74-4.27c.21-.18-.04-.28-.32-.1L7.38 14.6l-2.54-.8c-.55-.17-.56-.55.12-.81l9.92-3.83c.46-.17.86.11.71.81l.34-.87z" fill="white"/>
+            </svg>
+            Відкрити в Telegram
+        </a>
+
+        <!-- QR-код для швидкого доступу -->
+        <div style="margin-top:20px;">
+            <p style="font-size:13px;color:#888;margin-bottom:8px;">📷 Або відскануйте QR-код:</p>
+            <div id="qr-placeholder" style="width:140px;height:140px;margin:0 auto;border:2px solid #eee;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#f8f9fa;">
+                <canvas id="qr-canvas" width="140" height="140"></canvas>
+            </div>
         </div>
 
         <span class="badge">⚡ Telegram Mini App</span>
@@ -179,6 +194,21 @@
                 icon.style.transition = 'opacity 0.6s ease-out';
                 icon.style.opacity = '1';
             }, 200);
+
+            // Simple QR code fallback using a free QR API
+            const botUrl = 'https://t.me/YourGeneratorBot?start=open';
+            const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(botUrl)}`;
+            const canvas = document.getElementById('qr-canvas');
+            const img = new Image();
+            img.onload = () => {
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 140, 140);
+            };
+            img.onerror = () => {
+                const placeholder = document.getElementById('qr-placeholder');
+                placeholder.innerHTML = '<span style="font-size:12px;color:#aaa;text-align:center;padding:10px;">QR-код<br>недоступний</span>';
+            };
+            img.src = qrApiUrl;
         });
     </script>
 </body>
