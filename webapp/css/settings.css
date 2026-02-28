@@ -1,0 +1,296 @@
+/* ====================================================================
+   Settings Page — System Configuration UI
+   ==================================================================== */
+
+/* --- Page Layout --- */
+#app {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 0 12px 24px;
+}
+
+/* --- Header --- */
+.settings-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0 8px;
+    margin-bottom: 4px;
+}
+
+.settings-header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--tg-text, #1a1a2e);
+    margin: 0;
+}
+
+.btn-back {
+    border: none;
+    background: transparent;
+    color: var(--tg-link, #2481cc);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 0;
+    white-space: nowrap;
+}
+
+.btn-back:hover {
+    opacity: 0.75;
+}
+
+/* --- Settings Card --- */
+.settings-card {
+    background: var(--tg-section-bg, #ffffff);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.settings-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--tg-text, #1a1a2e);
+    border-bottom: 1px solid var(--tg-secondary-bg, #f0f0f5);
+}
+
+.settings-card-header-hint {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--tg-hint, #7a7a8c);
+}
+
+.settings-card-body {
+    padding: 0;
+}
+
+/* --- Settings Row --- */
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    gap: 8px;
+}
+
+.settings-row-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-row-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--tg-text, #1a1a2e);
+}
+
+.settings-row-sublabel {
+    font-size: 12px;
+    color: var(--tg-hint, #7a7a8c);
+    margin-top: 2px;
+}
+
+.settings-row-value-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.settings-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--tg-link, #2481cc);
+}
+
+.settings-unit {
+    font-size: 13px;
+    color: var(--tg-hint, #7a7a8c);
+}
+
+.settings-divider {
+    height: 1px;
+    background: var(--tg-secondary-bg, #f0f0f5);
+    margin: 0 16px;
+}
+
+/* --- Edit Button --- */
+.btn-edit {
+    border: none;
+    background: var(--tg-secondary-bg, #f0f0f5);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+    margin-left: 4px;
+}
+
+.btn-edit:hover {
+    background: var(--tg-link, #2481cc);
+    color: #fff;
+}
+
+/* --- History List --- */
+.history-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--tg-secondary-bg, #f0f0f5);
+}
+
+.history-item:last-child {
+    border-bottom: none;
+}
+
+.history-item-date {
+    font-size: 12px;
+    color: var(--tg-hint, #7a7a8c);
+    margin-bottom: 4px;
+}
+
+.history-item-entity {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--tg-text, #1a1a2e);
+    margin-bottom: 2px;
+}
+
+.history-item-change {
+    font-size: 13px;
+    color: var(--tg-text, #1a1a2e);
+}
+
+.history-item-change .old-val {
+    color: var(--tg-hint, #7a7a8c);
+    text-decoration: line-through;
+}
+
+.history-item-change .new-val {
+    color: var(--color-on, #27ae60);
+    font-weight: 600;
+}
+
+.history-item-by {
+    font-size: 12px;
+    color: var(--tg-hint, #7a7a8c);
+    margin-top: 3px;
+}
+
+/* --- Empty State --- */
+.settings-empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--tg-hint, #7a7a8c);
+    font-size: 14px;
+}
+
+/* --- Modal overrides --- */
+.modal-field-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--tg-text, #1a1a2e);
+    margin-bottom: 12px;
+}
+
+.modal-label {
+    display: block;
+    font-size: 13px;
+    color: var(--tg-hint, #7a7a8c);
+    margin-bottom: 6px;
+}
+
+.modal-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.modal-input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1.5px solid var(--tg-secondary-bg, #e0e0e8);
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--tg-text, #1a1a2e);
+    background: var(--tg-bg, #ffffff);
+    outline: none;
+    transition: border-color 0.2s;
+    -moz-appearance: textfield;
+}
+
+.modal-input::-webkit-inner-spin-button,
+.modal-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+}
+
+.modal-input:focus {
+    border-color: var(--tg-link, #2481cc);
+}
+
+.modal-input-unit {
+    font-size: 13px;
+    color: var(--tg-hint, #7a7a8c);
+    white-space: nowrap;
+}
+
+.modal-hint {
+    font-size: 12px;
+    color: var(--tg-hint, #7a7a8c);
+    margin-bottom: 4px;
+}
+
+.modal-error {
+    font-size: 13px;
+    color: var(--color-danger, #e74c3c);
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(231, 76, 60, 0.08);
+    border-radius: 8px;
+}
+
+.modal-error.hidden {
+    display: none;
+}
+
+/* --- Loading skeleton --- */
+.settings-loading {
+    padding: 20px 16px;
+    text-align: center;
+    color: var(--tg-hint, #7a7a8c);
+    font-size: 14px;
+}
+
+/* --- Dark mode support --- */
+[data-theme="dark"] .settings-card {
+    background: #1f1f2e;
+}
+
+[data-theme="dark"] .settings-card-header {
+    border-bottom-color: #2a2a3a;
+}
+
+[data-theme="dark"] .settings-divider {
+    background: #2a2a3a;
+}
+
+[data-theme="dark"] .btn-edit {
+    background: #2a2a3a;
+    color: #ccccdd;
+}
+
+[data-theme="dark"] .history-item {
+    border-bottom-color: #2a2a3a;
+}
+
+[data-theme="dark"] .modal-input {
+    background: #1f1f2e;
+    border-color: #3a3a4a;
+    color: #e0e0ee;
+}

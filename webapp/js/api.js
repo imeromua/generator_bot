@@ -156,6 +156,17 @@ const API = (() => {
         /** Прив'язати персонал до користувача */
         adminAssignPersonnel: (user_id, personnel) => post("/api/admin/personnel/assign", { user_id, personnel }),
 
+        // System configuration
+        /** Отримати поточні налаштування генераторів та глобальні */
+        adminGetConfig: () => get("/api/admin/config"),
+        /** Отримати історію змін налаштувань */
+        adminGetConfigHistory: (limit) => get("/api/admin/config/history", limit ? { limit } : undefined),
+        /** Змінити параметр генератора */
+        adminSetGeneratorConfig: (generator_id, param_name, value) =>
+            post("/api/admin/config/generator", { generator_id, param_name, value }),
+        /** Змінити глобальний параметр */
+        adminSetGlobalConfig: (param_name, value) => post("/api/admin/config/global", { param_name, value }),
+
         // Task 5: Notification preferences
         /** Отримати налаштування сповіщень */
         getNotificationPreferences: () => get("/api/notifications/preferences"),
