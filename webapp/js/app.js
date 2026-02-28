@@ -221,17 +221,18 @@
     // -------------------------------------------------------------------
     function loadTabData(tab) {
         switch (tab) {
-            case "dashboard":     loadDashboard(); break;
-            case "schedule":      loadSchedule();  break;
-            case "events":        loadEvents();    break;
-            case "maintenance":   loadMaintenance(); break;
-            case "admin":         loadAdmin();     break;
-            case "fuel-orders":   loadFuelOrders(); break;
-            case "shifts":        loadShifts();    break;
-            case "notifications": loadNotifications(); break;
-            case "analytics":     loadAnalytics(); break;
-            case "trends":        loadTrends(); break;
-            case "forecast":      loadForecast(); break;
+            case "dashboard":     return loadDashboard();
+            case "schedule":      return loadSchedule();
+            case "events":        return loadEvents();
+            case "maintenance":   return loadMaintenance();
+            case "admin":         return loadAdmin();
+            case "fuel-orders":   return loadFuelOrders();
+            case "shifts":        return loadShifts();
+            case "notifications": return loadNotifications();
+            case "analytics":     return loadAnalytics();
+            case "trends":        return loadTrends();
+            case "forecast":      return loadForecast();
+            default:              return Promise.resolve();
         }
     }
 
@@ -1365,6 +1366,91 @@
                 switchTab(tabs[idx + 1]);
             } else if (dx > 0 && idx > 0) {
                 switchTab(tabs[idx - 1]);
+            }
+        }, { passive: true });
+    })();
+
+    // -------------------------------------------------------------------
+    // Pull-to-Refresh
+    // -------------------------------------------------------------------
+    (function initPullToRefresh() {
+        let startY = 0;
+        let currentY = 0;
+        let isPulling = false;
+        let isRefreshing = false;
+        let hapticTriggered = false;
+        const TRIGGER_DISTANCE = 80; // px to activate refresh
+        const TEXT_RESET_DELAY = 300; // ms delay before resetting spinner text
+
+        const ptrEl = document.createElement("div");
+        ptrEl.className = "ptr-spinner";
+        ptrEl.textContent = "🔄 Оновлення...";
+        document.body.appendChild(ptrEl);
+
+        const pages = document.getElementById("app");
+
+        function hideSpinner(delay) {
+            setTimeout(() => {
+                ptrEl.classList.remove("visible");
+                ptrEl.style.transform = "";
+                setTimeout(() => { ptrEl.textContent = "🔄 Оновлення..."; }, TEXT_RESET_DELAY);
+            }, delay);
+        }
+
+        pages.addEventListener("touchstart", (e) => {
+            if (isRefreshing) return;
+            const loader = $("loader");
+            if (loader && loader.classList.contains("visible")) return;
+            if (pages.scrollTop === 0) {
+                startY = e.touches[0].clientY;
+                currentY = startY;
+                isPulling = true;
+                hapticTriggered = false;
+            }
+        }, { passive: true });
+
+        pages.addEventListener("touchmove", (e) => {
+            if (!isPulling) return;
+            currentY = e.touches[0].clientY;
+            const distance = currentY - startY;
+            if (distance > 0) {
+                ptrEl.style.transform = `translateX(-50%) translateY(${Math.min(distance * 0.4 - 50, 10)}px)`;
+                if (!hapticTriggered && distance >= TRIGGER_DISTANCE && window.Telegram?.WebApp?.HapticFeedback) {
+                    window.Telegram.WebApp.HapticFeedback.selectionChanged();
+                    hapticTriggered = true;
+                }
+            }
+        }, { passive: true });
+
+        pages.addEventListener("touchend", async () => {
+            if (!isPulling) return;
+            isPulling = false;
+            const distance = currentY - startY;
+
+            if (distance >= TRIGGER_DISTANCE) {
+                isRefreshing = true;
+                ptrEl.classList.add("visible");
+                if (window.Telegram?.WebApp?.HapticFeedback) {
+                    window.Telegram.WebApp.HapticFeedback.impactOccurred("light");
+                }
+                try {
+                    await loadTabData(currentTab);
+                    ptrEl.textContent = "✅ Оновлено";
+                    if (window.Telegram?.WebApp?.HapticFeedback) {
+                        window.Telegram.WebApp.HapticFeedback.notificationOccurred("success");
+                    }
+                    hideSpinner(1000);
+                } catch (err) {
+                    ptrEl.textContent = "❌ Помилка";
+                    if (window.Telegram?.WebApp?.HapticFeedback) {
+                        window.Telegram.WebApp.HapticFeedback.notificationOccurred("error");
+                    }
+                    hideSpinner(1500);
+                } finally {
+                    isRefreshing = false;
+                }
+            } else {
+                ptrEl.style.transform = "translateX(-50%) translateY(-60px)";
             }
         }, { passive: true });
     })();
