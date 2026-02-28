@@ -94,6 +94,10 @@ async def block_handler(request: Request):
     return FileResponse(str(_webapp_dir / "block.html"))
 
 
+async def settings_handler(request: Request):
+    return FileResponse(str(_webapp_dir / "settings.html"))
+
+
 async def sw_handler(request: Request):
     """
     Serve service-worker.js with dynamic cache version injected.
@@ -2833,6 +2837,7 @@ def create_app() -> FastAPI:
         app.add_api_route("/service-worker.js", sw_handler, methods=["GET"])
         app.add_api_route("/", index_handler, methods=["GET"])
         app.add_api_route("/block.html", block_handler, methods=["GET"])
+        app.add_api_route("/settings", settings_handler, methods=["GET"])
 
         # Static directories
         css_dir = _webapp_dir / "css"

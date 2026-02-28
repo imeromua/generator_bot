@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>⚙️ Налаштування системи</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/settings.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <!-- Splash під час перевірки доступу -->
+    <div id="tg-check-splash" style="position:fixed;inset:0;z-index:99999;background:var(--tg-bg,#ffffff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+        <div style="font-size:52px">⚙️</div>
+        <div style="font-size:15px;color:#999;font-family:sans-serif;">Перевірка доступу...</div>
+    </div>
+
+    <div id="app" style="display:none">
+        <!-- Шапка -->
+        <div class="settings-header">
+            <button class="btn-back" id="btn-back" onclick="history.back()">← Назад</button>
+            <h1>⚙️ Налаштування системи</h1>
+        </div>
+
+        <!-- Секція: Генератори -->
+        <div class="settings-card" id="section-generators">
+            <div class="settings-card-header">
+                <span>🔋 Генератори</span>
+            </div>
+            <div class="settings-card-body">
+                <div class="settings-row">
+                    <div class="settings-row-info">
+                        <div class="settings-row-label">Основний генератор</div>
+                        <div class="settings-row-sublabel">Витрати палива</div>
+                    </div>
+                    <div class="settings-row-value-wrap">
+                        <span class="settings-value" id="main-fuel-rate">—</span>
+                        <span class="settings-unit"> л/год</span>
+                        <button class="btn-edit" id="btn-edit-main" onclick="Settings.openEditGenerator('main')" title="Редагувати">✏️</button>
+                    </div>
+                </div>
+                <div class="settings-divider"></div>
+                <div class="settings-row">
+                    <div class="settings-row-info">
+                        <div class="settings-row-label">Аварійний генератор</div>
+                        <div class="settings-row-sublabel">Витрати палива</div>
+                    </div>
+                    <div class="settings-row-value-wrap">
+                        <span class="settings-value" id="emergency-fuel-rate">—</span>
+                        <span class="settings-unit"> л/год</span>
+                        <button class="btn-edit" id="btn-edit-emergency" onclick="Settings.openEditGenerator('emergency')" title="Редагувати">✏️</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Секція: Вартість палива -->
+        <div class="settings-card" id="section-fuel-price">
+            <div class="settings-card-header">
+                <span>💰 Вартість палива</span>
+            </div>
+            <div class="settings-card-body">
+                <div class="settings-row">
+                    <div class="settings-row-info">
+                        <div class="settings-row-label">Поточна ціна</div>
+                        <div class="settings-row-sublabel" id="fuel-price-meta">—</div>
+                    </div>
+                    <div class="settings-row-value-wrap">
+                        <span class="settings-value" id="fuel-price">—</span>
+                        <span class="settings-unit"> грн/л</span>
+                        <button class="btn-edit" id="btn-edit-price" onclick="Settings.openEditFuelPrice()" title="Редагувати">✏️</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Секція: Історія змін -->
+        <div class="settings-card" id="section-history">
+            <div class="settings-card-header">
+                <span>📜 Історія змін</span>
+                <span class="settings-card-header-hint">(останні 20)</span>
+            </div>
+            <div class="settings-card-body" id="history-list">
+                <div class="settings-empty" id="history-empty">Немає записів</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно: редагування витрат генератора -->
+    <div class="modal-overlay hidden" id="modal-edit-generator">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>✏️ Змінити витрати палива</h3>
+                <button class="modal-close" onclick="Settings.closeEditGenerator()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-field-label" id="edit-gen-name-label">Генератор: —</div>
+                <label class="modal-label">Нове значення (л/год):</label>
+                <div class="modal-input-row">
+                    <input type="number" id="edit-gen-input" class="modal-input"
+                           min="3" max="15" step="0.1" placeholder="напр. 5.3">
+                    <span class="modal-input-unit">л/год</span>
+                </div>
+                <div class="modal-hint">Діапазон: 3.0 — 15.0 л/год</div>
+                <div class="modal-error hidden" id="edit-gen-error"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="Settings.closeEditGenerator()">❌ Скасувати</button>
+                <button class="btn btn-primary" id="btn-save-gen" onclick="Settings.saveGenerator()">💾 Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно: редагування вартості палива -->
+    <div class="modal-overlay hidden" id="modal-edit-price">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>✏️ Змінити вартість палива</h3>
+                <button class="modal-close" onclick="Settings.closeEditFuelPrice()">✕</button>
+            </div>
+            <div class="modal-body">
+                <label class="modal-label">Нове значення (грн/л):</label>
+                <div class="modal-input-row">
+                    <input type="number" id="edit-price-input" class="modal-input"
+                           min="10" max="200" step="0.1" placeholder="напр. 50.0">
+                    <span class="modal-input-unit">грн/л</span>
+                </div>
+                <div class="modal-hint">Діапазон: 10.0 — 200.0 грн/л</div>
+                <div class="modal-error hidden" id="edit-price-error"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="Settings.closeEditFuelPrice()">❌ Скасувати</button>
+                <button class="btn btn-primary" id="btn-save-price" onclick="Settings.saveFuelPrice()">💾 Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/settings.js"></script>
+</body>
+</html>
