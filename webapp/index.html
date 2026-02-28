@@ -20,7 +20,11 @@
     <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#f39c12;color:#fff;text-align:center;padding:8px 16px;font-size:14px;font-weight:600;">
         ⚠️ Офлайн-режим — показуються збережені дані. Зміни недоступні.
     </div>
-    <div id="app">
+    <div id="tg-check-splash" style="position:fixed;inset:0;z-index:99999;background:var(--tg-bg,#ffffff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+        <div style="font-size:52px">⚡</div>
+        <div style="font-size:15px;color:#999;font-family:sans-serif;">Перевірка доступу...</div>
+    </div>
+    <div id="app" style="display:none">
         <!-- Навігація -->
         <nav class="tabs" id="tabs">
             <button class="tab active" data-tab="dashboard">🏠 Головна</button>
@@ -832,6 +836,14 @@
     <script src="/js/api.js"></script>
     <script src="/js/app.js"></script>
     <script>
+        // Якщо через 5 секунд Telegram SDK не завантажився — редирект на заглушку
+        window._tgCheckTimer = setTimeout(function() {
+            var splash = document.getElementById('tg-check-splash');
+            if (splash && splash.parentNode) {
+                window.location.href = '/block.html';
+            }
+        }, 5000);
+
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js').catch(function(err) {
