@@ -567,6 +567,26 @@ class TestApiAnalytics:
         assert body[:4] == b"%PDF"  # PDF magic bytes
 
 
+class TestMiniAppUi:
+    """Smoke tests for Mini App UI markup/assets."""
+
+    @pytest.mark.asyncio
+    async def test_index_contains_theme_cycle_button(self, client):
+        resp = await (await client).get("/")
+        assert resp.status == 200
+        html = await resp.text()
+        assert 'id="theme-cycle"' in html
+        assert "ThemeManager.cycle()" in html
+
+    @pytest.mark.asyncio
+    async def test_css_tabs_are_two_row_grid(self, client):
+        resp = await (await client).get("/css/style.css")
+        assert resp.status == 200
+        css = await resp.text()
+        assert "display: grid;" in css
+        assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in css
+
+
 class TestMlModels:
     """Unit tests for ml_models module."""
 

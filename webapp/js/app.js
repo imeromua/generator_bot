@@ -1295,7 +1295,7 @@
         let touchStartX = 0;
         let touchStartY = 0;
         const SWIPE_THRESHOLD = 50; // мінімальна відстань свайпу (px)
-        const TAB_ORDER = ["dashboard", "schedule", "events", "maintenance", "fuel-orders", "shifts", "notifications", "admin"];
+        const TAB_ORDER = ["dashboard", "schedule", "events", "maintenance", "fuel-orders", "shifts", "notifications", "analytics", "trends", "forecast", "admin"];
 
         function getVisibleTabs() {
             return TAB_ORDER.filter((t) => {
@@ -1330,8 +1330,26 @@
     const ThemeManager = (function () {
         const KEY = "app_theme";
         const MODES = ["light", "dark", "auto"];
+        const nextMode = { light: "dark", dark: "auto", auto: "light" };
+
+        function normalizeMode(mode) {
+            return MODES.includes(mode) ? mode : "auto";
+        }
+
+        function isDarkColor(hexColor) {
+            const raw = hexColor || "";
+            if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
+            const hex = raw.length === 4
+                ? "#" + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3]
+                : raw;
+            const r = parseInt(hex.slice(1,3), 16);
+            const g = parseInt(hex.slice(3,5), 16);
+            const b = parseInt(hex.slice(5,7), 16);
+            return (r + g + b) / 3 < 128;
+        }
 
         function apply(mode) {
+            mode = normalizeMode(mode);
             const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
             const tg = window.Telegram && window.Telegram.WebApp;
 
@@ -1343,11 +1361,7 @@
             } else {
                 // auto: use Telegram theme if available, else system
                 if (tg && tg.themeParams && tg.themeParams.bg_color) {
-                    const bg = tg.themeParams.bg_color;
-                    const r = parseInt(bg.slice(1,3),16);
-                    const g = parseInt(bg.slice(3,5),16);
-                    const b = parseInt(bg.slice(5,7),16);
-                    useDark = (r + g + b) / 3 < 128;
+                    useDark = isDarkColor(tg.themeParams.bg_color) ?? prefersDark;
                 } else {
                     useDark = prefersDark;
                 }
@@ -1361,12 +1375,19 @@
         }
 
         function set(mode) {
+            mode = normalizeMode(mode);
             localStorage.setItem(KEY, mode);
             apply(mode);
         }
 
+        function cycle() {
+            const current = normalizeMode(localStorage.getItem(KEY) || "auto");
+            set(nextMode[current]);
+        }
+
         function init() {
-            const saved = localStorage.getItem(KEY) || "auto";
+            const tg = window.Telegram && window.Telegram.WebApp;
+            const saved = normalizeMode(localStorage.getItem(KEY) || "auto");
             apply(saved);
             MODES.forEach((m) => {
                 const btn = document.getElementById("theme-" + m);
@@ -1376,9 +1397,14 @@
             window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
                 if ((localStorage.getItem(KEY) || "auto") === "auto") apply("auto");
             });
+            if (tg && typeof tg.onEvent === "function") {
+                tg.onEvent("themeChanged", () => {
+                    if ((localStorage.getItem(KEY) || "auto") === "auto") apply("auto");
+                });
+            }
         }
 
-        return { set, init };
+        return { set, init, cycle };
     })();
 
     window.ThemeManager = ThemeManager;
@@ -2102,3 +2128,4 @@
     // Публічний API для зовнішнього виклику
     window.App = window.App || {};
     Object.assign(window.App, { loadAnalytics, loadTrends, loadForecast, downloadPdfReport });
+})();
