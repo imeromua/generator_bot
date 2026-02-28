@@ -1,6 +1,10 @@
 aiogram>=3.24.0,<4.0
 # aiohttp is a direct dependency of aiogram; keep within v3.x
 aiohttp>=3.8,<4.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
 gspread
 google-auth
 google-auth-oauthlib

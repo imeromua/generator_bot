@@ -15,7 +15,6 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
-from aiohttp import web
 from redis.asyncio import Redis
 
 # Імпорт конфігурації (спочатку, щоб отримати параметри логування)
@@ -268,14 +267,16 @@ async def run_polling_once(dp: Dispatcher):
         if config.WEBAPP_URL:
             try:
                 webapp_app = create_webapp_app()
-                webapp_runner = web.AppRunner(webapp_app)
-                await webapp_runner.setup()
-                site = web.TCPSite(
-                    webapp_runner,
+                webapp_runner = None
+                import uvicorn as _uvicorn
+                uvicorn_config = _uvicorn.Config(
+                    webapp_app,
                     host=config.WEBAPP_HOST,
                     port=config.WEBAPP_PORT,
+                    log_level="info",
                 )
-                await site.start()
+                webapp_runner = _uvicorn.Server(uvicorn_config)
+                tasks.append(asyncio.create_task(webapp_runner.serve(), name="webapp"))
                 logger.info(f"📱 Mini App веб-сервер запущено: http://{config.WEBAPP_HOST}:{config.WEBAPP_PORT}")
             except Exception as e:
                 logger.error(f"❌ Помилка запуску Mini App веб-сервера: {e}")
@@ -307,7 +308,7 @@ async def run_polling_once(dp: Dispatcher):
         # Зупинка Mini App веб-сервера
         if webapp_runner:
             try:
-                await webapp_runner.cleanup()
+                webapp_runner.should_exit = True
                 logger.info("✅ Mini App веб-сервер зупинено")
             except Exception:
                 pass

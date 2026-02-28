@@ -5,7 +5,7 @@ import hmac
 import json
 from urllib.parse import parse_qs, unquote
 
-from aiohttp import web
+from fastapi import Request
 import config
 
 
@@ -46,11 +46,11 @@ def validate_init_data(init_data: str, bot_token: str) -> dict | None:
     return {}
 
 
-def extract_user(request: web.Request) -> dict | None:
+def extract_user(request: Request) -> dict | None:
     """Витягує та валідує користувача з заголовка або query-параметра init_data."""
     init_data = request.headers.get("X-Telegram-Init-Data", "")
     if not init_data:
-        init_data = request.query.get("init_data", "")
+        init_data = request.query_params.get("init_data", "")
     if not init_data:
         return None
     bot_token = config.BOT_TOKEN or ""
