@@ -1337,10 +1337,14 @@
         }
 
         function isDarkColor(hexColor) {
-            if (!/^#[0-9a-fA-F]{6}$/.test(hexColor || "")) return null;
-            const r = parseInt(hexColor.slice(1,3), 16);
-            const g = parseInt(hexColor.slice(3,5), 16);
-            const b = parseInt(hexColor.slice(5,7), 16);
+            const raw = hexColor || "";
+            if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
+            const hex = raw.length === 4
+                ? "#" + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3]
+                : raw;
+            const r = parseInt(hex.slice(1,3), 16);
+            const g = parseInt(hex.slice(3,5), 16);
+            const b = parseInt(hex.slice(5,7), 16);
             return (r + g + b) / 3 < 128;
         }
 
@@ -1357,8 +1361,7 @@
             } else {
                 // auto: use Telegram theme if available, else system
                 if (tg && tg.themeParams && tg.themeParams.bg_color) {
-                    useDark = isDarkColor(tg.themeParams.bg_color);
-                    if (useDark === null) useDark = prefersDark;
+                    useDark = isDarkColor(tg.themeParams.bg_color) ?? prefersDark;
                 } else {
                     useDark = prefersDark;
                 }
