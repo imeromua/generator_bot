@@ -18,8 +18,10 @@ import math
 import os
 import re
 import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import AsyncGenerator
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
@@ -2684,6 +2686,30 @@ async def api_report_excel_v2(request: Request):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
+@asynccontextmanager
+async def _webapp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Lifespan for the webapp FastAPI application.
+
+    Startup: initialise the database so the app works when started
+    standalone (``uvicorn webapp_server:create_app()``).
+    Shutdown: close the PostgreSQL connection pool gracefully.
+    """
+    try:
+        db_models.init_db()
+        logger.info("✅ [lifespan] DB initialised")
+    except Exception:
+        logger.exception("❌ [lifespan] DB init failed")
+        raise
+    yield
+    try:
+        from database.models import close_postgres_pool
+
+        close_postgres_pool()
+        logger.info("✅ [lifespan] DB pool closed")
+    except Exception:
+        logger.warning("⚠️  [lifespan] Error closing DB pool (ignored)")
+
+
 def create_app() -> FastAPI:
     """Створює FastAPI-додаток з API та статичними файлами."""
     from webapp.middleware.rate_limit import RateLimitMiddleware
@@ -2693,6 +2719,7 @@ def create_app() -> FastAPI:
         version=BUILD_VERSION,
         docs_url="/api/docs",
         redoc_url="/api/redoc",
+        lifespan=_webapp_lifespan,
     )
 
     app.add_middleware(
