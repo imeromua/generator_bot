@@ -34,9 +34,10 @@ VALID_GLOBAL_PARAMS = ("fuel_price",)
 
 def _ensure_tables(conn) -> None:
     """Create config tables if they don't exist (called from init_db)."""
-    conn.execute("""
+    pk_def = "SERIAL PRIMARY KEY" if db_models._is_postgres() else "INTEGER PRIMARY KEY"
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS generator_config (
-            id SERIAL PRIMARY KEY,
+            id {pk_def},
             generator_id TEXT NOT NULL,
             param_name TEXT NOT NULL,
             param_value REAL NOT NULL,
@@ -46,9 +47,9 @@ def _ensure_tables(conn) -> None:
             UNIQUE(generator_id, param_name)
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS global_config (
-            id SERIAL PRIMARY KEY,
+            id {pk_def},
             param_name TEXT NOT NULL UNIQUE,
             param_value REAL NOT NULL,
             updated_at TEXT NOT NULL,
@@ -56,9 +57,9 @@ def _ensure_tables(conn) -> None:
             updated_by_name TEXT
         )
     """)
-    conn.execute("""
+    conn.execute(f"""
         CREATE TABLE IF NOT EXISTS config_history (
-            id SERIAL PRIMARY KEY,
+            id {pk_def},
             config_type TEXT NOT NULL,
             entity_id TEXT,
             param_name TEXT NOT NULL,
@@ -83,21 +84,21 @@ def _seed_defaults(conn) -> None:
     conn.execute(
         """INSERT INTO generator_config
            (generator_id, param_name, param_value, updated_at)
-           VALUES ('main', 'fuel_consumption_rate', %s, %s)
+           VALUES ('main', 'fuel_consumption_rate', ?, ?)
            ON CONFLICT (generator_id, param_name) DO NOTHING""",
         (main_rate, now),
     )
     conn.execute(
         """INSERT INTO generator_config
            (generator_id, param_name, param_value, updated_at)
-           VALUES ('emergency', 'fuel_consumption_rate', %s, %s)
+           VALUES ('emergency', 'fuel_consumption_rate', ?, ?)
            ON CONFLICT (generator_id, param_name) DO NOTHING""",
         (emerg_rate, now),
     )
     conn.execute(
         """INSERT INTO global_config
            (param_name, param_value, updated_at)
-           VALUES ('fuel_price', %s, %s)
+           VALUES ('fuel_price', ?, ?)
            ON CONFLICT (param_name) DO NOTHING""",
         (fuel_price, now),
     )
@@ -116,7 +117,7 @@ def get_generator_param(generator_id: str, param_name: str) -> float | None:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT param_value FROM generator_config "
-                "WHERE generator_id = %s AND param_name = %s",
+                "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -139,7 +140,7 @@ def get_generator_config(generator_id: str) -> dict:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT param_name, param_value, updated_at, updated_by_name "
-                "FROM generator_config WHERE generator_id = %s",
+                "FROM generator_config WHERE generator_id = ?",
                 (generator_id,),
             )
             rows = cursor.fetchall()
@@ -186,7 +187,7 @@ def set_generator_param(
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT param_value FROM generator_config "
-                "WHERE generator_id = %s AND param_name = %s",
+                "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -195,7 +196,7 @@ def set_generator_param(
             cursor.execute(
                 """INSERT INTO generator_config
                    (generator_id, param_name, param_value, updated_at, updated_by, updated_by_name)
-                   VALUES (%s, %s, %s, %s, %s, %s)
+                   VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT(generator_id, param_name)
                    DO UPDATE SET
                        param_value = EXCLUDED.param_value,
@@ -208,7 +209,7 @@ def set_generator_param(
                 """INSERT INTO config_history
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
-                   VALUES ('generator', %s, %s, %s, %s, %s, %s, %s)""",
+                   VALUES ('generator', ?, ?, ?, ?, ?, ?, ?)""",
                 (generator_id, param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             conn.commit()
@@ -235,7 +236,7 @@ def get_global_param(param_name: str) -> float | None:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT param_value FROM global_config WHERE param_name = %s",
+                "SELECT param_value FROM global_config WHERE param_name = ?",
                 (param_name,),
             )
             row = cursor.fetchone()
@@ -299,7 +300,7 @@ def set_global_param(
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT param_value FROM global_config WHERE param_name = %s",
+                "SELECT param_value FROM global_config WHERE param_name = ?",
                 (param_name,),
             )
             row = cursor.fetchone()
@@ -308,7 +309,7 @@ def set_global_param(
             cursor.execute(
                 """INSERT INTO global_config
                    (param_name, param_value, updated_at, updated_by, updated_by_name)
-                   VALUES (%s, %s, %s, %s, %s)
+                   VALUES (?, ?, ?, ?, ?)
                    ON CONFLICT(param_name)
                    DO UPDATE SET
                        param_value = EXCLUDED.param_value,
@@ -321,7 +322,7 @@ def set_global_param(
                 """INSERT INTO config_history
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
-                   VALUES ('global', NULL, %s, %s, %s, %s, %s, %s)""",
+                   VALUES ('global', NULL, ?, ?, ?, ?, ?, ?)""",
                 (param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             conn.commit()
@@ -353,7 +354,7 @@ def get_config_history(limit: int = 20, offset: int = 0) -> list[dict]:
                           changed_by, changed_by_name, comment
                    FROM config_history
                    ORDER BY changed_at DESC
-                   LIMIT %s OFFSET %s""",
+                   LIMIT ? OFFSET ?""",
                 (limit, offset),
             )
             rows = cursor.fetchall()
