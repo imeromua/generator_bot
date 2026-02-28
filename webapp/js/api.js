@@ -183,7 +183,7 @@ const API = (() => {
         /** Аналітика змін */
         getShiftAnalytics: (month) => get("/api/shifts/analytics", month ? { month } : undefined),
 
-        // Tasks 9-12: Analytics, Trends, Forecast, PDF
+        // Tasks 9-12: Analytics, Trends, Forecast, Excel report
         /** KPI-картки аналітики */
         getAnalyticsKpi: (days, generator) =>
             get("/api/analytics/kpi", Object.assign({ days: days || 30 }, generator ? { generator } : {})),

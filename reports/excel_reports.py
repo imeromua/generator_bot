@@ -47,6 +47,7 @@ class ExcelReportGenerator:
         'dark_blue': '1565C0',
         'teal': '117A65',
         'dark_text': '1A1A2E',
+        'light_green': 'D5F5E3',
     }
 
     def __init__(self):
@@ -300,7 +301,7 @@ class ExcelReportGenerator:
                 elif eve_val < 40:
                     eve_cell.fill = self._fill('orange')
                 elif eve_val > 60:
-                    eve_cell.fill = PatternFill(start_color='D5F5E3', end_color='D5F5E3', fill_type='solid')
+                    eve_cell.fill = self._fill('light_green')
 
     def _fill_maintenance_sheet(self, ws, gen_id, gen_name):
         ws['A1'] = f"Технічне обслуговування — «{gen_name}»"
@@ -620,6 +621,7 @@ class ExcelReportGenerator:
                 'morning_fuel': morning_fuel,
                 'evening_fuel': evening_fuel,
                 'refill_total': refill_total if refill_total > 0 else None,
+                # outage_hours = work_hours because the generator runs during power outages
                 'outage_hours': work_hours,
                 'shifts_active': shifts_active,
             })

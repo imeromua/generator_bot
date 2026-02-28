@@ -34,8 +34,6 @@ except ImportError:
     MergedCell = None
     get_column_letter = None
 
-from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE
-
 # Додаємо кореневу директорію проєкту до sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -45,6 +43,13 @@ import config  # noqa: E402
 import database.models as db_models  # noqa: E402
 import database.db_api as db  # noqa: E402
 
+from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE  # noqa: E402
+from webapp.utils.validation import validate_init_data as _validate_init_data, extract_user as _extract_user  # noqa: E402
+from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
+from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
+from webapp.middleware.cors import cors_middleware  # noqa: E402
+from webapp.middleware.rate_limit import rate_limit_middleware  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -52,19 +57,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MAX_EVENTS_LIMIT = 100
 MAX_NAME_LENGTH = 100
-
-# ---------------------------------------------------------------------------
-# Telegram WebApp — валідація initData (delegated to webapp.utils.validation)
-# ---------------------------------------------------------------------------
-
-from webapp.utils.validation import validate_init_data as _validate_init_data, extract_user as _extract_user  # noqa: E402
-from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
-from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
-from webapp.middleware.cors import cors_middleware  # noqa: E402
-from webapp.middleware.rate_limit import rate_limit_middleware  # noqa: E402
-
-
-
 
 # ---------------------------------------------------------------------------
 # API — endpoints
