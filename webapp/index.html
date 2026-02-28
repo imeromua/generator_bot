@@ -9,17 +9,28 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <!-- Task 7: Dark Theme Switcher -->
-    <div class="theme-switcher" id="theme-switcher" title="Тема оформлення">
-        <button class="theme-btn theme-btn-cycle" id="theme-cycle" onclick="ThemeManager.cycle()" title="Наступна тема">🌓</button>
-        <button class="theme-btn" id="theme-light" onclick="ThemeManager.set('light')" title="Світла">🌞</button>
-        <button class="theme-btn" id="theme-dark"  onclick="ThemeManager.set('dark')"  title="Темна">🌙</button>
-        <button class="theme-btn active" id="theme-auto" onclick="ThemeManager.set('auto')" title="Авто">🔄</button>
-    </div>
     <!-- Офлайн-банер (прихований за замовчуванням) -->
     <div id="offline-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#f39c12;color:#fff;text-align:center;padding:8px 16px;font-size:14px;font-weight:600;">
         ⚠️ Офлайн-режим — показуються збережені дані. Зміни недоступні.
     </div>
+    <div id="app">
+        <!-- Навігація — рядок 1: головні вкладки -->
+        <nav class="tabs tabs-main" id="tabs">
+            <button class="tab active" data-tab="dashboard">🏠<span class="tab-lbl">Головна</span></button>
+            <button class="tab" data-tab="schedule">📅<span class="tab-lbl">Графік</span></button>
+            <button class="tab" data-tab="events">📋<span class="tab-lbl">Події</span></button>
+            <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️<span class="tab-lbl">Адмін</span></button>
+            <button class="tab tab-more" id="tab-more" onclick="toggleSecondaryNav()">&#xB7;&#xB7;&#xB7;<span class="tab-lbl">Ще</span></button>
+        </nav>
+        <!-- Навігація — рядок 2: додаткові вкладки (показується при кліку на «Ще») -->
+        <nav class="tabs tabs-secondary hidden" id="tabs-secondary">
+            <button class="tab" data-tab="fuel-orders">⛽<span class="tab-lbl">Паливо</span></button>
+            <button class="tab" data-tab="shifts">👥<span class="tab-lbl">Зміни</span></button>
+            <button class="tab" data-tab="analytics">📊<span class="tab-lbl">Аналітика</span></button>
+            <button class="tab" data-tab="forecast">🔮<span class="tab-lbl">Прогнози</span></button>
+            <button class="tab" data-tab="maintenance">🔧<span class="tab-lbl">ТО</span></button>
+            <button class="tab" data-tab="notifications">🔔<span class="tab-lbl">Сповіщ.</span></button>
+            <button class="tab" data-tab="trends">📈<span class="tab-lbl">Тренди</span></button>
     <div id="tg-check-splash" style="position:fixed;inset:0;z-index:99999;background:var(--tg-bg,#ffffff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
         <div style="font-size:52px">⚡</div>
         <div style="font-size:15px;color:#999;font-family:sans-serif;">Перевірка доступу...</div>
@@ -70,7 +81,7 @@
                         </div>
                         <div class="stat">
                             <span class="stat-label">⏱ Мотогодини</span>
-                            <span class="stat-value" id="stat-hours">— год</span>
+                            <span class="stat-value" id="stat-hours">—</span>
                         </div>
                         <div class="stat">
                             <span class="stat-label">🔥 Витрата</span>
@@ -405,57 +416,68 @@
             </div>
         </section>
 
-        <!-- Task 6: Вкладка: Управління паливом -->
+        <!-- Вкладка: Управління паливом -->
         <section class="page" id="page-fuel-orders">
-            <!-- Поточний стан та прогноз -->
+            <!-- 📊 Поточний стан -->
             <div class="card">
                 <div class="card-header">
-                    <h2>⛽ Рівень палива</h2>
+                    <h2>⛽ ПАЛИВО</h2>
                     <button class="btn-sm" id="btn-refresh-orders" onclick="App.refreshFuelOrders()">🔄</button>
                 </div>
                 <div class="card-body">
+                    <p class="section-subtitle">📊 Поточний стан</p>
                     <div id="fuel-forecast-stats">
                         <!-- Заповнюється JS -->
                     </div>
+                    <div id="fuel-level-bar-wrap" style="margin-top:10px;display:none">
+                        <div class="fuel-level-bar-bg">
+                            <div class="fuel-level-bar-fill" id="fuel-level-bar-fill"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--tg-hint);margin-top:3px">
+                            <span>0 л</span>
+                            <span id="fuel-level-pct">—</span>
+                            <span id="fuel-tank-max">—</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Нове замовлення (адмін) -->
-            <div class="card hidden" id="card-new-order">
-                <div class="card-header">
-                    <h2>📦 Нове замовлення</h2>
-                </div>
-                <div class="card-body">
-                    <div class="form-row">
-                        <label class="form-label">Кількість (л)</label>
-                        <input type="number" id="order-amount" class="form-input" min="1" max="10000" step="1" placeholder="Літри" value="200">
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Постачальник</label>
-                        <input type="text" id="order-supplier" class="form-input" maxlength="100" placeholder="Назва постачальника">
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Ціна за літр (грн)</label>
-                        <input type="number" id="order-price" class="form-input" min="0" step="0.01" placeholder="Ціна">
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Дата доставки</label>
-                        <input type="date" id="order-delivery-date" class="form-input">
-                    </div>
-                    <div class="form-row">
-                        <label class="form-label">Примітки</label>
-                        <input type="text" id="order-notes" class="form-input" maxlength="200" placeholder="Необов'язково">
-                    </div>
-                    <button class="btn btn-primary btn-full" onclick="App.createFuelOrder()">
-                        ✅ Замовити паливо
-                    </button>
-                </div>
-            </div>
-
-            <!-- Список замовлень -->
+            <!-- 📋 Замовлення -->
             <div class="card">
                 <div class="card-header">
                     <h2>📋 Замовлення</h2>
+                    <p class="section-subtitle" style="margin:0;font-size:11px">Активні та завершені замовлення палива</p>
+                </div>
+                <!-- Нове замовлення (адмін) -->
+                <div class="hidden" id="card-new-order" style="padding:12px 16px 0">
+                    <button class="btn btn-primary btn-full" onclick="App.toggleNewOrderForm()" id="btn-toggle-order-form">
+                        + Нове замовлення
+                    </button>
+                    <div id="new-order-form" class="hidden" style="margin-top:10px">
+                        <div class="form-row">
+                            <label class="form-label">Кількість (л)</label>
+                            <input type="number" id="order-amount" class="form-input" min="1" max="10000" step="1" placeholder="Літри" value="200">
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Постачальник</label>
+                            <input type="text" id="order-supplier" class="form-input" maxlength="100" placeholder="Назва постачальника">
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Ціна за літр (грн)</label>
+                            <input type="number" id="order-price" class="form-input" min="0" step="0.01" placeholder="Ціна">
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Дата доставки</label>
+                            <input type="date" id="order-delivery-date" class="form-input">
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Примітки</label>
+                            <input type="text" id="order-notes" class="form-input" maxlength="200" placeholder="Необов'язково">
+                        </div>
+                        <button class="btn btn-primary btn-full" onclick="App.createFuelOrder()">
+                            ✅ Замовити паливо
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="fuel-orders-list">
@@ -463,14 +485,40 @@
                     </div>
                 </div>
             </div>
-        </section>
 
-        <!-- Task 8: Вкладка: Планування змін -->
-        <section class="page" id="page-shifts">
-            <!-- Місячний календар -->
+            <!-- 📈 Статистика споживання -->
             <div class="card">
                 <div class="card-header">
-                    <h2>📆 Розклад змін</h2>
+                    <h2>📈 Статистика (цей місяць)</h2>
+                </div>
+                <div class="card-body">
+                    <div id="fuel-monthly-stats">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Планування змін -->
+        <section class="page" id="page-shifts">
+            <!-- 🟢 Активна зміна -->
+            <div class="card" id="card-active-shift-info">
+                <div class="card-header">
+                    <h2>👥 ЗМІНИ</h2>
+                    <button class="btn-sm" onclick="App.loadShifts()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <p class="section-subtitle">🟢 Активна зміна</p>
+                    <div id="shifts-active-block">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 📅 Місячний розклад -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📅 Розклад на місяць</h2>
                     <div class="date-nav">
                         <button class="btn-icon" id="shifts-prev">◀</button>
                         <span id="shifts-month-label">—</span>
@@ -518,10 +566,10 @@
                 </div>
             </div>
 
-            <!-- Аналітика -->
+            <!-- 📋 Навантаження персоналу -->
             <div class="card">
                 <div class="card-header">
-                    <h2>📊 Навантаження персоналу</h2>
+                    <h2>📋 Навантаження персоналу</h2>
                 </div>
                 <div class="card-body">
                     <div id="shifts-analytics">

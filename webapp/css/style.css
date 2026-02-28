@@ -54,33 +54,60 @@ body {
 
 /* --- Tabs Navigation --- */
 .tabs {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 4px;
+    display: flex;
+    gap: 2px;
     background: var(--tg-section-bg);
     border-radius: 12px;
     padding: 4px;
-    margin: var(--gap) 0;
+    margin: var(--gap) 0 2px;
     position: sticky;
     top: 0;
     z-index: 100;
     box-shadow: var(--card-shadow);
+    overflow: hidden;
+}
+
+.tabs-main {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.tabs-secondary {
+    margin-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top: 1px solid var(--color-border, #e0e0e8);
+    flex-wrap: wrap;
 }
 
 .tab {
     border: none;
     background: transparent;
     color: var(--tg-hint);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    padding: 8px 4px;
+    padding: 6px 2px;
     border-radius: 10px;
     cursor: pointer;
     transition: all var(--transition);
-    white-space: nowrap;
+    overflow: hidden;
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    line-height: 1.2;
+}
+
+.tab-lbl {
+    display: block;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
-    min-width: 0;
+    white-space: nowrap;
+    font-size: 10px;
 }
 
 .tab.active {
@@ -1122,6 +1149,10 @@ body, body * {
     box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
 
+[data-theme="dark"] .tabs-secondary {
+    border-top-color: var(--dark-border);
+}
+
 [data-theme="dark"] .tab {
     color: var(--dark-secondary);
 }
@@ -1250,52 +1281,6 @@ body, body * {
     color: var(--dark-text);
 }
 
-/* Dark theme toggle button */
-.theme-switcher {
-    position: fixed;
-    top: 10px;
-    right: 10px;
-    z-index: 200;
-    display: flex;
-    gap: 2px;
-    background: var(--tg-section-bg, #fff);
-    border-radius: 20px;
-    padding: 3px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-    border: 1px solid var(--color-border, #e0e0e8);
-}
-
-.theme-btn {
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    font-size: 15px;
-    padding: 4px 7px;
-    border-radius: 16px;
-    transition: background 0.2s;
-    line-height: 1;
-}
-
-.theme-btn-cycle {
-    border-right: 1px solid var(--color-border, #e0e0e8);
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
-    padding-right: 8px;
-}
-
-.theme-btn.active {
-    background: var(--tg-btn, #2481cc);
-}
-
-[data-theme="dark"] .theme-switcher {
-    background: var(--dark-surface);
-    border-color: var(--dark-border);
-}
-
-[data-theme="dark"] .theme-btn-cycle {
-    border-right-color: var(--dark-border);
-}
-
 /* Notification settings styles */
 .notif-category {
     margin-bottom: 16px;
@@ -1374,6 +1359,30 @@ body, body * {
 }
 
 /* Fuel orders styles */
+.section-subtitle {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--tg-hint);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 10px;
+}
+
+.fuel-level-bar-bg {
+    background: var(--tg-secondary-bg);
+    border-radius: 6px;
+    height: 14px;
+    overflow: hidden;
+    border: 1px solid var(--color-border, #e0e0e8);
+}
+
+.fuel-level-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.5s ease;
+    background: var(--color-success, #27ae60);
+}
+
 .order-item {
     padding: 12px;
     border-radius: 10px;
@@ -1403,6 +1412,35 @@ body, body * {
 .order-status.cancelled { background: rgba(231,76,60,0.15); color: #c0392b; }
 
 /* Shift schedule calendar styles */
+.active-shift-card {
+    background: var(--tg-secondary-bg);
+    border-radius: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border, #e0e0e8);
+}
+
+.active-shift-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 13px;
+    border-bottom: 1px solid var(--color-border, rgba(0,0,0,0.06));
+}
+
+.active-shift-row:last-child { border-bottom: none; }
+
+.active-shift-icon { font-size: 18px; }
+
+[data-theme="dark"] .active-shift-card {
+    background: var(--dark-accent);
+    border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .active-shift-row {
+    border-bottom-color: var(--dark-border);
+}
+
 .shift-calendar {
     display: grid;
     grid-template-columns: repeat(7, 1fr);

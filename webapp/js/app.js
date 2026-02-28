@@ -146,6 +146,16 @@
         } catch { return ts; }
     }
 
+    /**
+     * Форматує дробові години у формат чч:мм
+     */
+    function formatHoursMinutes(totalHours) {
+        if (totalHours === undefined || totalHours === null || totalHours === "") return "—";
+        const h = Math.floor(Number(totalHours));
+        const m = Math.round((Number(totalHours) - h) * 60);
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+
     function showToast(msg, type) {
         const el = document.createElement("div");
         el.className = "toast" + (type === "success" ? " toast-success" : "");
@@ -176,16 +186,32 @@
     function switchTab(tab) {
         if (currentTab === tab) return;
         currentTab = tab;
-        document.querySelectorAll(".tab").forEach((btn) => {
+        document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
             btn.classList.toggle("active", btn.dataset.tab === tab);
         });
         document.querySelectorAll(".page").forEach((page) => {
             page.classList.toggle("active", page.id === "page-" + tab);
         });
+        // Якщо вкладка з другого ряду — показати другий ряд
+        const secondaryTabs = ["fuel-orders","shifts","analytics","forecast","maintenance","notifications","trends"];
+        if (secondaryTabs.includes(tab)) {
+            const sec = document.getElementById("tabs-secondary");
+            if (sec) sec.classList.remove("hidden");
+            const more = document.getElementById("tab-more");
+            if (more) more.classList.add("active");
+        }
         loadTabData(tab);
     }
 
-    document.querySelectorAll(".tab").forEach((btn) => {
+    window.toggleSecondaryNav = function() {
+        const sec = document.getElementById("tabs-secondary");
+        const more = document.getElementById("tab-more");
+        if (!sec) return;
+        sec.classList.toggle("hidden");
+        if (more) more.classList.toggle("active", !sec.classList.contains("hidden"));
+    };
+
+    document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => switchTab(btn.dataset.tab));
     });
 
@@ -239,7 +265,8 @@
         badge.className = "badge " + (isOn ? "on" : "off");
         badge.textContent = isOn ? "ON" : "OFF";
 
-        $("stat-generator").textContent = data.generator_name || data.generator;
+        const genNameMap = { main: "🔋 Основний", emergency: "⚠️ Аварійний" };
+        $("stat-generator").textContent = data.generator_name || genNameMap[data.generator] || data.generator;
 
         if (data.active_shift && data.active_shift !== "none") {
             const code = data.active_shift.split("_")[0];
@@ -257,7 +284,7 @@
         if (fuel < FUEL_CRITICAL) fuelEl.classList.add("fuel-low");
         else if (fuel < FUEL_WARNING) fuelEl.classList.add("fuel-warn");
 
-        $("stat-hours").textContent = data.total_hours + " год";
+        $("stat-hours").textContent = formatHoursMinutes(data.total_hours);
         $("stat-rate").textContent  = data.fuel_rate + " л/год";
         $("stat-work-hours").textContent = data.work_start + " — " + data.work_end;
 
@@ -561,7 +588,7 @@
         statsEl.innerHTML = `
             <div class="mnt-item">
                 <span class="mnt-item-label">⏱ Мотогодини (${data.generator})</span>
-                <span class="mnt-item-value">${totalHours} год</span>
+                <span class="mnt-item-value">${formatHoursMinutes(totalHours)}</span>
             </div>
         ` + items.map((item) => {
             const remaining = stats[item.key];
@@ -574,7 +601,7 @@
             return `<div class="mnt-item" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;justify-content:space-between;">
                     <span class="mnt-item-label">${item.label}</span>
-                    <span class="mnt-item-value ${cls}">${remaining} год</span>
+                    <span class="mnt-item-value ${cls}">${formatHoursMinutes(remaining)}</span>
                 </div>
                 <div class="mnt-progress">
                     <div class="mnt-progress-bar ${cls}" style="width:${pct}%"></div>
@@ -591,7 +618,7 @@
                 <span class="mnt-history-icon">${mntIcon(h.type)}</span>
                 <div class="mnt-history-body">
                     <div class="mnt-history-type">${mntLabel(h.type)}</div>
-                    <div class="mnt-history-meta">${formatTime(h.date)} • ${h.admin || "—"} • ${h.hours} год</div>
+                    <div class="mnt-history-meta">${formatTime(h.date)} • ${h.admin || "—"} • ${formatHoursMinutes(h.hours)}</div>
                 </div>
             </div>`;
         }).join("");
@@ -628,17 +655,17 @@
             <div class="gen-card ${active === 'main' ? 'active' : ''}">
                 <div class="gen-card-header">🔋 Основний${active === 'main' ? ' <span class="badge on">АКТИВНИЙ</span>' : ''}</div>
                 <div class="gen-card-body">
-                    <div>⏱ Мотогодини: <b>${data.main.total_hours} год</b></div>
-                    <div>🛢 Від заміни мастила: <b>${data.main.last_oil_change} год</b></div>
-                    <div>🕯 Від заміни свічок: <b>${data.main.last_spark_change} год</b></div>
+                    <div>⏱ Мотогодини: <b>${formatHoursMinutes(data.main.total_hours)}</b></div>
+                    <div>🛢 Від заміни мастила: <b>${formatHoursMinutes(data.main.last_oil_change)}</b></div>
+                    <div>🕯 Від заміни свічок: <b>${formatHoursMinutes(data.main.last_spark_change)}</b></div>
                 </div>
             </div>
             <div class="gen-card ${active === 'emergency' ? 'active' : ''}">
                 <div class="gen-card-header">⚠️ Аварійний${active === 'emergency' ? ' <span class="badge warn">АКТИВНИЙ</span>' : ''}</div>
                 <div class="gen-card-body">
-                    <div>⏱ Мотогодини: <b>${data.emergency.total_hours} год</b></div>
-                    <div>🛢 Від заміни мастила: <b>${data.emergency.last_oil_change} год</b></div>
-                    <div>🕯 Від заміни свічок: <b>${data.emergency.last_spark_change} год</b></div>
+                    <div>⏱ Мотогодини: <b>${formatHoursMinutes(data.emergency.total_hours)}</b></div>
+                    <div>🛢 Від заміни мастила: <b>${formatHoursMinutes(data.emergency.last_oil_change)}</b></div>
+                    <div>🕯 Від заміни свічок: <b>${formatHoursMinutes(data.emergency.last_spark_change)}</b></div>
                 </div>
             </div>
         `;
@@ -698,7 +725,7 @@
             API.getGenerators().then(data => {
                 const stats = data[generator];
                 if (stats) {
-                    $("set-hours-current").textContent = `Поточне значення: ${stats.total_hours} год`;
+                    $("set-hours-current").textContent = `Поточне значення: ${formatHoursMinutes(stats.total_hours)}`;
                 }
             }).catch(() => {});
         },
@@ -1051,6 +1078,11 @@
         // Task 6: Fuel Orders
         async refreshFuelOrders() { await loadFuelOrders(); },
 
+        toggleNewOrderForm() {
+            const form = $("new-order-form");
+            if (form) form.classList.toggle("hidden");
+        },
+
         async createFuelOrder() {
             const amount = parseFloat($("order-amount").value);
             if (!amount || amount <= 0) { showError("Введіть кількість літрів"); return; }
@@ -1332,90 +1364,18 @@
     })();
 
     // -------------------------------------------------------------------
-    // Task 7: Dark Theme Manager
+    // Тема — лише автоматична з Telegram
     // -------------------------------------------------------------------
-    const ThemeManager = (function () {
-        const KEY = "app_theme";
-        const MODES = ["light", "dark", "auto"];
-        const nextMode = { light: "dark", dark: "auto", auto: "light" };
-
-        function normalizeMode(mode) {
-            return MODES.includes(mode) ? mode : "auto";
+    (function initTheme() {
+        function applyTelegramTheme() {
+            const isDark = tg && tg.colorScheme === "dark";
+            document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
         }
-
-        function isDarkColor(hexColor) {
-            const raw = hexColor || "";
-            if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return null;
-            const hex = raw.length === 4
-                ? "#" + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3]
-                : raw;
-            const r = parseInt(hex.slice(1,3), 16);
-            const g = parseInt(hex.slice(3,5), 16);
-            const b = parseInt(hex.slice(5,7), 16);
-            return (r + g + b) / 3 < 128;
+        applyTelegramTheme();
+        if (tg && typeof tg.onEvent === "function") {
+            tg.onEvent("themeChanged", applyTelegramTheme);
         }
-
-        function apply(mode) {
-            mode = normalizeMode(mode);
-            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            const tg = window.Telegram && window.Telegram.WebApp;
-
-            let useDark;
-            if (mode === "dark") {
-                useDark = true;
-            } else if (mode === "light") {
-                useDark = false;
-            } else {
-                // auto: use Telegram theme if available, else system
-                if (tg && tg.themeParams && tg.themeParams.bg_color) {
-                    useDark = isDarkColor(tg.themeParams.bg_color) ?? prefersDark;
-                } else {
-                    useDark = prefersDark;
-                }
-            }
-
-            document.documentElement.setAttribute("data-theme", useDark ? "dark" : "light");
-            MODES.forEach((m) => {
-                const btn = document.getElementById("theme-" + m);
-                if (btn) btn.classList.toggle("active", m === mode);
-            });
-        }
-
-        function set(mode) {
-            mode = normalizeMode(mode);
-            localStorage.setItem(KEY, mode);
-            apply(mode);
-        }
-
-        function cycle() {
-            const current = normalizeMode(localStorage.getItem(KEY) || "auto");
-            set(nextMode[current]);
-        }
-
-        function init() {
-            const tg = window.Telegram && window.Telegram.WebApp;
-            const saved = normalizeMode(localStorage.getItem(KEY) || "auto");
-            apply(saved);
-            MODES.forEach((m) => {
-                const btn = document.getElementById("theme-" + m);
-                if (btn) btn.classList.toggle("active", m === saved);
-            });
-            // Listen to system theme changes when in "auto" mode
-            window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-                if ((localStorage.getItem(KEY) || "auto") === "auto") apply("auto");
-            });
-            if (tg && typeof tg.onEvent === "function") {
-                tg.onEvent("themeChanged", () => {
-                    if ((localStorage.getItem(KEY) || "auto") === "auto") apply("auto");
-                });
-            }
-        }
-
-        return { set, init, cycle };
     })();
-
-    window.ThemeManager = ThemeManager;
-    ThemeManager.init();
 
     // -------------------------------------------------------------------
     // Task 6: Fuel Orders
@@ -1426,6 +1386,7 @@
         const forecastEl = $("fuel-forecast-stats");
         const listEl = $("fuel-orders-list");
         const newOrderCard = $("card-new-order");
+        const monthlyEl = $("fuel-monthly-stats");
 
         if (newOrderCard) newOrderCard.classList.toggle("hidden", !userRole.is_admin);
 
@@ -1437,8 +1398,10 @@
             const stats = data.consumption_stats || {};
             const status = currentStatus || {};
             const fuel = parseFloat(status.current_fuel || 0);
+            const tankMax = parseFloat(status.tank_capacity || status.max_fuel || 200);
             const rate = stats.avg_rate_per_hour || 0;
             const daysLeft = rate > 0 ? (fuel / (rate * 8)).toFixed(1) : "—";
+            const fuelPct = tankMax > 0 ? Math.min(100, Math.round(fuel / tankMax * 100)) : 0;
 
             if (forecastEl) {
                 forecastEl.innerHTML = `
@@ -1456,10 +1419,23 @@
                             <span class="stat-value">${rate.toFixed(2)} л/год</span>
                         </div>
                         <div class="stat">
-                            <span class="stat-label">📅 За 30 дн.</span>
-                            <span class="stat-value">${stats.total_consumed || 0} л</span>
+                            <span class="stat-label">📊 Рівень</span>
+                            <span class="stat-value">${fuelPct}%</span>
                         </div>
                     </div>`;
+            }
+
+            // Fuel level bar
+            const barWrap = $("fuel-level-bar-wrap");
+            const barFill = $("fuel-level-bar-fill");
+            const pctLabel = $("fuel-level-pct");
+            const maxLabel = $("fuel-tank-max");
+            if (barWrap && barFill) {
+                barWrap.style.display = "";
+                barFill.style.width = fuelPct + "%";
+                barFill.style.background = fuel < 15 ? "var(--color-danger,#e74c3c)" : fuel < 40 ? "#f39c12" : "var(--color-success,#27ae60)";
+                if (pctLabel) pctLabel.textContent = fuelPct + "%";
+                if (maxLabel) maxLabel.textContent = tankMax + " л";
             }
 
             // Render orders list
@@ -1470,6 +1446,35 @@
                 } else {
                     listEl.innerHTML = orders.map((o) => renderOrderItem(o)).join("");
                 }
+            }
+
+            // Monthly stats
+            if (monthlyEl) {
+                const now = new Date();
+                const monthLabel = now.toLocaleDateString("uk-UA", { month: "long" });
+                const refillCount = (data.orders || []).filter((o) => {
+                    if (o.status !== "delivered") return false;
+                    const d = o.created_at ? new Date(o.created_at) : null;
+                    return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                }).length;
+                const totalConsumed = stats.total_consumed || 0;
+                const fuelPrice = stats.price_per_liter || 0;
+                const totalCost = fuelPrice > 0 ? (totalConsumed * fuelPrice).toFixed(0) : "—";
+                monthlyEl.innerHTML = `
+                    <div class="stats-grid">
+                        <div class="stat">
+                            <span class="stat-label">📅 Витрата</span>
+                            <span class="stat-value">${totalConsumed} л</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">💰 Вартість</span>
+                            <span class="stat-value">${totalCost !== "—" ? totalCost + " грн" : "—"}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">🔄 Поповнень</span>
+                            <span class="stat-value">${refillCount} раз</span>
+                        </div>
+                    </div>`;
             }
         } catch (e) {
             if (forecastEl) forecastEl.innerHTML = `<div class="empty-state">Помилка: ${e.message}</div>`;
@@ -1522,6 +1527,35 @@
 
         const adminCard = $("card-auto-schedule");
         if (adminCard) adminCard.classList.toggle("hidden", !userRole.is_admin);
+
+        // Render active shift block
+        const activeBlock = $("shifts-active-block");
+        if (activeBlock && currentStatus) {
+            const isOn = currentStatus.status === "ON";
+            const activeShift = currentStatus.active_shift;
+            if (isOn && activeShift && activeShift !== "none") {
+                const code = activeShift.split("_")[0];
+                const name = shiftName(code);
+                const genName = currentStatus.generator_name || currentStatus.generator || "—";
+                const startTime = currentStatus.shift_start ? formatTime(currentStatus.shift_start) : "—";
+                const durationH = currentStatus.shift_duration_hours;
+                const durationStr = durationH != null ? formatHoursMinutes(durationH) : "—";
+                const fuelConsumed = currentStatus.shift_fuel != null ? currentStatus.shift_fuel.toFixed(1) + " л" : "—";
+                activeBlock.innerHTML = `
+                    <div class="active-shift-card">
+                        <div class="active-shift-row"><span class="active-shift-icon">👤</span><span>${escapeHtml(currentStatus.operator_name || currentStatus.personnel || "—")}</span></div>
+                        <div class="active-shift-row"><span>🕐 Початок:</span><span>${startTime}</span></div>
+                        <div class="active-shift-row"><span>⏱ Тривалість:</span><span><b>${durationStr}</b></span></div>
+                        <div class="active-shift-row"><span>⚡ Генератор:</span><span>${escapeHtml(genName)}</span></div>
+                        <div class="active-shift-row"><span>⛽ Витрата:</span><span>${fuelConsumed}</span></div>
+                        <div class="active-shift-row"><span>📋 Зміна:</span><span>${name}</span></div>
+                    </div>`;
+            } else {
+                activeBlock.innerHTML = `<div class="hint-text" style="text-align:center;padding:8px">Активної зміни немає</div>`;
+            }
+        } else if (activeBlock) {
+            activeBlock.innerHTML = `<div class="hint-text" style="text-align:center;padding:8px">Завантаження...</div>`;
+        }
 
         const filterEl = $("shifts-filter-personnel");
         if (filterEl && filterEl.options.length <= 1) {
@@ -1760,8 +1794,8 @@
 
             // KPI картки
             const fmt = (v, d) => (v !== undefined && v !== null ? (typeof v === "number" ? v.toFixed(d || 0) : v) : "—");
-            document.getElementById("kpi-total-hours") && (document.getElementById("kpi-total-hours").textContent = fmt(kpi.total_hours, 1) + " год");
-            document.getElementById("kpi-avg-hours")   && (document.getElementById("kpi-avg-hours").textContent   = fmt(kpi.avg_hours_per_day, 1) + " год");
+            document.getElementById("kpi-total-hours") && (document.getElementById("kpi-total-hours").textContent = formatHoursMinutes(kpi.total_hours));
+            document.getElementById("kpi-avg-hours")   && (document.getElementById("kpi-avg-hours").textContent   = formatHoursMinutes(kpi.avg_hours_per_day));
             document.getElementById("kpi-fuel-rate")   && (document.getElementById("kpi-fuel-rate").textContent   = fmt(kpi.avg_fuel_rate, 2) + " л/год");
             document.getElementById("kpi-fuel-cost")   && (document.getElementById("kpi-fuel-cost").textContent   = fmt(kpi.fuel_cost, 0) + " грн");
             document.getElementById("kpi-efficiency")  && (document.getElementById("kpi-efficiency").textContent  = fmt(kpi.efficiency_pct, 1) + "%");
@@ -2090,8 +2124,8 @@
             // ТО
             if (mntEl) {
                 mntEl.innerHTML = `
-                    <div class="mnt-row"><span>🛢️ До заміни мастила</span><span><b>${mnt.oil_remaining_hours || "—"} год</b> (≈${mnt.days_to_oil_change || "?"} дн)</span></div>
-                    <div class="mnt-row"><span>🔩 До заміни свічок</span><span><b>${mnt.spark_remaining_hours || "—"} год</b> (≈${mnt.days_to_spark_change || "?"} дн)</span></div>
+                    <div class="mnt-row"><span>🛢️ До заміни мастила</span><span><b>${mnt.oil_remaining_hours != null ? formatHoursMinutes(mnt.oil_remaining_hours) : "—"}</b> (≈${mnt.days_to_oil_change || "?"} дн)</span></div>
+                    <div class="mnt-row"><span>🔩 До заміни свічок</span><span><b>${mnt.spark_remaining_hours != null ? formatHoursMinutes(mnt.spark_remaining_hours) : "—"}</b> (≈${mnt.days_to_spark_change || "?"} дн)</span></div>
                 `;
             }
 
