@@ -1427,6 +1427,163 @@ async def api_admin_audit_export(request: Request):
 # Backup endpoints
 # ---------------------------------------------------------------------------
 
+async def api_admin_config_get(request: Request):
+    """GET /api/admin/config — поточні налаштування генераторів та глобальні."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+    try:
+        from database.api.config import get_generator_config, get_global_config
+
+        def _build_param_response(cfg: dict, params: tuple) -> dict:
+            return {
+                p: {
+                    "value": cfg[p]["value"] if p in cfg else None,
+                    "last_updated": cfg[p]["last_updated"] if p in cfg else "",
+                    "updated_by": cfg[p]["updated_by"] if p in cfg else "",
+                }
+                for p in params
+            }
+
+        main_cfg = get_generator_config("main")
+        emerg_cfg = get_generator_config("emergency")
+        global_cfg = get_global_config()
+        gen_params = ("fuel_consumption_rate",)
+
+        return {
+            "generators": {
+                "main": _build_param_response(main_cfg, gen_params),
+                "emergency": _build_param_response(emerg_cfg, gen_params),
+            },
+            "global": _build_param_response(global_cfg, ("fuel_price",)),
+        }
+    except Exception as e:
+        logger.exception("api_admin_config_get error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def api_admin_config_set_generator(request: Request):
+    """POST /api/admin/config/generator — змінити параметр генератора."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
+
+    generator_id = str(body.get("generator_id", "")).strip()
+    param_name = str(body.get("param_name", "")).strip()
+    value = body.get("value")
+
+    if not generator_id or not param_name or value is None:
+        return JSONResponse(content={"error": "generator_id, param_name та value обов'язкові"}, status_code=400)
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return JSONResponse(content={"error": "value має бути числом"}, status_code=400)
+
+    try:
+        from database.api.config import set_generator_param, get_generator_param, VALID_GENERATOR_IDS, VALID_GENERATOR_PARAMS
+        if generator_id not in VALID_GENERATOR_IDS:
+            return JSONResponse(content={"error": f"generator_id має бути одним із: {', '.join(VALID_GENERATOR_IDS)}"}, status_code=400)
+        if param_name not in VALID_GENERATOR_PARAMS:
+            return JSONResponse(content={"error": f"param_name має бути одним із: {', '.join(VALID_GENERATOR_PARAMS)}"}, status_code=400)
+
+        admin_id, admin_name = _get_admin_info(user)
+        old_value = get_generator_param(generator_id, param_name)
+
+        ok = set_generator_param(generator_id, param_name, value, admin_id, admin_name)
+        if not ok:
+            return JSONResponse(content={"error": "Не вдалося зберегти налаштування"}, status_code=500)
+
+        db.log_admin_action(
+            admin_id, admin_name, "config_generator_set",
+            f"Змінено {param_name} для {generator_id}: {old_value} → {value}",
+            target_entity=f"generator:{generator_id}",
+            old_value=old_value,
+            new_value=value,
+        )
+        return {"ok": True, "message": "Налаштування збережено", "old_value": old_value, "new_value": value}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.exception("api_admin_config_set_generator error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def api_admin_config_set_global(request: Request):
+    """POST /api/admin/config/global — змінити глобальний параметр."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
+
+    param_name = str(body.get("param_name", "")).strip()
+    value = body.get("value")
+
+    if not param_name or value is None:
+        return JSONResponse(content={"error": "param_name та value обов'язкові"}, status_code=400)
+
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return JSONResponse(content={"error": "value має бути числом"}, status_code=400)
+
+    try:
+        from database.api.config import set_global_param, get_global_param, VALID_GLOBAL_PARAMS
+        if param_name not in VALID_GLOBAL_PARAMS:
+            return JSONResponse(content={"error": f"param_name має бути одним із: {', '.join(VALID_GLOBAL_PARAMS)}"}, status_code=400)
+
+        admin_id, admin_name = _get_admin_info(user)
+        old_value = get_global_param(param_name)
+
+        ok = set_global_param(param_name, value, admin_id, admin_name)
+        if not ok:
+            return JSONResponse(content={"error": "Не вдалося зберегти налаштування"}, status_code=500)
+
+        db.log_admin_action(
+            admin_id, admin_name, "config_global_set",
+            f"Змінено {param_name}: {old_value} → {value}",
+            target_entity=f"global:{param_name}",
+            old_value=old_value,
+            new_value=value,
+        )
+        return {"ok": True, "message": "Налаштування збережено", "old_value": old_value, "new_value": value}
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.exception("api_admin_config_set_global error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def api_admin_config_history(request: Request):
+    """GET /api/admin/config/history?limit=20 — історія змін налаштувань."""
+    user = _extract_user(request)
+    if not _is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+    try:
+        limit = int(request.query_params.get("limit", "20"))
+        limit = max(1, min(limit, 100))
+        offset = int(request.query_params.get("offset", "0"))
+        offset = max(0, offset)
+
+        from database.api.config import get_config_history
+        history = get_config_history(limit=limit, offset=offset)
+        return {"history": history}
+    except Exception as e:
+        logger.exception("api_admin_config_history error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Backup endpoints
+# ---------------------------------------------------------------------------
+
 async def api_admin_backups_list(request: Request):
     """GET /api/admin/backups — список резервних копій."""
     user = _extract_user(request)
@@ -1956,7 +2113,7 @@ async def api_analytics_kpi(request: Request):
         total_fuel   = sum(d["fuel_consumed"] for d in daily)
         avg_per_day  = total_hours / len(daily) if daily else 0
         avg_rate     = total_fuel / total_hours if total_hours > 0 else 0
-        fuel_price   = getattr(config, "FUEL_PRICE", 50.0)
+        fuel_price   = db.get_fuel_price_db()
         fuel_cost    = total_fuel * fuel_price
         total_outage = sum(d["outage_hours"] for d in daily)
         total_avail  = days * 24
@@ -2434,6 +2591,11 @@ def create_app() -> FastAPI:
 
     app.add_api_route("/api/admin/audit", api_admin_audit, methods=["GET"])
     app.add_api_route("/api/admin/audit/export", api_admin_audit_export, methods=["GET"])
+
+    app.add_api_route("/api/admin/config", api_admin_config_get, methods=["GET"])
+    app.add_api_route("/api/admin/config/generator", api_admin_config_set_generator, methods=["POST"])
+    app.add_api_route("/api/admin/config/global", api_admin_config_set_global, methods=["POST"])
+    app.add_api_route("/api/admin/config/history", api_admin_config_history, methods=["GET"])
 
     app.add_api_route("/api/admin/backups", api_admin_backups_list, methods=["GET"])
     app.add_api_route("/api/admin/backup", api_admin_backup_create, methods=["POST"])

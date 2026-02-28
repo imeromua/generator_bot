@@ -668,6 +668,14 @@ def init_db():
             except Exception as e:
                 logging.warning(f"⚠️ Не вдалося додати дефолт {k}={v}: {e}")
 
+    # Config tables (generator_config, global_config, config_history)
+    try:
+        from database.api.config import _ensure_tables, _seed_defaults
+        _ensure_tables(conn)
+        _seed_defaults(conn)
+    except Exception as e:
+        logging.warning(f"⚠️ Не вдалося ініціалізувати таблиці конфігурації: {e}")
+
     try:
         conn.commit()
     except Exception as e:

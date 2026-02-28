@@ -114,15 +114,19 @@ def admin_panel():
         [
             InlineKeyboardButton(text="🛠 Меню ТО", callback_data="mnt_menu"),
         ],
-        # Row 5: User management (single, less frequent)
+        # Row 5: Settings (new)
+        [
+            InlineKeyboardButton(text="⚙️ Налаштування", callback_data="cfg_settings"),
+        ],
+        # Row 6: User management (single, less frequent)
         [
             InlineKeyboardButton(text="👥 ID Користувачів", callback_data="users_list"),
         ],
-        # Row 6: Dangerous operation (isolated, red)
+        # Row 7: Dangerous operation (isolated, red)
         [
             InlineKeyboardButton(text="🗑 Очистка БД", callback_data="db_cleanup_confirm", style="danger"),
         ],
-        # Row 7: Navigation
+        # Row 8: Navigation
         [
             InlineKeyboardButton(text="🏠 На головну", callback_data="main_menu"),
         ]
