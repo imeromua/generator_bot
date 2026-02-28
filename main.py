@@ -89,11 +89,9 @@ async def _run_blocking(func, *args, **kwargs):
 
 
 async def _close_redis(redis: Redis):
-    """Best-effort close of redis client + pool (supports sync/async methods)."""
+    """Best-effort close of redis client + pool (supports async methods)."""
     try:
-        res = redis.close()
-        if inspect.isawaitable(res):
-            await res
+        await redis.aclose()
     except Exception:
         pass
     try:
