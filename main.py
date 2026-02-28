@@ -267,7 +267,6 @@ async def run_polling_once(dp: Dispatcher):
         if config.WEBAPP_URL:
             try:
                 webapp_app = create_webapp_app()
-                webapp_runner = None
                 import uvicorn as _uvicorn
                 uvicorn_config = _uvicorn.Config(
                     webapp_app,
