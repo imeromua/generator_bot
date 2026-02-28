@@ -104,7 +104,7 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
     total_period_refills = sum(d["refill_liters"] for d in sorted_days)
     total_period_consumption = sum(d["fuel_consumed"] for d in sorted_days)
     starting_fuel = current_fuel - total_period_refills + total_period_consumption
-    prev_balance = starting_fuel if starting_fuel > 0 else None
+    prev_balance: float | None = starting_fuel if starting_fuel > 0 else None
     for d in sorted_days:
         morning_balance = prev_balance
         if morning_balance is not None:
