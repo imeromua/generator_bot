@@ -23,6 +23,13 @@
         return; // Зупиняємо виконання скрипта
     }
 
+    // Telegram підтверджено — скасовуємо таймер, прибираємо splash і показуємо інтерфейс
+    if (window._tgCheckTimer) clearTimeout(window._tgCheckTimer);
+    const _splash = document.getElementById('tg-check-splash');
+    if (_splash) _splash.remove();
+    const _appEl = document.getElementById('app');
+    if (_appEl) _appEl.style.display = '';
+
     // -------------------------------------------------------------------
     // Telegram WebApp SDK
     // -------------------------------------------------------------------
