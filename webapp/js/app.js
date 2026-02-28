@@ -177,7 +177,6 @@
     // Навігація по вкладках
     // -------------------------------------------------------------------
     function switchTab(tab) {
-        if (!tab) return;
         if (currentTab === tab) return;
         currentTab = tab;
         document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
