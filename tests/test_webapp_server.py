@@ -554,6 +554,19 @@ class TestApiAnalytics:
         assert resp.status == 400
 
     @pytest.mark.asyncio
+    async def test_pdf_report_reportlab_unavailable(self, client, monkeypatch):
+        """Returns 503 when ReportLab is not installed."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        monkeypatch.setattr("webapp_server.REPORTLAB_AVAILABLE", False)
+        resp = await (await client).get("/api/report/pdf?type=quick")
+        assert resp.status == 503
+        data = await resp.json()
+        assert "error" in data
+
+    @pytest.mark.asyncio
     async def test_pdf_report_quick(self, client, monkeypatch):
         """Quick PDF report should return PDF bytes."""
         monkeypatch.setattr(

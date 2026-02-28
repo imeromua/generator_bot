@@ -2498,6 +2498,11 @@ async def api_report_pdf(request: web.Request) -> web.Response:
     user = _extract_user(request)
     if not user:
         return web.json_response({"error": "Не авторизовано"}, status=401)
+    if not REPORTLAB_AVAILABLE:
+        return web.json_response(
+            {"error": "PDF-звіти недоступні. Встановіть ReportLab: pip install reportlab"},
+            status=503,
+        )
     try:
         report_type = request.query.get("type", "quick")
         valid_types = ("quick", "detailed", "personnel", "technical", "financial")

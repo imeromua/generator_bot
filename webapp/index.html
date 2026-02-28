@@ -880,7 +880,21 @@
 
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/service-worker.js').catch(function(err) {
+            navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+                // Force update check on every page load
+                reg.update();
+
+                // Listen for new service worker and reload when ready
+                reg.addEventListener('updatefound', function() {
+                    var newWorker = reg.installing;
+                    newWorker.addEventListener('statechange', function() {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            // New version available - reload to activate it
+                            window.location.reload();
+                        }
+                    });
+                });
+            }).catch(function(err) {
                 console.warn('Service Worker registration failed:', err);
             });
         }
