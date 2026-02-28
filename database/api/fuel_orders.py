@@ -128,7 +128,7 @@ def get_fuel_consumption_stats(days: int = 30) -> dict:
         # shift end events (we use these to compute consumption periods)
         shift_end_rows = conn.execute(
             "SELECT timestamp, value FROM logs "
-            "WHERE event_type LIKE '%_end' AND timestamp >= ? ORDER BY timestamp",
+            "WHERE event_type IN ('m_end', 'd_end', 'e_end', 'x_end') AND timestamp >= ? ORDER BY timestamp",
             (cutoff,),
         ).fetchall()
 
