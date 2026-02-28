@@ -1092,7 +1092,11 @@ async def api_report_excel(request: Request):
         return Response(
             content=buf.read(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     except Exception as e:
         logger.exception("api_report_excel error")
@@ -2708,7 +2712,11 @@ async def api_report_excel_v2(request: Request):
         return Response(
             content=excel_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     except ValueError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)

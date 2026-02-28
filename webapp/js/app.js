@@ -770,7 +770,26 @@
             const url = API.getExcelReportUrl(reportType, days, generator || "");
             const fullUrl  = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
             const filename = `generator_report_${reportType}_${new Date().toISOString().slice(0,10)}.xlsx`;
+            const absoluteUrl = window.location.origin + fullUrl;
 
+            const twa = window.Telegram?.WebApp;
+
+            if (twa?.isVersionAtLeast?.('6.9') && typeof twa.downloadFile === 'function') {
+                // Telegram WebApp API 6.9+ — native download (works on Android/iOS)
+                twa.downloadFile({ url: absoluteUrl, file_name: filename });
+                if (twa.showPopup) {
+                    twa.showPopup({ title: '✅ Готово', message: 'Звіт завантажується...', buttons: [{type: 'close'}] });
+                }
+                return;
+            }
+
+            if (twa?.openLink) {
+                // Fallback for older Telegram mobile — open in external browser
+                twa.openLink(absoluteUrl, { try_instant_view: false });
+                return;
+            }
+
+            // Desktop / browser fallback
             fetch(fullUrl)
                 .then(response => {
                     if (!response.ok) {
@@ -788,8 +807,8 @@
                     document.body.removeChild(a);
                     setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
-                    if (window.Telegram?.WebApp?.showPopup) {
-                        window.Telegram.WebApp.showPopup({
+                    if (twa?.showPopup) {
+                        twa.showPopup({
                             title: '✅ Готово',
                             message: 'Звіт завантажено',
                             buttons: [{type: 'close'}]
@@ -798,8 +817,8 @@
                 })
                 .catch(err => {
                     console.error('Download failed:', err);
-                    if (window.Telegram?.WebApp?.showPopup) {
-                        window.Telegram.WebApp.showPopup({
+                    if (twa?.showPopup) {
+                        twa.showPopup({
                             title: '❌ Помилка',
                             message: `Не вдалося завантажити звіт: ${err.message}`,
                             buttons: [{type: 'close'}]
@@ -2194,6 +2213,7 @@
         const url    = API.getExcelReportUrl(type, analyticsPeriod);
         const fullUrl  = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
         const filename = `generator_report_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        const absoluteUrl = window.location.origin + fullUrl;
 
         const downloadBtn = document.getElementById('analytics-download-btn');
         const originalText = downloadBtn?.textContent;
@@ -2202,6 +2222,32 @@
             downloadBtn.disabled = true;
         }
 
+        const twa = window.Telegram?.WebApp;
+
+        if (twa?.isVersionAtLeast?.('6.9') && typeof twa.downloadFile === 'function') {
+            // Telegram WebApp API 6.9+ — native download (works on Android/iOS)
+            twa.downloadFile({ url: absoluteUrl, file_name: filename });
+            if (downloadBtn) {
+                downloadBtn.textContent = originalText || '📊 Завантажити Excel (.xlsx)';
+                downloadBtn.disabled = false;
+            }
+            if (twa.showPopup) {
+                twa.showPopup({ title: '✅ Готово', message: 'Звіт завантажується...', buttons: [{type: 'close'}] });
+            }
+            return;
+        }
+
+        if (twa?.openLink) {
+            // Fallback for older Telegram mobile — open in external browser
+            twa.openLink(absoluteUrl, { try_instant_view: false });
+            if (downloadBtn) {
+                downloadBtn.textContent = originalText || '📊 Завантажити Excel (.xlsx)';
+                downloadBtn.disabled = false;
+            }
+            return;
+        }
+
+        // Desktop / browser fallback
         fetch(fullUrl)
             .then(response => {
                 if (!response.ok) {
@@ -2219,8 +2265,8 @@
                 document.body.removeChild(a);
                 setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
-                if (window.Telegram?.WebApp?.showPopup) {
-                    window.Telegram.WebApp.showPopup({
+                if (twa?.showPopup) {
+                    twa.showPopup({
                         title: '✅ Готово',
                         message: 'Звіт завантажено',
                         buttons: [{type: 'close'}]
@@ -2229,8 +2275,8 @@
             })
             .catch(err => {
                 console.error('Download failed:', err);
-                if (window.Telegram?.WebApp?.showPopup) {
-                    window.Telegram.WebApp.showPopup({
+                if (twa?.showPopup) {
+                    twa.showPopup({
                         title: '❌ Помилка',
                         message: `Не вдалося завантажити звіт: ${err.message}`,
                         buttons: [{type: 'close'}]
