@@ -132,7 +132,7 @@ async def api_status(request: Request):
         fuel_rate = db.get_fuel_consumption_rate()
 
         # Оцінка палива під час роботи
-        current_fuel = float(state.get("current_fuel", 0))
+        current_fuel = float(state.get("current_fuel") or 0.0)
         status = state.get("status", "OFF")
         estimated_fuel = current_fuel
 
@@ -154,6 +154,8 @@ async def api_status(request: Request):
                         )
                     start_dt = start_dt.replace(tzinfo=config.KYIV)
                     now = datetime.now(config.KYIV)
+                    if start_dt > now:
+                        start_dt -= timedelta(days=1)
                     elapsed_h = (now - start_dt).total_seconds() / 3600
                     if 0 < elapsed_h < 24:
                         estimated_fuel = max(0, current_fuel - elapsed_h * fuel_rate)
@@ -1492,8 +1494,8 @@ async def api_admin_audit_export(request: Request):
             ws.cell(row=ri, column=5, value=r[4] or "")
             ws.cell(row=ri, column=6, value=r[5] or "")
             ws.cell(row=ri, column=7, value=r[6] or "")
-            ws.cell(row=ri, column=8, value=r[7] or "")
-            ws.cell(row=ri, column=9, value=r[8] or "")
+            ws.cell(row=ri, column=8, value=str(r[7]) if isinstance(r[7], (dict, list)) else (r[7] or ""))
+            ws.cell(row=ri, column=9, value=str(r[8]) if isinstance(r[8], (dict, list)) else (r[8] or ""))
             ws.cell(row=ri, column=10, value="✅" if r[9] else "❌")
 
         buf = io.BytesIO()
@@ -1946,15 +1948,13 @@ async def api_fuel_orders_update(request: Request):
         if not updated:
             return JSONResponse(content={"error": "Нічого не оновлено"}, status_code=400)
 
-        # If delivered, add fuel to current level
+        # If delivered, add fuel to current level atomically
         if new_status == "delivered":
             from database.api.fuel_orders import get_order
 
             order = get_order(int(order_id))
             if order:
-                current_fuel = float(db.get_state_value("current_fuel", "0") or "0")
-                new_fuel = current_fuel + order["amount_liters"]
-                db.set_state("current_fuel", str(round(new_fuel, 1)))
+                db.update_fuel(order["amount_liters"])
                 user_id = int(user.get("id", 0))
                 user_info = db.get_user(user_id)
                 actor = user_info[1] if user_info else user.get("first_name", "Адмін")
@@ -2148,7 +2148,6 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
     """
     from database.api.logs import get_logs_for_period
     from database.api.schedule import get_schedule
-    import config as _cfg
 
     start_str = start_dt.strftime("%Y-%m-%d")
     end_str = end_dt.strftime("%Y-%m-%d")
@@ -2193,7 +2192,7 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
             if start_ts:
                 hours = (ts - start_ts).total_seconds() / 3600.0
                 if 0 < hours < 24:
-                    fuel_rate = getattr(_cfg, "FUEL_CONSUMPTION", 5.0)
+                    fuel_rate = float(db.get_fuel_consumption_rate() or 5.0)
                     daily[day_key]["work_hours"] += hours
                     daily[day_key]["fuel_consumed"] += hours * fuel_rate
                     daily[day_key]["fuel_rate"] = fuel_rate
@@ -2431,7 +2430,7 @@ async def api_analytics_efficiency(request: Request):
             work_hours = 0.0
         if not math.isfinite(outage_hours):
             outage_hours = 0.0
-        idle_hours = max(0.0, total_hours_avail - work_hours - outage_hours - maintenance_hours)
+        idle_hours = max(0.0, total_hours_avail - outage_hours - maintenance_hours)
 
         # Розбивка по змінах
         shift_fuel: dict = {"m": 0.0, "d": 0.0, "e": 0.0, "x": 0.0}
@@ -2442,7 +2441,6 @@ async def api_analytics_efficiency(request: Request):
         start_str = start_dt.strftime("%Y-%m-%d")
         end_str = now.strftime("%Y-%m-%d")
         logs = get_logs_for_period(start_str, end_str)
-        import config as _cfg
 
         pending: dict = {}
         for row in logs:
@@ -2460,7 +2458,7 @@ async def api_analytics_efficiency(request: Request):
                 if start_ts:
                     h = (ts - start_ts).total_seconds() / 3600.0
                     if 0 < h < 24:
-                        fuel_rate = float(getattr(_cfg, "FUEL_CONSUMPTION", 5.0) or 5.0)
+                        fuel_rate = float(db.get_fuel_consumption_rate() or 5.0)
                         shift_hours[shift_key] = shift_hours.get(shift_key, 0.0) + h
                         shift_fuel[shift_key] = shift_fuel.get(shift_key, 0.0) + h * fuel_rate
 
