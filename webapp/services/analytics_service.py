@@ -18,7 +18,7 @@ def _safe_round(v: float, ndigits: int = 1) -> float:
         return 0.0
 
 
-def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id=None) -> list:
+def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str | None = None) -> list:
     """Збирає денну статистику з логів за вказаний діапазон дат.
 
     Повертає список dict:
