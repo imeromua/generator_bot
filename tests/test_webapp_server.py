@@ -603,6 +603,43 @@ class TestMiniAppUi:
         assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in css
 
 
+class TestServiceWorker:
+    """Tests for dynamic service worker endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_service_worker_returns_ok(self, client):
+        """Service worker endpoint should return 200."""
+        resp = await (await client).get("/service-worker.js")
+        assert resp.status == 200
+
+    @pytest.mark.asyncio
+    async def test_service_worker_content_type(self, client):
+        """Service worker should have correct content type."""
+        resp = await (await client).get("/service-worker.js")
+        assert resp.content_type == "application/javascript"
+
+    @pytest.mark.asyncio
+    async def test_service_worker_no_cache_headers(self, client):
+        """Service worker should have no-cache headers."""
+        resp = await (await client).get("/service-worker.js")
+        assert "no-cache" in resp.headers.get("Cache-Control", "")
+
+    @pytest.mark.asyncio
+    async def test_service_worker_injects_build_version(self, client):
+        """Service worker should have hardcoded version replaced with BUILD_VERSION."""
+        from get_build_version import BUILD_VERSION
+        resp = await (await client).get("/service-worker.js")
+        text = await resp.text()
+        assert f"const CACHE_VERSION = '{BUILD_VERSION}';" in text
+        assert "const CACHE_VERSION = 'v1.1.0';" not in text
+
+    @pytest.mark.asyncio
+    async def test_service_worker_allowed_header(self, client):
+        """Service worker should have Service-Worker-Allowed header."""
+        resp = await (await client).get("/service-worker.js")
+        assert resp.headers.get("Service-Worker-Allowed") == "/"
+
+
 class TestMlModels:
     """Unit tests for ml_models module."""
 

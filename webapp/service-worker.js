@@ -7,7 +7,7 @@
  *   - Термін кешу API: 24 години
  */
 
-const CACHE_VERSION = 'v1.1.0'; // Update this value manually on every deploy to bust old caches
+const CACHE_VERSION = 'v1.1.0'; // Auto-replaced by server with git commit hash on startup
 const STATIC_CACHE = `generator-bot-cache-${CACHE_VERSION}-static`;
 const API_CACHE    = `generator-bot-cache-${CACHE_VERSION}-api`;
 

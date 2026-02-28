@@ -16,6 +16,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -49,6 +50,7 @@ from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
 from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
 from webapp.middleware.cors import cors_middleware  # noqa: E402
 from webapp.middleware.rate_limit import rate_limit_middleware  # noqa: E402
+from get_build_version import BUILD_VERSION  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -2428,10 +2430,42 @@ def create_app() -> web.Application:
         async def block_handler(request: web.Request) -> web.FileResponse:
             return web.FileResponse(webapp_dir / "block.html")
 
-        async def sw_handler(request: web.Request) -> web.FileResponse:
-            return web.FileResponse(
-                webapp_dir / "service-worker.js",
-                headers={"Content-Type": "application/javascript"},
+        # Read service worker content once at startup and inject build version
+        sw_path = webapp_dir / "service-worker.js"
+        try:
+            with open(sw_path, 'r', encoding='utf-8') as f:
+                _sw_raw = f.read()
+        except FileNotFoundError:
+            _sw_raw = None
+
+        # Replace CACHE_VERSION value using regex to be robust against version changes
+        _sw_content = re.sub(
+            r"(const CACHE_VERSION\s*=\s*')[^']*(')",
+            rf"\g<1>{BUILD_VERSION}\2",
+            _sw_raw or "",
+        )
+
+        async def sw_handler(request: web.Request) -> web.Response:
+            """
+            Serve service-worker.js with dynamic cache version injected.
+
+            Returns content pre-processed at startup with the build version
+            (git commit hash or timestamp) replacing the CACHE_VERSION constant.
+
+            Cache-Control headers ensure browser always fetches fresh SW code.
+            """
+            if _sw_raw is None:
+                return web.Response(text='Service Worker not found', status=404)
+
+            return web.Response(
+                text=_sw_content,
+                content_type='application/javascript',
+                headers={
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0',
+                    'Service-Worker-Allowed': '/'
+                }
             )
 
         app.router.add_get("/", index_handler)
@@ -2450,6 +2484,7 @@ def main():
 
     # Ініціалізація БД
     logger.info("🔧 Ініціалізація бази даних...")
+    logger.info(f"🏷️  BUILD_VERSION: {BUILD_VERSION}")
     db_models.init_db()
 
     port = int(os.getenv("WEBAPP_PORT", "8080"))
