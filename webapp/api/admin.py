@@ -7,8 +7,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
-from webapp.utils.permissions import is_admin as _is_admin
+from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
 try:
     from openpyxl import Workbook
@@ -24,8 +24,8 @@ MAX_NAME_LENGTH = 100
 
 async def api_admin_drivers_list(request: Request):
     """GET /api/admin/drivers — список водіїв (лише для адмінів)."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         drivers = db.get_drivers()
@@ -37,8 +37,8 @@ async def api_admin_drivers_list(request: Request):
 
 async def api_admin_drivers_add(request: Request):
     """POST /api/admin/drivers — додати водія."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -71,8 +71,8 @@ async def api_admin_drivers_add(request: Request):
 
 async def api_admin_drivers_delete(request: Request):
     """DELETE /api/admin/drivers — видалити водія."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -105,8 +105,8 @@ async def api_admin_drivers_delete(request: Request):
 
 async def api_admin_personnel_list(request: Request):
     """GET /api/admin/personnel — список персоналу (лише для адмінів)."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         names = db.get_personnel_names()
@@ -120,8 +120,8 @@ async def api_admin_personnel_list(request: Request):
 
 async def api_admin_personnel_add(request: Request):
     """POST /api/admin/personnel — додати ПІБ персоналу."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -154,8 +154,8 @@ async def api_admin_personnel_add(request: Request):
 
 async def api_admin_personnel_delete(request: Request):
     """DELETE /api/admin/personnel — видалити ПІБ персоналу."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -188,8 +188,8 @@ async def api_admin_personnel_delete(request: Request):
 
 async def api_admin_personnel_assign(request: Request):
     """POST /api/admin/personnel/assign — прив'язати персонал до Telegram-користувача."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -232,8 +232,8 @@ async def api_admin_personnel_assign(request: Request):
 
 async def api_admin_sync(request: Request):
     """POST /api/admin/sync — запуск синхронізації з Google Sheets (експорт)."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -272,8 +272,8 @@ async def api_admin_audit(request: Request):
         date_from  (str YYYY-MM-DD, optional)
         date_to    (str YYYY-MM-DD, optional)
     """
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -336,8 +336,8 @@ async def api_admin_audit(request: Request):
 
 async def api_admin_audit_export(request: Request):
     """GET /api/admin/audit/export — експорт журналу дій у Excel."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     if not EXCEL_AVAILABLE:
@@ -423,8 +423,8 @@ async def api_admin_audit_export(request: Request):
 
 async def api_admin_config_get(request: Request):
     """GET /api/admin/config — поточні налаштування генераторів та глобальні."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from database.api.config import get_generator_config, get_global_config
@@ -458,8 +458,8 @@ async def api_admin_config_get(request: Request):
 
 async def api_admin_config_set_generator(request: Request):
     """POST /api/admin/config/generator — змінити параметр генератора."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
@@ -521,8 +521,8 @@ async def api_admin_config_set_generator(request: Request):
 
 async def api_admin_config_set_global(request: Request):
     """POST /api/admin/config/global — змінити глобальний параметр."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
@@ -574,8 +574,8 @@ async def api_admin_config_set_global(request: Request):
 
 async def api_admin_config_history(request: Request):
     """GET /api/admin/config/history?limit=20 — історія змін налаштувань."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         limit = int(request.query_params.get("limit", "20"))
@@ -594,8 +594,8 @@ async def api_admin_config_history(request: Request):
 
 async def api_admin_backups_list(request: Request):
     """GET /api/admin/backups — список резервних копій."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -610,8 +610,8 @@ async def api_admin_backups_list(request: Request):
 
 async def api_admin_backup_create(request: Request):
     """POST /api/admin/backup — створити резервну копію вручну."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -643,8 +643,8 @@ async def api_admin_backup_download(request: Request, filename: str):
     """GET /api/admin/backup/download/{filename} — завантажити резервну копію."""
     import re as _re
 
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     filename = filename or ""

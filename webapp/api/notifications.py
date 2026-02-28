@@ -2,14 +2,14 @@
 import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from webapp.utils.validation import extract_user as _extract_user
+from webapp.utils import validation as _validation_mod
 
 logger = logging.getLogger(__name__)
 
 
 async def api_notifications_get(request: Request):
     """GET /api/notifications/preferences — get user notification preferences."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -28,7 +28,7 @@ async def api_notifications_get(request: Request):
 
 async def api_notifications_set(request: Request):
     """POST /api/notifications/preferences — update user notification preference."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -65,7 +65,7 @@ async def api_notifications_set(request: Request):
 
 async def api_notifications_test(request: Request):
     """POST /api/notifications/test — send a test notification to the user."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     # This endpoint is informational — the actual bot send happens via the Telegram bot

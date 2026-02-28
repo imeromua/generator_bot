@@ -6,7 +6,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
+from webapp.utils import validation as _validation_mod
 from webapp.services.analytics_service import _safe_round, _build_daily_stats
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 async def api_analytics_kpi(request: Request):
     """GET /api/analytics/kpi — KPI картки для дашборду аналітики."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -72,7 +72,7 @@ async def api_analytics_kpi(request: Request):
 
 async def api_analytics_fuel_timeline(request: Request):
     """GET /api/analytics/fuel-timeline — дані для графіка витрати палива."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -117,7 +117,7 @@ async def api_analytics_fuel_timeline(request: Request):
 
 async def api_analytics_motor_hours(request: Request):
     """GET /api/analytics/motor-hours — мотогодини генераторів."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -169,7 +169,7 @@ async def api_analytics_motor_hours(request: Request):
 
 async def api_analytics_efficiency(request: Request):
     """GET /api/analytics/efficiency — ефективність роботи."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -247,7 +247,7 @@ async def api_analytics_efficiency(request: Request):
 
 async def api_analytics_calendar(request: Request):
     """GET /api/analytics/calendar — календар відключень (місяць)."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -275,7 +275,7 @@ async def api_analytics_calendar(request: Request):
 
 async def api_analytics_trends(request: Request):
     """GET /api/analytics/trends — тренди та автоматичні інсайти."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -380,7 +380,7 @@ async def api_analytics_trends(request: Request):
 
 async def api_analytics_forecast(request: Request):
     """GET /api/analytics/forecast — ML-прогноз витрати палива."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:

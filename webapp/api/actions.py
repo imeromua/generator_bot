@@ -5,7 +5,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
+from webapp.utils import validation as _validation_mod
 from webapp.utils.db_helpers import atomic_transaction
 from webapp.utils.time_helpers import _within_work_window
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 async def api_action_start(request: Request):
     """POST /api/action/start — старт зміни генератора."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
@@ -67,7 +67,7 @@ async def api_action_start(request: Request):
 
 async def api_action_stop(request: Request):
     """POST /api/action/stop — зупинка зміни генератора."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
@@ -115,7 +115,7 @@ async def api_action_stop(request: Request):
 
 async def api_action_refill(request: Request):
     """POST /api/action/refill — прийом палива."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 

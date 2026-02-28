@@ -5,8 +5,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
-from webapp.utils.permissions import is_admin as _is_admin
+from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
 from webapp.utils.time_helpers import _within_work_window
 
@@ -138,13 +138,13 @@ async def api_schedule_week(request: Request):
 
 async def api_user_role(request: Request):
     """GET /api/user/role — роль поточного користувача."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     try:
         user_id = int(user.get("id", 0)) if user else None
     except (TypeError, ValueError):
         user_id = None
 
-    is_admin = _is_admin(user)
+    is_admin = _permissions_mod.is_admin(user)
     personnel = db.get_personnel_for_user(user_id) if user_id else None
 
     return {
@@ -192,7 +192,7 @@ async def api_generators(request: Request):
 
 async def api_personnel_me(request: Request):
     """GET /api/personnel/me — персонал поточного користувача."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
@@ -208,8 +208,8 @@ async def api_personnel_me(request: Request):
 
 async def api_schedule_toggle(request: Request):
     """POST /api/schedule/toggle — перемикання години графіка відключень."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -258,8 +258,8 @@ async def api_schedule_toggle(request: Request):
 
 async def api_generator_switch(request: Request):
     """POST /api/generator/switch — перемикання активного генератора."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:

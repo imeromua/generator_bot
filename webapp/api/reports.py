@@ -6,8 +6,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
-from webapp.utils.permissions import is_admin as _is_admin
+from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
 from webapp.services.reports_service import _build_daily_report_wb, EXCEL_AVAILABLE
 from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE
@@ -21,8 +21,8 @@ async def api_report_excel(request: Request):
     Параметр ``generator`` може бути ``main``, ``emergency`` або ``all``
     (за замовчуванням — активний генератор).
     """
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     if not EXCEL_AVAILABLE:
@@ -77,7 +77,7 @@ async def api_report_excel(request: Request):
 
 async def api_report_excel_v2(request: Request):
     """GET /api/report/excel/v2?type=quick&days=30&generator=main — enhanced Excel report."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     if not _EXCEL_RPT_AVAILABLE:

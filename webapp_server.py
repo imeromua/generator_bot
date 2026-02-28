@@ -15,7 +15,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import database.models as db_models  # noqa: E402
 
-from webapp.app import create_app  # noqa: E402, F401
+from webapp.app import create_app  # noqa: E402
 from webapp.utils.validation import (  # noqa: E402, F401
     validate_init_data as _validate_init_data,
     extract_user as _extract_user,

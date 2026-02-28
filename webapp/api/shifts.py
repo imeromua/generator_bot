@@ -3,15 +3,15 @@ import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
-from webapp.utils.permissions import is_admin as _is_admin
+from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 
 logger = logging.getLogger(__name__)
 
 
 async def api_shifts_get(request: Request):
     """GET /api/shifts/schedule — get shift schedule for a month or date."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
@@ -44,8 +44,8 @@ async def api_shifts_get(request: Request):
 
 async def api_shifts_set(request: Request):
     """POST /api/shifts/schedule — create or update a shift assignment."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
@@ -80,8 +80,8 @@ async def api_shifts_set(request: Request):
 
 async def api_shifts_auto(request: Request):
     """POST /api/shifts/auto — generate auto schedule for a month."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
@@ -128,7 +128,7 @@ async def api_shifts_auto(request: Request):
 
 async def api_shifts_analytics(request: Request):
     """GET /api/shifts/analytics — shift load analytics."""
-    user = _extract_user(request)
+    user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:

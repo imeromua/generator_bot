@@ -4,8 +4,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 import config
 import database.db_api as db
-from webapp.utils.validation import extract_user as _extract_user
-from webapp.utils.permissions import is_admin as _is_admin
+from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
 
 logger = logging.getLogger(__name__)
@@ -47,8 +47,8 @@ async def api_maintenance(request: Request):
 
 async def api_maintenance_perform(request: Request):
     """POST /api/maintenance/perform — виконання технічного обслуговування."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -90,8 +90,8 @@ async def api_maintenance_perform(request: Request):
 
 async def api_maintenance_set_hours(request: Request):
     """POST /api/maintenance/set-hours — встановлення мотогодин генератора."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
@@ -138,8 +138,8 @@ async def api_maintenance_set_hours(request: Request):
 
 async def api_fuel_set(request: Request):
     """POST /api/fuel/set — встановлення поточного рівня палива (адмін)."""
-    user = _extract_user(request)
-    if not _is_admin(user):
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
