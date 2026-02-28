@@ -31,6 +31,24 @@
             <button class="tab" data-tab="maintenance">🔧<span class="tab-lbl">ТО</span></button>
             <button class="tab" data-tab="notifications">🔔<span class="tab-lbl">Сповіщ.</span></button>
             <button class="tab" data-tab="trends">📈<span class="tab-lbl">Тренди</span></button>
+    <div id="tg-check-splash" style="position:fixed;inset:0;z-index:99999;background:var(--tg-bg,#ffffff);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;">
+        <div style="font-size:52px">⚡</div>
+        <div style="font-size:15px;color:#999;font-family:sans-serif;">Перевірка доступу...</div>
+    </div>
+    <div id="app" style="display:none">
+        <!-- Навігація -->
+        <nav class="tabs" id="tabs">
+            <button class="tab active" data-tab="dashboard">🏠 Головна</button>
+            <button class="tab" data-tab="schedule">📅 Графік</button>
+            <button class="tab" data-tab="events">🕘 Події</button>
+            <button class="tab" data-tab="maintenance">🔧 ТО</button>
+            <button class="tab" data-tab="fuel-orders">⛽ Паливо</button>
+            <button class="tab" data-tab="shifts">📆 Зміни</button>
+            <button class="tab" data-tab="notifications">🔔 Сповіщення</button>
+            <button class="tab" data-tab="analytics">📊 Аналітика</button>
+            <button class="tab" data-tab="trends">📈 Тренди</button>
+            <button class="tab" data-tab="forecast">🔮 Прогнози</button>
+            <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️ Адмін</button>
         </nav>
 
         <!-- Статус-панель -->
@@ -866,6 +884,14 @@
     <script src="/js/api.js"></script>
     <script src="/js/app.js"></script>
     <script>
+        // Якщо через 5 секунд Telegram SDK не завантажився — редирект на заглушку
+        window._tgCheckTimer = setTimeout(function() {
+            var splash = document.getElementById('tg-check-splash');
+            if (splash && splash.parentNode) {
+                window.location.href = '/block.html';
+            }
+        }, 5000);
+
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/service-worker.js').catch(function(err) {
