@@ -2158,15 +2158,15 @@
         }
     }
 
-    // --- PDF звіт ---
-    function downloadPdfReport() {
+    // --- Excel звіт ---
+    function downloadExcelReport() {
         const typeEl = document.getElementById("report-type-select");
         const type   = typeEl ? typeEl.value : "quick";
-        const url    = API.getPdfReportUrl(type, analyticsPeriod);
+        const url    = API.getExcelReportUrl(type, analyticsPeriod);
         window.open(url, "_blank");
     }
 
     // Публічний API для зовнішнього виклику
     window.App = window.App || {};
-    Object.assign(window.App, { loadAnalytics, loadTrends, loadForecast, downloadPdfReport });
+    Object.assign(window.App, { loadAnalytics, loadTrends, loadForecast, downloadExcelReport });
 })();

@@ -200,9 +200,9 @@ const API = (() => {
         getTrends: (days) => get("/api/analytics/trends", { days: days || 30 }),
         /** ML-прогноз */
         getForecast: () => get("/api/analytics/forecast"),
-        /** URL для PDF-звіту */
-        getPdfReportUrl: (type, days, generator) => {
-            let url = BASE + "/api/report/pdf?type=" + (type || "quick") + "&days=" + (days || 30);
+        /** URL для Excel-звіту (enhanced) */
+        getExcelReportUrl: (type, days, generator) => {
+            let url = BASE + "/api/report/excel/v2?type=" + (type || "quick") + "&days=" + (days || 30);
             if (generator) url += "&generator=" + encodeURIComponent(generator);
             return url;
         },

@@ -708,20 +708,20 @@
                     </div>
                 </div>
             </div>
-            <!-- Кнопка PDF звіту -->
+            <!-- Кнопка Excel звіту -->
             <div class="card">
-                <div class="card-header"><h2>📄 Звіт</h2></div>
+                <div class="card-header"><h2>📊 Звіт</h2></div>
                 <div class="card-body">
                     <div class="report-controls">
                         <select id="report-type-select" class="form-input">
-                            <option value="quick">Швидкий (1 стор.)</option>
-                            <option value="detailed">Детальний (3-5 стор.)</option>
+                            <option value="quick">Швидкий</option>
+                            <option value="detailed">Детальний</option>
                             <option value="personnel">По персоналу</option>
                             <option value="technical">Технічний</option>
                             <option value="financial">Фінансовий</option>
                         </select>
-                        <button class="btn btn-primary btn-full" id="btn-download-pdf" onclick="App.downloadPdfReport()">
-                            📄 Завантажити PDF
+                        <button class="btn btn-primary btn-full" id="btn-download-excel" onclick="App.downloadExcelReport()">
+                            📊 Завантажити Excel
                         </button>
                     </div>
                 </div>
