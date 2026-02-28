@@ -11,6 +11,9 @@ from webapp.services.analytics_service import _safe_round, _build_daily_stats
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_AVG_DAILY_HOURS = 2.0
+_MIN_REALISTIC_AVG_DAILY_HOURS = 0.5
+
 
 async def api_analytics_kpi(request: Request):
     """GET /api/analytics/kpi — KPI картки для дашборду аналітики."""
@@ -410,7 +413,9 @@ async def api_analytics_forecast(request: Request):
         oil_remaining = max(0, oil_interval - oil_hours)
         spark_remaining = max(0, spark_interval - main_stats.get("last_spark_change", 0))
 
-        avg_daily_hours = sum(d["work_hours"] for d in daily[-7:]) / 7 if len(daily) >= 7 else 2.0
+        avg_daily_hours = sum(d["work_hours"] for d in daily[-7:]) / 7 if len(daily) >= 7 else _DEFAULT_AVG_DAILY_HOURS
+        if avg_daily_hours < _MIN_REALISTIC_AVG_DAILY_HOURS:
+            avg_daily_hours = _DEFAULT_AVG_DAILY_HOURS
         days_to_oil = round(oil_remaining / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
         days_to_spark = round(spark_remaining / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
 
