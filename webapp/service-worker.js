@@ -7,9 +7,9 @@
  *   - Термін кешу API: 24 години
  */
 
-const CACHE_VERSION = 'generator-v1';
-const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const API_CACHE    = `${CACHE_VERSION}-api`;
+const CACHE_VERSION = 'v1.1.0'; // Update this value manually on every deploy to bust old caches
+const STATIC_CACHE = `generator-bot-cache-${CACHE_VERSION}-static`;
+const API_CACHE    = `generator-bot-cache-${CACHE_VERSION}-api`;
 
 const STATIC_ASSETS = [
     '/',
@@ -53,8 +53,11 @@ self.addEventListener('activate', event => {
         caches.keys().then(keys =>
             Promise.all(
                 keys
-                    .filter(k => k.startsWith('generator-') && k !== STATIC_CACHE && k !== API_CACHE)
-                    .map(k => caches.delete(k))
+                    .filter(k => k !== STATIC_CACHE && k !== API_CACHE)
+                    .map(k => {
+                        console.log('Deleting old cache:', k);
+                        return caches.delete(k);
+                    })
             )
         ).then(() => self.clients.claim())
     );
