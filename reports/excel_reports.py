@@ -575,8 +575,37 @@ class ExcelReportGenerator:
                 except Exception:
                     pass
 
+        # Initialize fuel balance from current state
+        state = db.get_state()
+        current_fuel = float(state.get('current_fuel', 0) or 0)
+        
+        # Calculate backwards from current fuel to get starting fuel for the period
+        # We need to account for all refills and consumption from end_date to now
+        total_period_fuel = sum(sum(day['refills']) for day in days_data.values())
+        total_period_consumption = 0.0
+        for day in days_data.values():
+            total_shift_mins = 0
+            for shift_data in day['shifts'].values():
+                s_str = shift_data.get('start')
+                e_str = shift_data.get('end')
+                if s_str and e_str:
+                    try:
+                        s_t = datetime.strptime(s_str, '%H:%M')
+                        e_t = datetime.strptime(e_str, '%H:%M')
+                        diff = (e_t - s_t).total_seconds() / 60
+                        if diff < 0:
+                            diff += 24 * 60
+                        total_shift_mins += diff
+                    except Exception:
+                        pass
+            work_hours = total_shift_mins / 60
+            total_period_consumption += work_hours * fuel_rate
+
+        # Starting fuel = current_fuel - refills + consumption
+        starting_fuel = current_fuel - total_period_fuel + total_period_consumption
+        prev_fuel = starting_fuel if starting_fuel > 0 else None
+
         result = []
-        prev_fuel = None
         for date_str in sorted(days_data.keys()):
             try:
                 dt = datetime.strptime(date_str, '%Y-%m-%d')
