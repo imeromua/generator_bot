@@ -590,35 +590,9 @@ class ExcelReportGenerator:
                 except Exception:
                     pass
 
-        # Initialize fuel balance from current state
-        state = db.get_state()
-        current_fuel = float(state.get('current_fuel', 0) or 0)
-
-        # Calculate backwards from current fuel to get starting fuel for the period
-        # We need to account for all refills and consumption from end_date to now
-        total_period_fuel = sum(sum(day['refills']) for day in days_data.values())
-        total_period_consumption = 0.0
-        for day in days_data.values():
-            total_shift_mins = 0
-            for shift_data in day['shifts'].values():
-                s_str = shift_data.get('start')
-                e_str = shift_data.get('end')
-                if s_str and e_str:
-                    try:
-                        s_t = datetime.strptime(s_str, '%H:%M')
-                        e_t = datetime.strptime(e_str, '%H:%M')
-                        diff = (e_t - s_t).total_seconds() / 60
-                        if diff < 0:
-                            diff += 24 * 60
-                        total_shift_mins += diff
-                    except Exception:
-                        pass
-            work_hours = total_shift_mins / 60
-            total_period_consumption += work_hours * fuel_rate
-
-        # Starting fuel = current_fuel - refills + consumption
-        starting_fuel = current_fuel - total_period_fuel + total_period_consumption
-        prev_fuel = starting_fuel if starting_fuel > 0 else None
+        # Forward calculation: propagate fuel balances day by day,
+        # using corr_fuel_set events as anchor points when available.
+        prev_evening_fuel = None
 
         result = []
         for date_str in sorted(days_data.keys()):
@@ -650,14 +624,31 @@ class ExcelReportGenerator:
             fuel_consumed = round(work_hours * fuel_rate, 1) if work_hours > 0 else 0.0
             refill_total = round(sum(day['refills']), 1) if day['refills'] else 0.0
 
-            morning_fuel = day.get('morning_fuel') or prev_fuel
-            if morning_fuel is not None:
-                evening_fuel = round(float(morning_fuel) + refill_total - fuel_consumed, 1)
+            if day['evening_fuel'] is not None:
+                # Day has a manual fuel correction — use it as evening fuel and
+                # calculate morning fuel backwards from it.
+                evening_fuel = day['evening_fuel']
+                morning_fuel = round(evening_fuel - refill_total + fuel_consumed, 1)
+                if morning_fuel < 0:
+                    morning_fuel = 0.0
+            elif prev_evening_fuel is not None:
+                # Propagate forward: previous day's evening fuel is today's morning fuel.
+                morning_fuel = prev_evening_fuel
+                evening_fuel = round(morning_fuel + refill_total - fuel_consumed, 1)
+                if evening_fuel < 0:
+                    evening_fuel = 0.0
+            elif refill_total > 0:
+                # Refill logged but no prior state known — assume tank was empty before refill.
+                morning_fuel = 0.0
+                evening_fuel = round(refill_total - fuel_consumed, 1)
+                if evening_fuel < 0:
+                    evening_fuel = 0.0
             else:
                 morning_fuel = None
                 evening_fuel = None
 
-            prev_fuel = evening_fuel if isinstance(evening_fuel, float) else None
+            if evening_fuel is not None:
+                prev_evening_fuel = evening_fuel
 
             result.append(
                 {
