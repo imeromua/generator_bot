@@ -195,7 +195,8 @@ class ExcelReportGenerator:
             date_ref = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
             chart.add_data(fuel_ref, titles_from_data=False)
             chart.set_categories(date_ref)
-            chart.series[0].title.value = "Витрата, л"
+            if chart.series and chart.series[0] is not None and chart.series[0].title is not None:
+                chart.series[0].title.value = "Витрата, л"
             ws.add_chart(chart, f"A{data_end_row + 3}")
 
     # ------------------------------------------------------------------
