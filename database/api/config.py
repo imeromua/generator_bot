@@ -113,8 +113,10 @@ def get_generator_param(generator_id: str, param_name: str) -> float | None:
     try:
         conn = db_models.get_connection()
         try:
-            row = conn.execute(
-                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT param_value FROM generator_config "
+                "WHERE generator_id = %s AND param_name = %s",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -181,8 +183,10 @@ def set_generator_param(
     try:
         conn = db_models.get_connection()
         try:
-            row = conn.execute(
-                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT param_value FROM generator_config "
+                "WHERE generator_id = %s AND param_name = %s",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -204,7 +208,7 @@ def set_generator_param(
                 """INSERT INTO config_history
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
-                   VALUES ('generator', ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES ('generator', %s, %s, %s, %s, %s, %s, %s)""",
                 (generator_id, param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             conn.commit()
@@ -317,7 +321,7 @@ def set_global_param(
                 """INSERT INTO config_history
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
-                   VALUES ('global', NULL, ?, ?, ?, ?, ?, ?)""",
+                   VALUES ('global', NULL, %s, %s, %s, %s, %s, %s)""",
                 (param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             conn.commit()
