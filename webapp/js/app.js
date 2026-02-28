@@ -766,19 +766,14 @@
         // --- Звіти ---
         downloadReport(generator) {
             const days = $("report-days-select").value || "30";
-            let url = API.getReportUrl(days, generator || "");
-            // initData передається як query-параметр для прямого завантаження
-            const initData = window.Telegram?.WebApp?.initData;
-            if (initData) {
-                url += (url.includes("?") ? "&" : "?") + "init_data=" + encodeURIComponent(initData);
-            }
-            // Абсолютний URL для Telegram openLink
-            const absUrl = url.startsWith("http") ? url : (window.location.origin + url);
-            if (window.Telegram?.WebApp?.openLink) {
-                window.Telegram.WebApp.openLink(absUrl);
-            } else {
-                window.open(absUrl, "_blank");
-            }
+            const reportType = document.getElementById('report-type')?.value || 'quick';
+            const url = API.getExcelReportUrl(reportType, days, generator || "");
+            const a = document.createElement('a');
+            a.href = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
+            a.download = `generator_report_${reportType}_${new Date().toISOString().slice(0,10)}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
         },
 
         // --- Sync Google Sheets ---
@@ -2163,7 +2158,12 @@
         const typeEl = document.getElementById("report-type-select");
         const type   = typeEl ? typeEl.value : "quick";
         const url    = API.getExcelReportUrl(type, analyticsPeriod);
-        window.open(url, "_blank");
+        const a = document.createElement('a');
+        a.href = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
+        a.download = `generator_report_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
 
     // Публічний API для зовнішнього виклику
