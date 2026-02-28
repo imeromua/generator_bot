@@ -558,6 +558,33 @@ class TestApiAnalytics:
         assert "attachment" in resp.headers.get("content-disposition", "")
         assert resp.content[:2] == b"PK"
 
+    def test_fuel_timeline_includes_balance_fields(self, client, monkeypatch):
+        """Fuel timeline response must include morning_balance and evening_balance for each day."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = client.get("/api/analytics/fuel-timeline?days=3")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "actual" in data
+        for day in data["actual"]:
+            assert "morning_balance" in day, "morning_balance missing from fuel-timeline response"
+            assert "evening_balance" in day, "evening_balance missing from fuel-timeline response"
+
+    def test_build_daily_stats_includes_balance_fields(self, monkeypatch):
+        """_build_daily_stats must include morning_balance and evening_balance in each day dict."""
+        from datetime import datetime, timedelta
+        from webapp_server import _build_daily_stats
+
+        end_dt = datetime(2025, 1, 5)
+        start_dt = end_dt - timedelta(days=2)
+        result = _build_daily_stats(start_dt, end_dt, None)
+        assert len(result) > 0
+        for day in result:
+            assert "morning_balance" in day, "morning_balance missing from _build_daily_stats output"
+            assert "evening_balance" in day, "evening_balance missing from _build_daily_stats output"
+
     def test_excel_v1_report_attachment_header(self, client, monkeypatch):
         """v1 Excel report should include Content-Disposition: attachment header."""
         monkeypatch.setattr(

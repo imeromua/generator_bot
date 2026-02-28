@@ -2135,7 +2135,8 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
     """Збирає денну статистику з логів за вказаний діапазон дат.
 
     Повертає список dict:
-      {date, work_hours, fuel_consumed, fuel_rate, outage_hours, refill_liters}
+      {date, work_hours, fuel_consumed, fuel_rate, outage_hours, refill_liters,
+       morning_balance, evening_balance}
     """
     from database.api.logs import get_logs_for_period
     from database.api.schedule import get_schedule
@@ -2157,6 +2158,8 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
             "fuel_rate": 0.0,
             "outage_hours": 0,
             "refill_liters": 0.0,
+            "morning_balance": None,
+            "evening_balance": None,
         }
         current_day += timedelta(days=1)
 
@@ -2209,7 +2212,29 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
         if d["work_hours"] > 0:
             d["fuel_rate"] = round(d["fuel_consumed"] / d["work_hours"], 3)
 
-    return sorted(daily.values(), key=lambda x: x["date"])
+    # Розрахунок залишків палива (ранок/вечір)
+    sorted_days = sorted(daily.values(), key=lambda x: x["date"])
+    try:
+        current_fuel = float(db.get_state().get("current_fuel", 0) or 0)
+    except Exception:
+        current_fuel = 0.0
+    total_period_refills = sum(d["refill_liters"] for d in sorted_days)
+    total_period_consumption = sum(d["fuel_consumed"] for d in sorted_days)
+    starting_fuel = current_fuel - total_period_refills + total_period_consumption
+    prev_balance: float | None = starting_fuel if starting_fuel > 0 else None
+    for d in sorted_days:
+        morning_balance = prev_balance
+        if morning_balance is not None:
+            evening_balance: float | None = round(
+                float(morning_balance) + d["refill_liters"] - d["fuel_consumed"], 1
+            )
+        else:
+            evening_balance = None
+        d["morning_balance"] = morning_balance
+        d["evening_balance"] = evening_balance
+        prev_balance = evening_balance if isinstance(evening_balance, float) else None
+
+    return sorted_days
 
 
 # ---------------------------------------------------------------------------
@@ -2308,6 +2333,8 @@ async def api_analytics_fuel_timeline(request: Request):
                     "work_hours": d["work_hours"],
                     "refill_liters": d["refill_liters"],
                     "outage_hours": d["outage_hours"],
+                    "morning_balance": d.get("morning_balance"),
+                    "evening_balance": d.get("evening_balance"),
                 }
                 for d in daily
             ],
