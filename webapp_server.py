@@ -21,7 +21,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, quote
 
 from aiohttp import web
 
@@ -1173,8 +1173,8 @@ async def api_report_excel(request: web.Request) -> web.Response:
         wb.save(buf)
         buf.seek(0)
 
-        safe_gen = "основний" if generator_param == "main" else "аварійний"
-        filename = f"звіт_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
+        safe_gen = "main" if generator_param == "main" else "backup"
+        filename = f"report_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id, admin_name, "export_excel",
