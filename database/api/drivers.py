@@ -38,31 +38,25 @@ def update_driver(old_name, new_name):
     """Update driver name. Returns True if successful, False if new_name already exists."""
     if not old_name or not new_name:
         return False
-    
+
     old_name = old_name.strip()
     new_name = new_name.strip()
-    
+
     if old_name == new_name:
         return True
-    
+
     try:
         with get_connection() as conn:
             # Check if new name already exists
-            exists = conn.execute(
-                "SELECT 1 FROM drivers WHERE name = ?",
-                (new_name,)
-            ).fetchone()
-            
+            exists = conn.execute("SELECT 1 FROM drivers WHERE name = ?", (new_name,)).fetchone()
+
             if exists:
                 logging.warning(f"Водій {new_name} вже існує")
                 return False
-            
+
             # Update driver name
-            cur = conn.execute(
-                "UPDATE drivers SET name = ? WHERE name = ?",
-                (new_name, old_name)
-            )
-            
+            cur = conn.execute("UPDATE drivers SET name = ? WHERE name = ?", (new_name, old_name))
+
             return bool(cur.rowcount and cur.rowcount > 0)
     except Exception as e:
         logging.error(f"Помилка оновлення водія: {e}")

@@ -43,7 +43,7 @@ def _collect_stop_reminder_recipients() -> list[int]:
 
     # admins
     try:
-        for a in (config.ADMIN_IDS or []):
+        for a in config.ADMIN_IDS or []:
             recipients.add(int(a))
     except Exception:
         pass
@@ -86,14 +86,14 @@ async def maybe_send_stop_reminder(
         if (reminder_dt <= now < close_dt) and (sent_date != today_str):
             # FIX #29: Use correct state key 'last_start_time' instead of 'start_time'
             st_time = state.get("last_start_time", "")
-            
+
             txt = (
                 f"⏰ <b>Нагадування</b>\n\n"
                 f"До кінця робочого дня лишилось <b>{reminder_min} хв</b>.\n"
                 f"Якщо генератор вже вимкнули — натисніть <b>СТОП</b> в боті, щоб закрити зміну.\n\n"
                 f"Активна зміна: <b>{active}</b>\n"
             )
-            
+
             # Only show start time if available
             if st_time:
                 txt += f"Старт був о: <b>{st_time}</b>"

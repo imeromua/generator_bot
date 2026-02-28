@@ -140,10 +140,10 @@ def sheet_force_online(ts: int | None = None):
 
 def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
     """FIX #8: Pure read operation without side effects.
-    
+
     Returns True if offline is active (forced or auto) OR if access failure duration >= threshold.
     Does NOT modify database state - use sheet_mark_offline_if_needed() for that.
-    
+
     This prevents unexpected mutations during what appears to be a read-only check.
     """
     try:
@@ -170,7 +170,7 @@ def sheet_check_offline(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> 
 
 def sheet_mark_offline_if_needed(threshold_seconds: int = _OFFLINE_THRESHOLD_SECONDS) -> bool:
     """FIX #8: Separate write operation to mark offline if threshold exceeded.
-    
+
     Call this explicitly when you want to transition to offline state based on failure duration.
     Returns True if offline was marked, False otherwise.
     """
@@ -209,6 +209,7 @@ def get_state():
     повертаємо дефолти замість падіння IndexError/TypeError.
     """
     with get_connection() as conn:
+
         def _get(k: str, default: str = "") -> str:
             return _conn_get_state_value(conn, k, default)
 
@@ -239,6 +240,7 @@ def get_state():
 
 # ========== ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: ОСНОВНИЙ ТА АВАРІЙНИЙ ==========
 
+
 def get_active_generator() -> str:
     """Повертає ID активного генератора: 'main' або 'emergency'."""
     return str(get_state_value("active_generator", "main") or "main").strip()
@@ -258,23 +260,24 @@ def is_emergency_active() -> bool:
 
 def get_generator_state(generator_id: str | None = None):
     """Повертає стан конкретного генератора.
-    
+
     Args:
         generator_id: 'main', 'emergency' або None (автовизначення активного)
-    
+
     Returns:
         dict з полями: status, start_time, start_date, total_hours, last_oil, last_spark, current_fuel, active_shift
     """
     if generator_id is None:
         generator_id = get_active_generator()
-    
+
     if generator_id == "main":
         # Основний генератор - стандартні ключі
         return get_state()
-    
+
     elif generator_id == "emergency":
         # Аварійний генератор - окремі ключі, але спільний status/shift/fuel
         with get_connection() as conn:
+
             def _get(k: str, default: str = "") -> str:
                 return _conn_get_state_value(conn, k, default)
 
@@ -291,7 +294,7 @@ def get_generator_state(generator_id: str | None = None):
             total = _get_f("emergency_total_hours", 0.0)
             last_oil = _get_f("emergency_last_oil_change", 0.0)
             last_spark = _get_f("emergency_last_spark_change", 0.0)
-            
+
             # Паливо спільне
             fuel = _get_f("current_fuel", 0.0)
 
@@ -305,7 +308,7 @@ def get_generator_state(generator_id: str | None = None):
                 "current_fuel": fuel,
                 "active_shift": active_shift,
             }
-    
+
     else:
         raise ValueError(f"Unknown generator_id: {generator_id}")
 
@@ -359,6 +362,7 @@ def get_fuel_consumption_rate(generator_id: str | None = None) -> float:
         generator_id = "emergency" if is_emergency_active() else "main"
     try:
         from database.api.config import get_fuel_consumption_rate_db
+
         return get_fuel_consumption_rate_db(generator_id)
     except Exception:
         pass

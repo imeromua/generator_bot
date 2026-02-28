@@ -28,7 +28,7 @@ def _fmt_log_line(
         ts_pretty = (ts or "").strip()[:16]
 
     who = (user_name or "").strip()
-    
+
     # Іконка генератора
     gen_icon = ""
     if generator_id == "emergency":
@@ -42,7 +42,7 @@ def _fmt_log_line(
         return f"• {ts_pretty} — {gen_icon}⏹ Стоп: <b>{shift_pretty(event_type)}</b> ({who})"
 
     if event_type == "refill":
-        liters = (str(value or "").strip().replace(",", "."))
+        liters = str(value or "").strip().replace(",", ".")
         extra = []
         if liters:
             extra.append(f"{liters} л")
@@ -90,10 +90,10 @@ def _fmt_log_line(
         tail = f" — <b>{val} год</b>" if val else ""
         who_tail = f" ({who})" if who else ""
         return f"• {ts_pretty} — 🕯 <b>Корекція: свічки</b>{tail}{who_tail}"
-    
+
     if event_type == "sync":
         return f"• {ts_pretty} — 🔄 <b>Синхронізація з Google Sheets</b> ({who})"
-    
+
     if event_type == "generator_switch":
         # value містить цільовий генератор
         target = (value or "").strip()
@@ -148,10 +148,7 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
         if page == 1:
             txt = "🕘 <b>Останні події</b>\n\nПоки немає записів."
         else:
-            txt = (
-                "🕘 <b>Останні події</b>\n\n"
-                f"Для сторінки <b>{page}</b> подій більше немає."
-            )
+            txt = "🕘 <b>Останні події</b>\n\n" f"Для сторінки <b>{page}</b> подій більше немає."
     else:
         lines = []
         for event_type, ts, u_name, value, driver_name, receipt_number, generator_id in rows:
@@ -159,10 +156,7 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
 
         start_idx = offset + 1
         end_idx = offset + len(rows)
-        txt = (
-            "🕘 <b>Останні події</b>\n"
-            f"Показано записи <b>{start_idx}–{end_idx}</b>.\n\n" + "\n".join(lines)
-        )
+        txt = "🕘 <b>Останні події</b>\n" f"Показано записи <b>{start_idx}–{end_idx}</b>.\n\n" + "\n".join(lines)
 
     # Побудова inline‑клавіатури з пагінацією
     kb_rows: list[list[InlineKeyboardButton]] = []
@@ -188,9 +182,7 @@ async def events_last(cb: types.CallbackQuery, state: FSMContext):
         kb_rows.append(nav_row)
 
     # Кнопка повернення на дашборд
-    kb_rows.append(
-        [InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]
-    )
+    kb_rows.append([InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")])
 
     kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
 

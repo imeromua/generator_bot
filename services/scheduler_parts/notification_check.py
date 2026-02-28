@@ -126,7 +126,8 @@ async def check_all_notifications(bot, state: dict) -> None:
         for uid in admin_ids:
             if _should_notify(uid, "fuel_critical", now):
                 await _notify_user(
-                    bot, uid,
+                    bot,
+                    uid,
                     f"🔴 <b>КРИТИЧНО: Паливо закінчується!</b>\n\n"
                     f"Залишок: <b>{current_fuel:.1f} л</b>\n"
                     f"⚠️ Необхідне негайне поповнення!",
@@ -138,7 +139,8 @@ async def check_all_notifications(bot, state: dict) -> None:
         for uid in admin_ids:
             if _should_notify(uid, "fuel_warning", now):
                 await _notify_user(
-                    bot, uid,
+                    bot,
+                    uid,
                     f"⚠️ <b>Увага: Низький рівень палива</b>\n\n"
                     f"Залишок: <b>{current_fuel:.1f} л</b>\n"
                     f"Рекомендується замовити паливо.",
@@ -150,16 +152,15 @@ async def check_all_notifications(bot, state: dict) -> None:
         try:
             last_start_date = state.get("last_start_date", "") or ""
             if last_start_date:
-                start_dt = datetime.strptime(
-                    f"{last_start_date} {last_start_str}", "%Y-%m-%d %H:%M"
-                )
+                start_dt = datetime.strptime(f"{last_start_date} {last_start_str}", "%Y-%m-%d %H:%M")
                 start_dt = start_dt.replace(tzinfo=config.KYIV)
                 shift_hours = (now - start_dt).total_seconds() / 3600.0
                 if shift_hours > 9:
                     for uid in admin_ids:
                         if _should_notify(uid, "long_shift", now):
                             await _notify_user(
-                                bot, uid,
+                                bot,
+                                uid,
                                 f"🛑 <b>Зміна триває {shift_hours:.1f} год!</b>\n\n"
                                 f"Можливо, забули зупинити зміну?\n"
                                 f"Запущено о {last_start_str}",
@@ -173,7 +174,8 @@ async def check_all_notifications(bot, state: dict) -> None:
         for uid in admin_ids:
             if _should_notify(uid, "maintenance_soon", now):
                 await _notify_user(
-                    bot, uid,
+                    bot,
+                    uid,
                     f"🔧 <b>Час техобслуговування!</b>\n\n"
                     f"Залишок до ТО: <b>{hours_to_service:.1f} год</b>\n"
                     f"Заплануйте техобслуговування.",

@@ -233,8 +233,7 @@ def ensure_postgres_database_exists():
                 pass
     except Exception as e:
         raise RuntimeError(
-            f"Failed to create Postgres database '{dbname}'. "
-            f"Check POSTGRES_ADMIN_DSN / permissions. Error: {e}"
+            f"Failed to create Postgres database '{dbname}'. " f"Check POSTGRES_ADMIN_DSN / permissions. Error: {e}"
         )
 
 
@@ -245,27 +244,27 @@ _pg_pool = None
 def get_postgres_pool():
     """Get or create global PostgreSQL connection pool."""
     global _pg_pool
-    
+
     if _pg_pool is None:
         if not _is_postgres():
             return None
-        
+
         if ConnectionPool is None:
             raise RuntimeError("psycopg_pool is not installed but DB_BACKEND=postgres")
-        
+
         dsn = (getattr(config, "POSTGRES_DSN", "") or "").strip()
         if not dsn:
             raise RuntimeError("POSTGRES_DSN is not set")
-        
+
         # Ensure database exists before creating pool
         ensure_postgres_database_exists()
-        
+
         # Create connection pool with reasonable defaults
         min_size = getattr(config, "PG_POOL_MIN_SIZE", 2)
         max_size = getattr(config, "PG_POOL_MAX_SIZE", 10)
         timeout = getattr(config, "PG_POOL_TIMEOUT", 30)
         max_idle = getattr(config, "PG_POOL_MAX_IDLE", 300)  # 5 minutes
-        
+
         try:
             _pg_pool = ConnectionPool(
                 conninfo=dsn,
@@ -277,20 +276,20 @@ def get_postgres_pool():
                 kwargs={
                     "autocommit": True,  # Match SQLite semantics
                     "connect_timeout": 10,
-                }
+                },
             )
             logging.info(f"✅ PostgreSQL connection pool initialized (min={min_size}, max={max_size})")
         except Exception as e:
             logging.error(f"❌ Failed to create connection pool: {e}")
             raise
-    
+
     return _pg_pool
 
 
 def close_postgres_pool():
     """Close PostgreSQL connection pool gracefully."""
     global _pg_pool
-    
+
     if _pg_pool is not None:
         try:
             _pg_pool.close()
@@ -376,7 +375,9 @@ def init_db():
             generator_id TEXT DEFAULT 'main'
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
             id INTEGER PRIMARY KEY,
             date TEXT,
@@ -385,9 +386,13 @@ def init_db():
             admin TEXT,
             generator_id TEXT DEFAULT 'main'
         )''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS user_personnel (user_id INTEGER PRIMARY KEY, personnel_name TEXT, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS user_ui (user_id INTEGER PRIMARY KEY, chat_id INTEGER, message_id INTEGER, FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE)'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
@@ -456,7 +461,9 @@ def init_db():
             generator_id TEXT DEFAULT 'main'
         )''')
         c.execute('''CREATE TABLE IF NOT EXISTS generator_state (key TEXT PRIMARY KEY, value TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS schedule (date TEXT, hour INTEGER, is_off INTEGER, PRIMARY KEY(date, hour))'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS maintenance (
             id BIGSERIAL PRIMARY KEY,
             date TEXT,
@@ -465,9 +472,13 @@ def init_db():
             admin TEXT,
             generator_id TEXT DEFAULT 'main'
         )''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS user_personnel (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, personnel_name TEXT)'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS personnel_names (name TEXT PRIMARY KEY)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)''')
+        c.execute(
+            '''CREATE TABLE IF NOT EXISTS user_ui (user_id BIGINT PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE, chat_id BIGINT, message_id BIGINT)'''
+        )
         c.execute('''CREATE TABLE IF NOT EXISTS user_messages (
             id BIGSERIAL PRIMARY KEY,
             user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -609,14 +620,16 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_shift_schedule_date ON shift_schedule(date)",
         "CREATE INDEX IF NOT EXISTS idx_shift_schedule_personnel ON shift_schedule(assigned_personnel_id)",
     ]
-    
+
     # PostgreSQL-specific optimized indexes
     if _is_postgres():
-        index_statements.extend([
-            "CREATE INDEX IF NOT EXISTS idx_logs_date_generator ON logs(timestamp, generator_id)",
-            "CREATE INDEX IF NOT EXISTS idx_logs_sync_generator ON logs(is_synced, generator_id) WHERE is_synced = 0",
-        ])
-    
+        index_statements.extend(
+            [
+                "CREATE INDEX IF NOT EXISTS idx_logs_date_generator ON logs(timestamp, generator_id)",
+                "CREATE INDEX IF NOT EXISTS idx_logs_sync_generator ON logs(is_synced, generator_id) WHERE is_synced = 0",
+            ]
+        )
+
     for stmt in index_statements:
         try:
             c.execute(stmt)
@@ -642,7 +655,6 @@ def init_db():
         ('sheet_offline', '0'),
         ('sheet_offline_since_ts', ''),
         ('sync_in_progress', '0'),
-
         # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
         ('active_generator', 'main'),
         ('emergency_total_hours', '0.0'),
@@ -671,6 +683,7 @@ def init_db():
     # Config tables (generator_config, global_config, config_history)
     try:
         from database.api.config import _ensure_tables, _seed_defaults
+
         _ensure_tables(conn)
         _seed_defaults(conn)
     except Exception as e:

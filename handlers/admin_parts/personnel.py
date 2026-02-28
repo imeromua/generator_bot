@@ -49,8 +49,10 @@ async def personnel_assign(cb: types.CallbackQuery):
     if not users:
         return await cb.message.edit_text("👥 Немає користувачів у БД.", reply_markup=admin_panel())
 
-    txt = "👥 <b>Персонал → прив'язка користувачів</b>\n\nОберіть користувача:" \
-          "\n<i>(натисніть, щоб призначити ПІБ з колонки 'ПЕРСОНАЛ')</i>"
+    txt = (
+        "👥 <b>Персонал → прив'язка користувачів</b>\n\nОберіть користувача:"
+        "\n<i>(натисніть, щоб призначити ПІБ з колонки 'ПЕРСОНАЛ')</i>"
+    )
 
     kb = []
     for uid, full_name, pers in users[:30]:
@@ -131,10 +133,10 @@ async def personnel_set(cb: types.CallbackQuery):
         return await cb.answer("⚠️ Список персоналу оновився. Відкрийте ще раз.", show_alert=True)
 
     db.set_personnel_for_user(uid, names[idx])
-    
+
     actor = actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     logger.info(f"👥 {actor} призначив {names[idx]} для user_id={uid}")
-    
+
     await cb.answer("✅ Призначено", show_alert=True)
     await personnel_choose_user(cb)
 
@@ -150,10 +152,10 @@ async def personnel_clear(cb: types.CallbackQuery):
         return await cb.answer("❌ Помилка", show_alert=True)
 
     db.set_personnel_for_user(uid, None)
-    
+
     actor = actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     logger.info(f"👥 {actor} зняв прив'язку для user_id={uid}")
-    
+
     await cb.answer("✅ Прив'язку знято", show_alert=True)
     await personnel_choose_user(cb)
 
@@ -165,7 +167,7 @@ async def personnel_list(cb: types.CallbackQuery):
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
     personnel = db.get_personnel_names()
-    
+
     if not personnel:
         txt = "👥 <b>Список персоналу</b>\n\n⚠️ Список пустий.\n\n<i>Додайте персонал або запустіть синхронізацію.</i>"
         kb = [
@@ -178,10 +180,7 @@ async def personnel_list(cb: types.CallbackQuery):
 
     kb = []
     for idx, name in enumerate(personnel[:40]):
-        kb.append([types.InlineKeyboardButton(
-            text=f"👤 {name}",
-            callback_data=f"personnel_manage_{idx}"
-        )])
+        kb.append([types.InlineKeyboardButton(text=f"👤 {name}", callback_data=f"personnel_manage_{idx}")])
 
     kb.append([types.InlineKeyboardButton(text="➕ Додати персонал", callback_data="add_personnel_start")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="personnel_menu")])
@@ -272,12 +271,12 @@ async def personnel_edit_start(cb: types.CallbackQuery, state: FSMContext):
         return await personnel_list(cb)
 
     old_name = personnel[idx]
-    
+
     await state.update_data(old_name=old_name)
     await state.set_state(EditPersonnelForm.new_name)
-    
+
     txt = f"✏️ <b>Редагування персоналу</b>\n\nПоточне ПІБ: <b>{old_name}</b>\n\nВведіть нове ПІБ:"
-    
+
     await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
 
@@ -289,7 +288,7 @@ async def personnel_edit_save(msg: types.Message, state: FSMContext):
 
     data = await state.get_data()
     old_name = data.get("old_name")
-    
+
     if not old_name:
         await state.clear()
         return await msg.answer("❌ Помилка: втрачено стан", reply_markup=back_to_admin())

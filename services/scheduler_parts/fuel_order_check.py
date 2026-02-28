@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 # Default thresholds (litres)
 THRESHOLD_DEFAULT = 50.0
-THRESHOLD_WINTER = 70.0   # October-March
-THRESHOLD_SUMMER = 50.0   # April-September
+THRESHOLD_WINTER = 70.0  # October-March
+THRESHOLD_SUMMER = 50.0  # April-September
 THRESHOLD_PRE_WEEKEND_BONUS = 0.20  # +20% before weekends
 
 # Debounce: minimum hours between repeat order suggestions
@@ -35,7 +35,7 @@ def _adaptive_threshold(now) -> float:
     threshold = THRESHOLD_WINTER if month in (10, 11, 12, 1, 2, 3) else THRESHOLD_SUMMER
     # Friday = 4, Saturday = 5 (isoweekday: Mon=1)
     if now.isoweekday() in (5, 6):  # pre-weekend
-        threshold *= (1 + THRESHOLD_PRE_WEEKEND_BONUS)
+        threshold *= 1 + THRESHOLD_PRE_WEEKEND_BONUS
     return threshold
 
 
@@ -109,10 +109,15 @@ async def check_fuel_order(bot, state: dict) -> None:
     )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Замовити 200л", callback_data="fuel_order:create:200"),
-        InlineKeyboardButton(text="❌ Пізніше", callback_data="fuel_order:skip"),
-    ]])
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Замовити 200л", callback_data="fuel_order:create:200"),
+                InlineKeyboardButton(text="❌ Пізніше", callback_data="fuel_order:skip"),
+            ]
+        ]
+    )
 
     for admin_id in config.ADMIN_IDS:
         try:

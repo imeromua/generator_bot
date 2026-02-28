@@ -57,13 +57,11 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
         SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
         FROM logs
         ORDER BY timestamp ASC
-    """
-    )
+    """)
     rows = cur.fetchall()
     conn.close()
 
@@ -242,11 +240,11 @@ def full_export():
             logger.info("➕ Додаємо новий рядок для дати %s (рядок %s)", date_str, row_idx)
 
         # Оновлюємо/записуємо лише дозволені колонки для цього рядка
-        dates = [[row_data[0]]]          # A
-        times = [row_data[1:9]]          # B..I
-        col_n = [[row_data[13]]]         # N
-        col_p = [[row_data[15]]]         # P
-        col_q = [[row_data[16]]]         # Q
+        dates = [[row_data[0]]]  # A
+        times = [row_data[1:9]]  # B..I
+        col_n = [[row_data[13]]]  # N
+        col_p = [[row_data[15]]]  # P
+        col_q = [[row_data[16]]]  # Q
 
         main_sheet.update(f"A{row_idx}:A{row_idx}", dates, value_input_option="USER_ENTERED")
         main_sheet.update(f"B{row_idx}:I{row_idx}", times, value_input_option="USER_ENTERED")

@@ -38,9 +38,9 @@ async def fuel_ordered(cb: types.CallbackQuery):
         new_text = (orig + note).strip() if orig else note.strip()
 
         # прибираємо кнопку, залишаємо лише "На головну" для зручності
-        kb = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]
-        ])
+        kb = types.InlineKeyboardMarkup(
+            inline_keyboard=[[types.InlineKeyboardButton(text="🏠 Дашборд", callback_data="home")]]
+        )
 
         await cb.message.edit_text(new_text, reply_markup=kb)
     except TelegramBadRequest as e:
@@ -64,6 +64,7 @@ async def fuel_order_create(cb: types.CallbackQuery):
         return await cb.answer("❌ Невірні дані", show_alert=True)
 
     from database.api.fuel_orders import create_order
+
     now = datetime.now(config.KYIV)
 
     try:
@@ -80,9 +81,15 @@ async def fuel_order_create(cb: types.CallbackQuery):
     note = f"\n\n✅ <b>Замовлення #{order_id} створено</b> ({liters:.0f} л)"
     updated_text = (orig + note).strip()
 
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="📄 Переглянути замовлення", url="https://generator-016.pp.ua/?tab=fuel-orders")]
-    ])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text="📄 Переглянути замовлення", url="https://generator-016.pp.ua/?tab=fuel-orders"
+                )
+            ]
+        ]
+    )
 
     try:
         await cb.message.edit_text(updated_text, reply_markup=kb, parse_mode="HTML")

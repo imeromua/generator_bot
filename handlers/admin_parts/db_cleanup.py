@@ -93,6 +93,5 @@ async def db_cleanup_execute(cb: types.CallbackQuery):
         logger.error(f"❌ Помилка очистки БД: {e}", exc_info=True)
         kb = [[InlineKeyboardButton(text="🔙 В адмінку", callback_data="admin_home")]]
         await cb.message.edit_text(
-            f"❌ <b>Помилка очистки</b>\n\n{e}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+            f"❌ <b>Помилка очистки</b>\n\n{e}", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
         )

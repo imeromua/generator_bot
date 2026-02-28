@@ -1,4 +1,5 @@
 """DB API for fuel_orders table (Task 6)."""
+
 from database.models import get_connection
 
 VALID_STATUSES = ("pending", "ordered", "confirmed", "delivered", "cancelled")

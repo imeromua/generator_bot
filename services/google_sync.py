@@ -16,15 +16,9 @@ __all__ = ["sync_loop", "sync_canonical_state_once"]
 
 async def sync_loop() -> None:
     """Disabled background sync loop (no-op)."""
-    logger.info(
-        "Google Sheets runtime sync is disabled. "
-        "Manual import/export should be used instead."
-    )
+    logger.info("Google Sheets runtime sync is disabled. " "Manual import/export should be used instead.")
 
 
 async def sync_canonical_state_once() -> None:
     """Disabled one-shot sync (no-op)."""
-    logger.info(
-        "Google Sheets canonical state sync is disabled. "
-        "Manual import/export should be used instead."
-    )
+    logger.info("Google Sheets canonical state sync is disabled. " "Manual import/export should be used instead.")

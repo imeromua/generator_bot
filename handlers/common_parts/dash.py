@@ -20,6 +20,7 @@ except ImportError:
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
+
 router = Router()
 
 
@@ -38,16 +39,16 @@ def _format_sync_time(ts_str: str | None) -> str:
     """Форматує час синхронізації у зручному вигляді."""
     if not ts_str:
         return "ніколи"
-    
+
     try:
         # Парсимо час із бази
         dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
         dt = dt.replace(tzinfo=config.KYIV)
         now = datetime.now(config.KYIV)
-        
+
         # Обчислюємо різницю
         diff = now - dt
-        
+
         if diff.total_seconds() < 60:
             return "щойно"
         elif diff.total_seconds() < 3600:
@@ -101,7 +102,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
     # Отримуємо активний генератор
     active_gen = db.get_active_generator()
     gen_name = db.get_generator_name(active_gen)
-    
+
     # Іконка генератора
     if active_gen == "emergency":
         gen_icon = "⚠️"
@@ -126,7 +127,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
                 "maintenance": "🔧 планове ТО",
             }
             mnt_name = mnt_names.get(mnt_type, "ТО")
-            
+
             if mnt_hours <= 0:
                 to_service_str = f"⚠️ <b>ТЕРМІНОВЕ!</b> Потрібно {mnt_name}"
             else:
@@ -171,7 +172,7 @@ def _build_dash_text(user_id: int, user_name: str, banner: str | None = None) ->
         fuel_rate_for_calc = db.get_fuel_consumption_rate()
     except Exception:
         fuel_rate_for_calc = config.FUEL_CONSUMPTION
-    
+
     hours_left = current_fuel / fuel_rate_for_calc if fuel_rate_for_calc > 0 else 0
     hours_left_hhmm = format_hours_hhmm(hours_left)
 
@@ -218,6 +219,7 @@ async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: st
     # Раніше тут була runtime-синхронізація з Sheets; зараз модуль services.google_sync — no-op.
     try:
         from services.google_sync import sync_canonical_state_once
+
         await sync_canonical_state_once()
     except Exception:
         pass
@@ -262,19 +264,19 @@ async def show_dash(msg: types.Message, user_id: int, user_name: str, banner: st
 async def main_menu_callback(cb: types.CallbackQuery, state: FSMContext):
     """Повертає користувача на головну сторінку."""
     await state.clear()
-    
+
     user_id = cb.from_user.id
     user_info = db.get_user(user_id)
     user_name = user_info[1] if user_info else cb.from_user.full_name
-    
+
     txt, markup = _build_dash_text(user_id, user_name)
-    
+
     await cb.message.edit_text(txt, reply_markup=markup)
-    
+
     # Зберігаємо UI message ID
     try:
         db.set_ui_message(user_id, cb.message.chat.id, cb.message.message_id)
     except Exception:
         pass
-    
+
     await cb.answer()

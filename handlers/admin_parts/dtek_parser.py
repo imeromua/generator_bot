@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+
 @router.message(F.text & ~F.text.startswith("/"), StateFilter(None))
 async def check_dtek_post(msg: types.Message):
     """Перевіряє кожен текст: чи це графік? (тільки для адмінів)"""

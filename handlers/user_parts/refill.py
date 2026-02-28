@@ -104,8 +104,7 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
     driver_name = cb.data.split("_", 1)[1]
     await state.update_data(driver=driver_name)
     await cb.message.edit_text(
-        f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято?",
-        reply_markup=_fuel_quick_buttons()
+        f"Водій: <b>{driver_name}</b>\n🔢 Скільки літрів прийнято?", reply_markup=_fuel_quick_buttons()
     )
     await state.set_state(RefillForm.liters)
     await cb.answer()
@@ -115,27 +114,35 @@ async def refill_driver(cb: types.CallbackQuery, state: FSMContext):
 async def refill_quick_amount(cb: types.CallbackQuery, state: FSMContext):
     """FIX #21: Обробка швидких кнопок вибору кількості палива."""
     fuel_type = cb.data.split("_")[1]
-    
+
     if fuel_type == "custom":
         # Користувач хоче ввести вручну
         await cb.message.edit_text(
             f"🔢 Введіть кількість літрів (числом):",
-            reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+            reply_markup=main_dashboard(
+                'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager',
+                db.get_state().get('active_shift', 'none'),
+                db.get_today_completed_shifts(),
+            ),
         )
         await cb.answer()
         return
-    
+
     # Швидкий вибір: 20, 40, 60, 80
     try:
         liters = float(fuel_type)
     except Exception:
         await cb.answer("⚠️ Помилка вибору кількості", show_alert=True)
         return
-    
+
     await state.update_data(liters=liters)
     await cb.message.edit_text(
         f"Літри: <b>{liters:.0f} л</b>\n🧾 Введіть <b>номер чека</b>:",
-        reply_markup=main_dashboard('admin' if cb.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+        reply_markup=main_dashboard(
+            'admin' if cb.from_user.id in config.ADMIN_IDS else 'manager',
+            db.get_state().get('active_shift', 'none'),
+            db.get_today_completed_shifts(),
+        ),
     )
     await state.set_state(RefillForm.receipt)
     await cb.answer()
@@ -163,7 +170,11 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
                     chat_id=chat_id,
                     message_id=message_id,
                     text=f"Літри: <b>{liters:.1f} л</b>\n🧾 Введіть <b>номер чека</b>:",
-                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                    reply_markup=main_dashboard(
+                        'admin' if msg.from_user.id in config.ADMIN_IDS else 'manager',
+                        db.get_state().get('active_shift', 'none'),
+                        db.get_today_completed_shifts(),
+                    ),
                 )
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e).lower():
@@ -178,7 +189,11 @@ async def refill_ask_receipt(msg: types.Message, state: FSMContext):
                     chat_id=chat_id,
                     message_id=message_id,
                     text="❌ Введіть кількість літрів числом (1..500).",
-                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                    reply_markup=main_dashboard(
+                        'admin' if msg.from_user.id in config.ADMIN_IDS else 'manager',
+                        db.get_state().get('active_shift', 'none'),
+                        db.get_today_completed_shifts(),
+                    ),
                 )
             except Exception:
                 pass
@@ -216,7 +231,11 @@ async def refill_save(msg: types.Message, state: FSMContext):
                     chat_id=chat_id,
                     message_id=message_id,
                     text=err_txt,
-                    reply_markup=main_dashboard('admin' if msg.from_user.id in config.ADMIN_IDS else 'manager', db.get_state().get('active_shift', 'none'), db.get_today_completed_shifts())
+                    reply_markup=main_dashboard(
+                        'admin' if msg.from_user.id in config.ADMIN_IDS else 'manager',
+                        db.get_state().get('active_shift', 'none'),
+                        db.get_today_completed_shifts(),
+                    ),
                 )
             except Exception:
                 pass
@@ -254,31 +273,31 @@ async def refill_save(msg: types.Message, state: FSMContext):
     try:
         conn = get_connection()
         begin_transaction(conn)
-        
+
         # Add log entry
         db.add_log("refill", operator_personnel, str(liters), driver, receipt=receipt_num, conn=conn)
-        
+
         # Update fuel state atomically
         db.update_fuel(liters, conn=conn)
-        
+
         conn.commit()
-        
+
     except Exception as e:
         if conn:
             try:
                 conn.rollback()
             except Exception:
                 pass
-        
+
         await state.clear()
-        
+
         # FIX #25: Notify error
         notify_error(msg.from_user.id, f"❌ Помилка збереження заправки: {str(e)[:50]}")
-        
+
         err_banner = f"❌ <b>Помилка збереження заправки</b>\n\n{e}"
         await show_dash(msg, user[0], user[1], banner=err_banner)
         return
-        
+
     finally:
         if conn:
             try:
@@ -289,10 +308,7 @@ async def refill_save(msg: types.Message, state: FSMContext):
     await state.clear()
 
     # FIX #25: Notify success
-    notify_success(
-        msg.from_user.id, 
-        f"✅ Прийнято {float(liters):.1f} л палива (Водій: {driver}, Чек: {receipt_num})"
-    )
+    notify_success(msg.from_user.id, f"✅ Прийнято {float(liters):.1f} л палива (Водій: {driver}, Чек: {receipt_num})")
 
     banner = (
         f"✅ <b>Паливо прийнято</b>\n"

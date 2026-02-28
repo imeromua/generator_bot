@@ -11,16 +11,16 @@ MAX_FUEL_CAPACITY = 500.0  # Maximum reasonable fuel capacity in liters
 
 def update_fuel(liters_delta, conn=None):
     """Update fuel with atomic SQL operation to prevent race conditions.
-    
+
     FIX #10: Use SQL-level atomic update instead of read-modify-write pattern.
     This prevents lost updates in concurrent scenarios.
-    
+
     FIX #11: Add maximum fuel capacity validation.
-    
+
     Args:
         liters_delta: Amount to add (positive) or subtract (negative)
         conn: Optional existing connection for transactional operations
-    
+
     Returns:
         New fuel value after update
     """
@@ -28,7 +28,7 @@ def update_fuel(liters_delta, conn=None):
     if conn is None:
         conn = get_connection()
         close_conn = True
-    
+
     try:
         # FIX #10: Atomic update at SQL level using CASE to enforce bounds
         # This ensures read-modify-write happens atomically without races
@@ -43,21 +43,21 @@ def update_fuel(liters_delta, conn=None):
             )
             WHERE key = 'current_fuel'
         """
-        
+
         delta = float(liters_delta or 0.0)
         conn.execute(query, (delta, delta, MAX_FUEL_CAPACITY, MAX_FUEL_CAPACITY, delta))
-        
+
         # Read back the new value
         new_val = _conn_get_state_float(conn, "current_fuel", 0.0)
-        
+
         # Log if we hit limits
         if new_val == 0.0 and delta < 0:
             logging.info(f"⛽ Fuel update hit minimum (0.0L), delta was {delta:.2f}L")
         elif new_val == MAX_FUEL_CAPACITY and delta > 0:
             logging.warning(f"⛽ Fuel update hit maximum ({MAX_FUEL_CAPACITY}L), delta was {delta:.2f}L")
-        
+
         return new_val
-    
+
     except Exception as e:
         logging.error(f"Помилка оновлення палива: {e}")
         return 0.0

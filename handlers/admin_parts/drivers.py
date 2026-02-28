@@ -46,7 +46,7 @@ async def drivers_list(cb: types.CallbackQuery):
         return await cb.answer("⛔ Тільки для адмінів", show_alert=True)
 
     drivers = db.get_drivers()
-    
+
     if not drivers:
         txt = "🚛 <b>Список водіїв</b>\n\n⚠️ Список пустий.\n\n<i>Додайте водіїв або запустіть синхронізацію.</i>"
         kb = [
@@ -59,10 +59,7 @@ async def drivers_list(cb: types.CallbackQuery):
 
     kb = []
     for idx, driver in enumerate(drivers[:40]):
-        kb.append([types.InlineKeyboardButton(
-            text=f"👤 {driver}",
-            callback_data=f"driver_manage_{idx}"
-        )])
+        kb.append([types.InlineKeyboardButton(text=f"👤 {driver}", callback_data=f"driver_manage_{idx}")])
 
     kb.append([types.InlineKeyboardButton(text="➕ Додати водія", callback_data="add_driver_start")])
     kb.append([types.InlineKeyboardButton(text="🔙 Назад", callback_data="drivers_menu")])
@@ -153,12 +150,12 @@ async def driver_edit_start(cb: types.CallbackQuery, state: FSMContext):
         return await drivers_list(cb)
 
     old_name = drivers[idx]
-    
+
     await state.update_data(old_name=old_name)
     await state.set_state(EditDriverForm.new_name)
-    
+
     txt = f"✏️ <b>Редагування водія</b>\n\nПоточне ім'я: <b>{old_name}</b>\n\nВведіть нове ім'я:"
-    
+
     await cb.message.edit_text(txt, reply_markup=back_to_admin())
 
 
@@ -170,7 +167,7 @@ async def driver_edit_save(msg: types.Message, state: FSMContext):
 
     data = await state.get_data()
     old_name = data.get("old_name")
-    
+
     if not old_name:
         await state.clear()
         return await msg.answer("❌ Помилка: втрачено стан", reply_markup=back_to_admin())

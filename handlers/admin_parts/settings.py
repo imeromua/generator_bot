@@ -30,54 +30,62 @@ class SettingsStates(StatesGroup):
 # Keyboards
 # ---------------------------------------------------------------------------
 
+
 def _settings_menu_kb() -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [
-            types.InlineKeyboardButton(
-                text="🔋 Основний ✏️",
-                callback_data="cfg_edit_rate:main",
-            ),
-            types.InlineKeyboardButton(
-                text="⚡ Аварійний ✏️",
-                callback_data="cfg_edit_rate:emergency",
-            ),
-        ],
-        [
-            types.InlineKeyboardButton(
-                text="💰 Вартість палива ✏️",
-                callback_data="cfg_edit_price",
-            ),
-        ],
-        [
-            types.InlineKeyboardButton(
-                text="📜 Історія змін",
-                callback_data="cfg_history",
-            ),
-        ],
-        [
-            types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home"),
-        ],
-    ])
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(
+                    text="🔋 Основний ✏️",
+                    callback_data="cfg_edit_rate:main",
+                ),
+                types.InlineKeyboardButton(
+                    text="⚡ Аварійний ✏️",
+                    callback_data="cfg_edit_rate:emergency",
+                ),
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text="💰 Вартість палива ✏️",
+                    callback_data="cfg_edit_price",
+                ),
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text="📜 Історія змін",
+                    callback_data="cfg_history",
+                ),
+            ],
+            [
+                types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home"),
+            ],
+        ]
+    )
 
 
 def _confirm_kb(confirm_data: str) -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [
-            types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=confirm_data),
-            types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel"),
-        ],
-    ])
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=confirm_data),
+                types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel"),
+            ],
+        ]
+    )
 
 
 def _back_to_settings_kb() -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="◀️ До налаштувань", callback_data="cfg_settings")],
-    ])
+    return types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="◀️ До налаштувань", callback_data="cfg_settings")],
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _gen_label(generator_id: str) -> str:
     return "🔋 Основний" if generator_id == "main" else "⚡ Аварійний"
@@ -101,6 +109,7 @@ def _settings_text() -> str:
 # Handlers
 # ---------------------------------------------------------------------------
 
+
 @router.callback_query(F.data == "cfg_settings")
 async def settings_menu(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -118,6 +127,7 @@ async def settings_menu(cb: types.CallbackQuery, state: FSMContext):
 
 # --- FUEL RATE ---
 
+
 @router.callback_query(F.data.startswith("cfg_edit_rate:"))
 async def cfg_edit_rate_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -132,15 +142,18 @@ async def cfg_edit_rate_start(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(generator_id=generator_id, current_rate=current)
 
     from database.api.config import FUEL_CONSUMPTION_MIN, FUEL_CONSUMPTION_MAX
+
     txt = (
         f"🔧 <b>Зміна витрати палива</b>\n"
         f"Генератор: {_gen_label(generator_id)}\n\n"
         f"Поточне значення: <b>{current:.1f} л/год</b>\n\n"
         f"Введіть нове значення ({FUEL_CONSUMPTION_MIN} — {FUEL_CONSUMPTION_MAX} л/год):"
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel")],
-    ])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel")],
+        ]
+    )
     await cb.message.edit_text(txt, reply_markup=kb)
     await cb.answer()
 
@@ -201,8 +214,11 @@ async def cfg_confirm_rate(cb: types.CallbackQuery, state: FSMContext):
 
     actor = actor_name(cb.from_user.id, first_name=cb.from_user.first_name)
     ok = db.set_generator_param(
-        generator_id, "fuel_consumption_rate", new_value,
-        cb.from_user.id, actor,
+        generator_id,
+        "fuel_consumption_rate",
+        new_value,
+        cb.from_user.id,
+        actor,
     )
     if not ok:
         await state.clear()
@@ -210,7 +226,9 @@ async def cfg_confirm_rate(cb: types.CallbackQuery, state: FSMContext):
         return await cb.answer()
 
     db.log_admin_action(
-        cb.from_user.id, actor, "config_generator_set",
+        cb.from_user.id,
+        actor,
+        "config_generator_set",
         f"Змінено fuel_consumption_rate для {generator_id}: {old_value:.1f} → {new_value:.1f} л/год",
         target_entity=f"generator:{generator_id}",
         old_value=old_value,
@@ -232,6 +250,7 @@ async def cfg_confirm_rate(cb: types.CallbackQuery, state: FSMContext):
 
 # --- FUEL PRICE ---
 
+
 @router.callback_query(F.data == "cfg_edit_price")
 async def cfg_edit_price_start(cb: types.CallbackQuery, state: FSMContext):
     if cb.from_user.id not in config.ADMIN_IDS:
@@ -248,9 +267,11 @@ async def cfg_edit_price_start(cb: types.CallbackQuery, state: FSMContext):
         f"Поточна ціна: <b>{current:.0f} грн/л</b>\n\n"
         f"Введіть нову вартість палива ({FUEL_PRICE_MIN:.0f} — {FUEL_PRICE_MAX:.0f} грн/л):"
     )
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel")],
-    ])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="❌ Скасувати", callback_data="cfg_cancel")],
+        ]
+    )
     await cb.message.edit_text(txt, reply_markup=kb)
     await cb.answer()
 
@@ -269,9 +290,7 @@ async def cfg_edit_price_input(message: types.Message, state: FSMContext):
     try:
         new_value = float(text.replace(",", "."))
     except ValueError:
-        await message.answer(
-            f"❌ Невірне значення. Введіть число від {FUEL_PRICE_MIN:.0f} до {FUEL_PRICE_MAX:.0f}:"
-        )
+        await message.answer(f"❌ Невірне значення. Введіть число від {FUEL_PRICE_MIN:.0f} до {FUEL_PRICE_MAX:.0f}:")
         return
 
     if not (FUEL_PRICE_MIN <= new_value <= FUEL_PRICE_MAX):
@@ -310,7 +329,9 @@ async def cfg_confirm_price(cb: types.CallbackQuery, state: FSMContext):
         return await cb.answer()
 
     db.log_admin_action(
-        cb.from_user.id, actor, "config_global_set",
+        cb.from_user.id,
+        actor,
+        "config_global_set",
         f"Змінено fuel_price: {old_value:.0f} → {new_value:.0f} грн/л",
         target_entity="global:fuel_price",
         old_value=old_value,
@@ -331,6 +352,7 @@ async def cfg_confirm_price(cb: types.CallbackQuery, state: FSMContext):
 
 
 # --- HISTORY ---
+
 
 @router.callback_query(F.data == "cfg_history")
 async def cfg_history(cb: types.CallbackQuery, state: FSMContext):
@@ -364,20 +386,20 @@ async def cfg_history(cb: types.CallbackQuery, state: FSMContext):
                 old_str = f"{old_v:.0f}" if old_v is not None else "—"
                 new_str = f"{new_v:.0f}"
 
-            lines.append(
-                f"<code>{dt_str}</code> | {actor}\n"
-                f"  {label}: {old_str} → {new_str} {unit}\n"
-            )
+            lines.append(f"<code>{dt_str}</code> | {actor}\n" f"  {label}: {old_str} → {new_str} {unit}\n")
         txt = "\n".join(lines)
 
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="◀️ До налаштувань", callback_data="cfg_settings")],
-    ])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="◀️ До налаштувань", callback_data="cfg_settings")],
+        ]
+    )
     await cb.message.edit_text(txt, reply_markup=kb)
     await cb.answer()
 
 
 # --- CANCEL ---
+
 
 @router.callback_query(F.data == "cfg_cancel")
 async def cfg_cancel(cb: types.CallbackQuery, state: FSMContext):

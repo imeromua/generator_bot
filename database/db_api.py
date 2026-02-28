@@ -20,8 +20,8 @@ from database.api.personnel import (
     delete_personnel_name,
 )
 from database.api.drivers import (
-    add_driver, 
-    get_drivers, 
+    add_driver,
+    get_drivers,
     update_driver,
     delete_driver,
     sync_drivers_from_sheet,
@@ -59,8 +59,8 @@ from database.api.logs import (
     get_refills_for_date,
 )
 from database.api.maintenance import (
-    update_hours, 
-    set_total_hours, 
+    update_hours,
+    set_total_hours,
     record_maintenance,
     get_maintenance_history,
     get_maintenance_stats,
@@ -99,7 +99,6 @@ from database.api.config import (
     get_fuel_consumption_rate_db,
     get_fuel_price_db,
 )
-
 
 __all__ = [
     # users

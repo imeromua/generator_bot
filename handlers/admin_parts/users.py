@@ -22,7 +22,7 @@ async def users_view(cb: types.CallbackQuery):
             txt += f"👤 {name}\n🆔 <code>{uid}</code>\n\n"
         txt += "<i>Натисніть на ID, щоб скопіювати.</i>"
 
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
-    ])
+    kb = types.InlineKeyboardMarkup(
+        inline_keyboard=[[types.InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]]
+    )
     await cb.message.edit_text(txt, reply_markup=kb)

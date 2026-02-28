@@ -5,7 +5,6 @@ from aiogram.fsm.context import FSMContext
 import config
 import database.db_api as db
 
-
 router = Router()
 
 
@@ -72,7 +71,7 @@ async def cmd_help(msg: types.Message):
     await _delete_old_ui_message(msg.from_user.id, msg.bot)
 
     sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
-    
+
     # FIX: Зберігаємо нове UI message ID
     try:
         db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
@@ -116,7 +115,7 @@ async def cmd_privacy(msg: types.Message):
     await _delete_old_ui_message(msg.from_user.id, msg.bot)
 
     sent = await msg.answer(txt, reply_markup=_nav_kb(msg.from_user.id))
-    
+
     # FIX: Зберігаємо нове UI message ID
     try:
         db.set_ui_message(msg.from_user.id, sent.chat.id, sent.message_id)
@@ -131,11 +130,11 @@ async def cb_home(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
     from handlers.common_parts.dash import show_dash
     from handlers.user_parts.utils import ensure_user
-    
+
     user = ensure_user(cb.from_user.id, cb.from_user.first_name)
     if not user:
         await cb.answer("⚠️ Спочатку натисніть /start", show_alert=True)
         return
-    
+
     await show_dash(cb.message, user[0], user[1])
     await cb.answer()

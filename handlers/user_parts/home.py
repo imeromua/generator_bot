@@ -7,5 +7,4 @@ but is intentionally empty.
 
 from aiogram import Router
 
-
 router = Router()

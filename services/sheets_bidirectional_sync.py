@@ -174,13 +174,11 @@ def _get_db_data_by_date() -> dict[str, dict]:
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
         SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
         FROM logs
         ORDER BY timestamp ASC
-    """
-    )
+    """)
     rows = cur.fetchall()
     conn.close()
 
@@ -415,7 +413,7 @@ def _write_sheets_to_db(date: str, sheets_data: dict, conn):
 
 def _sync_references_from_sheets_to_db(sheets_data: dict, report: SyncReport):
     """Синхронізує довідники водіїв та персоналу: Sheets → БД.
-    
+
     Додає нових водіїв/персонал з Sheets що відсутні в БД.
     """
     conn = get_connection()
@@ -459,7 +457,7 @@ def _sync_references_from_sheets_to_db(sheets_data: dict, report: SyncReport):
 
 def _write_references_to_sheets(worksheet, report: SyncReport):
     """Записує довідники водіїв та персоналу: БД → Sheets.
-    
+
     Записує всіх водіїв з БД в колонку R (28) та персонал в S (29) рядка 2.
     Формат: через кому, без дублікатів.
     """
@@ -475,12 +473,12 @@ def _write_references_to_sheets(worksheet, report: SyncReport):
         # Записуємо в рядок 2 (перший рядок з даними після заголовка)
         # Колонка R (індекс 17, але в нотації A1 це R)
         # Колонка S (індекс 18, але в нотації A1 це S)
-        
+
         if drivers_str:
             worksheet.update("R2", [[drivers_str]], value_input_option="USER_ENTERED")
             report.drivers_synced_to_sheets = len(drivers_list)
             logger.info(f"📤 Записано {len(drivers_list)} водіїв БД → Sheets (колонка R)")
-        
+
         if personnel_str:
             worksheet.update("S2", [[personnel_str]], value_input_option="USER_ENTERED")
             report.personnel_synced_to_sheets = len(personnel_list)
@@ -572,7 +570,9 @@ def bidirectional_sync(user_name: str = "system") -> SyncReport:
                         expected = float(config.FUEL_CONSUMPTION)
                         if abs(fuel_rate - expected) > 0.1:
                             report.fuel_rate_warnings.append((date, fuel_rate))
-                            logger.warning(f"⚠️ {date}: витрати палива {fuel_rate} л/год не збігаються з config ({expected})")
+                            logger.warning(
+                                f"⚠️ {date}: витрати палива {fuel_rate} л/год не збігаються з config ({expected})"
+                            )
 
             except Exception as e:
                 report.errors.append((date, str(e)))
@@ -583,10 +583,10 @@ def bidirectional_sync(user_name: str = "system") -> SyncReport:
 
         # Синхронізуємо довідники ДВОНАПРАВЛЕНО
         logger.info("🔄 Синхронізація довідників...")
-        
+
         # 1. Sheets → БД (додаємо нових)
         _sync_references_from_sheets_to_db(sheets_data, report)
-        
+
         # 2. БД → Sheets (записуємо всіх)
         _write_references_to_sheets(worksheet, report)
 

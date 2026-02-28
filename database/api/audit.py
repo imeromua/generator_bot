@@ -68,8 +68,17 @@ def log_admin_action(
                    (timestamp, admin_user_id, admin_name, action_type,
                     action_description, target_entity, old_value, new_value, success)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (now, admin_user_id, admin_name, action_type,
-                 action_description, target_entity, old_json, new_json, success_int),
+                (
+                    now,
+                    admin_user_id,
+                    admin_name,
+                    action_type,
+                    action_description,
+                    target_entity,
+                    old_json,
+                    new_json,
+                    success_int,
+                ),
             )
         finally:
             try:

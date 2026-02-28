@@ -18,6 +18,7 @@ except ImportError:
         c = code.split('_')[0].lower() if '_' in code else code.lower()
         return mapping.get(c, code)
 
+
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,16 @@ def _format_sync_time(ts_str: str | None) -> str:
     """Форматує час синхронізації у зручному вигляді."""
     if not ts_str:
         return "ніколи"
-    
+
     try:
         # Парсимо час із бази
         dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
         dt = dt.replace(tzinfo=config.KYIV)
         now = datetime.now(config.KYIV)
-        
+
         # Обчислюємо різницю
         diff = now - dt
-        
+
         if diff.total_seconds() < 60:
             return "щойно"
         elif diff.total_seconds() < 3600:
@@ -92,7 +93,7 @@ async def adm_menu(cb: types.CallbackQuery, state: FSMContext):
     # Отримуємо активний генератор
     active_gen = db.get_active_generator()
     gen_name = db.get_generator_name(active_gen)
-    
+
     # Іконка генератора
     if active_gen == "emergency":
         gen_icon = "⚠️"

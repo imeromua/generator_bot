@@ -5,7 +5,6 @@ from handlers.common import show_dash
 from handlers.user_parts.utils import ensure_user
 from utils.time import now_kiev
 
-
 router = Router()
 
 
@@ -41,7 +40,9 @@ async def schedule_today(cb: types.CallbackQuery):
     ranges = _schedule_to_ranges(schedule)
     total_off = sum((e - s) for s, e in ranges)
 
-    now_status = "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now.hour, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
+    now_status = (
+        "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now.hour, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
+    )
 
     banner = f"📅 <b>Графік відключень на сьогодні</b> ({now.strftime('%d.%m.%Y')})\n\n"
 

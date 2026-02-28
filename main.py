@@ -47,7 +47,7 @@ def setup_logging():
                 filename=config.LOG_FILE,
                 maxBytes=config.LOG_MAX_BYTES,
                 backupCount=config.LOG_BACKUP_COUNT,
-                encoding='utf-8'
+                encoding='utf-8',
             )
             file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
             handlers.append(file_handler)
@@ -59,11 +59,7 @@ def setup_logging():
                 pass
 
     # Використовуємо force=True (Python 3.8+), щоб переконатися, що конфіг застосується
-    logging.basicConfig(
-        level=getattr(logging, config.LOG_LEVEL, logging.INFO),
-        handlers=handlers,
-        force=True
-    )
+    logging.basicConfig(level=getattr(logging, config.LOG_LEVEL, logging.INFO), handlers=handlers, force=True)
 
 
 logger = logging.getLogger(__name__)
@@ -253,10 +249,7 @@ async def run_polling_once(dp: Dispatcher):
         # Виклик ініціалізації БД
         await _run_blocking(db_models.init_db)
 
-        bot = Bot(
-            token=config.BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-        )
+        bot = Bot(token=config.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
         logger.info("🚀 Запуск фонових процесів...")
         tasks.append(asyncio.create_task(_run_background_forever("scheduler", scheduler_loop, bot), name="scheduler"))
@@ -266,6 +259,7 @@ async def run_polling_once(dp: Dispatcher):
             try:
                 webapp_app = create_webapp_app()
                 import uvicorn as _uvicorn
+
                 uvicorn_config = _uvicorn.Config(
                     webapp_app,
                     host=config.WEBAPP_HOST,
@@ -295,11 +289,7 @@ async def run_polling_once(dp: Dispatcher):
         except Exception as e:
             logger.warning(f"⚠️ Помилка очищення webhook (ігноруємо): {e}")
 
-        await dp.start_polling(
-            bot,
-            handle_signals=False,
-            allowed_updates=dp.resolve_used_update_types()
-        )
+        await dp.start_polling(bot, handle_signals=False, allowed_updates=dp.resolve_used_update_types())
 
     finally:
         # Зупинка Mini App веб-сервера

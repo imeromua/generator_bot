@@ -18,8 +18,7 @@ __all__ = [
 
 def _log_disabled(name: str) -> None:
     logger.info(
-        "Sheets runtime sync helper '%s' is disabled. "
-        "Use DB + manual import/export instead.",
+        "Sheets runtime sync helper '%s' is disabled. " "Use DB + manual import/export instead.",
         name,
     )
 
