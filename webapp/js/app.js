@@ -211,9 +211,9 @@
     }
 
     /**
-     * Форматує тривалість відключення
-     * @param {number} hours - кількість годин
-     * @returns {string} - "17:00" або "03:30"
+     * Форматує тривалість відключення у вигляді ЧЧ:ММ
+     * @param {number} hours - кількість годин (ціле число)
+     * @returns {string} - "17:00", "03:00" тощо
      */
     function formatHoursDuration(hours) {
         const h = Math.floor(hours);
@@ -277,7 +277,7 @@
         if (lastOutageData) {
             const start = String(lastOutageData.startHour).padStart(2, "0") + ":00";
             const end = String(lastOutageData.endHour).padStart(2, "0") + ":00";
-            showToast(`Найдовше відключення: ${start} - ${end} (${lastOutageData.duration} год)`, "info");
+            showToast(`Найдовше відключення: ${start} - ${end} (${formatHoursDuration(lastOutageData.duration)})`, "info");
         }
     });
 
