@@ -151,8 +151,9 @@
      */
     function formatHoursMinutes(totalHours) {
         if (totalHours === undefined || totalHours === null || totalHours === "") return "—";
-        const h = Math.floor(Number(totalHours));
-        const m = Math.round((Number(totalHours) - h) * 60);
+        let h = Math.floor(Number(totalHours));
+        let m = Math.round((Number(totalHours) - h) * 60);
+        if (m === 60) { h++; m = 0; }
         return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
     }
 
