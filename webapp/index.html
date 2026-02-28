@@ -11,6 +11,7 @@
 <body>
     <!-- Task 7: Dark Theme Switcher -->
     <div class="theme-switcher" id="theme-switcher" title="Тема оформлення">
+        <button class="theme-btn theme-btn-cycle" id="theme-cycle" onclick="ThemeManager.cycle()" title="Наступна тема">🌓</button>
         <button class="theme-btn" id="theme-light" onclick="ThemeManager.set('light')" title="Світла">🌞</button>
         <button class="theme-btn" id="theme-dark"  onclick="ThemeManager.set('dark')"  title="Темна">🌙</button>
         <button class="theme-btn active" id="theme-auto" onclick="ThemeManager.set('auto')" title="Авто">🔄</button>
@@ -851,4 +852,3 @@
     </script>
 </body>
 </html>
-

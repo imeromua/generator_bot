@@ -54,8 +54,9 @@ body {
 
 /* --- Tabs Navigation --- */
 .tabs {
-    display: flex;
-    gap: 2px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px;
     background: var(--tg-section-bg);
     border-radius: 12px;
     padding: 4px;
@@ -67,7 +68,6 @@ body {
 }
 
 .tab {
-    flex: 1;
     border: none;
     background: transparent;
     color: var(--tg-hint);
@@ -78,6 +78,9 @@ body {
     cursor: pointer;
     transition: all var(--transition);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 .tab.active {
@@ -1273,6 +1276,13 @@ body, body * {
     line-height: 1;
 }
 
+.theme-btn-cycle {
+    border-right: 1px solid var(--color-border, #e0e0e8);
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-right: 8px;
+}
+
 .theme-btn.active {
     background: var(--tg-btn, #2481cc);
 }
@@ -1280,6 +1290,10 @@ body, body * {
 [data-theme="dark"] .theme-switcher {
     background: var(--dark-surface);
     border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .theme-btn-cycle {
+    border-right-color: var(--dark-border);
 }
 
 /* Notification settings styles */
