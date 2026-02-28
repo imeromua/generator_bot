@@ -88,6 +88,17 @@ from database.api.audit import (
     get_audit_logs,
     count_audit_logs,
 )
+from database.api.config import (
+    get_generator_param,
+    get_generator_config,
+    set_generator_param,
+    get_global_param,
+    get_global_config,
+    set_global_param,
+    get_config_history,
+    get_fuel_consumption_rate_db,
+    get_fuel_price_db,
+)
 
 
 __all__ = [
@@ -174,4 +185,14 @@ __all__ = [
     "log_admin_action",
     "get_audit_logs",
     "count_audit_logs",
+    # config
+    "get_generator_param",
+    "get_generator_config",
+    "set_generator_param",
+    "get_global_param",
+    "get_global_config",
+    "set_global_param",
+    "get_config_history",
+    "get_fuel_consumption_rate_db",
+    "get_fuel_price_db",
 ]

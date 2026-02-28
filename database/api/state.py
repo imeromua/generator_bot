@@ -349,12 +349,19 @@ def set_emergency_last_spark_change(hours: float):
     set_state("emergency_last_spark_change", str(float(hours)))
 
 
-def get_fuel_consumption_rate() -> float:
-    """Повертає витрати палива для активного генератора (л/год).
-    
-    Основний: config.FUEL_CONSUMPTION
-    Аварійний: config.EMERGENCY_FUEL_CONSUMPTION
+def get_fuel_consumption_rate(generator_id: str | None = None) -> float:
+    """Повертає витрати палива для активного або вказаного генератора (л/год).
+
+    Читає з БД (generator_config), з fallback до config.
+    Аварійний: generator_id='emergency' або якщо активний аварійний.
     """
-    if is_emergency_active():
+    if generator_id is None:
+        generator_id = "emergency" if is_emergency_active() else "main"
+    try:
+        from database.api.config import get_fuel_consumption_rate_db
+        return get_fuel_consumption_rate_db(generator_id)
+    except Exception:
+        pass
+    if generator_id == "emergency":
         return float(getattr(config, "EMERGENCY_FUEL_CONSUMPTION", config.FUEL_CONSUMPTION))
     return float(config.FUEL_CONSUMPTION)

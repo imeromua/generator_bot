@@ -11,6 +11,7 @@ from handlers.admin_parts.maintenance import router as maintenance_router
 from handlers.admin_parts.personnel import router as personnel_router
 from handlers.admin_parts.reports import router as reports_router
 from handlers.admin_parts.schedule import router as schedule_router
+from handlers.admin_parts.settings import router as settings_router
 from handlers.admin_parts.sync import router as sync_router
 from handlers.admin_parts.users import router as users_router
 
@@ -18,6 +19,7 @@ router = Router()
 
 # Підключаємо роутери частин адмінки
 router.include_router(home_router)
+router.include_router(settings_router)
 router.include_router(personnel_router)
 router.include_router(schedule_router)
 router.include_router(maintenance_router)
