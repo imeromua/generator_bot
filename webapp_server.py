@@ -16,6 +16,7 @@ import hmac
 import io
 import json
 import logging
+import math
 import os
 import sys
 from contextlib import contextmanager
@@ -1989,6 +1990,15 @@ async def api_shifts_analytics(request: web.Request) -> web.Response:
 # Analytics helpers
 # ---------------------------------------------------------------------------
 
+def _safe_round(v: float, ndigits: int = 1) -> float:
+    """Round a float, replacing non-finite values with 0.0."""
+    try:
+        f = float(v)
+        return round(f, ndigits) if math.isfinite(f) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str | None = None) -> list:
     """Збирає денну статистику з логів за вказаний діапазон дат.
 
@@ -2240,8 +2250,13 @@ async def api_analytics_efficiency(request: web.Request) -> web.Response:
 
         total_hours_avail = days * 24
         work_hours        = sum(d["work_hours"] for d in daily)
-        outage_hours      = sum(d["outage_hours"] for d in daily)
+        outage_hours      = float(sum(d["outage_hours"] for d in daily))
         maintenance_hours = 0.0
+        # Guard against NaN/Inf from summing DB values
+        if not math.isfinite(work_hours):
+            work_hours = 0.0
+        if not math.isfinite(outage_hours):
+            outage_hours = 0.0
         idle_hours = max(0.0, total_hours_avail - work_hours - outage_hours - maintenance_hours)
 
         # Розбивка по змінах
@@ -2269,21 +2284,21 @@ async def api_analytics_efficiency(request: web.Request) -> web.Response:
                 if start_ts:
                     h = (ts - start_ts).total_seconds() / 3600.0
                     if 0 < h < 24:
-                        fuel_rate = getattr(_cfg, "FUEL_CONSUMPTION", 5.0)
+                        fuel_rate = float(getattr(_cfg, "FUEL_CONSUMPTION", 5.0) or 5.0)
                         shift_hours[shift_key] = shift_hours.get(shift_key, 0.0) + h
                         shift_fuel[shift_key]  = shift_fuel.get(shift_key, 0.0) + h * fuel_rate
 
         return web.json_response({
             "pie": {
-                "work_hours":        round(work_hours, 1),
-                "idle_hours":        round(idle_hours, 1),
-                "outage_hours":      outage_hours,
-                "maintenance_hours": round(maintenance_hours, 1),
+                "work_hours":        _safe_round(work_hours),
+                "idle_hours":        _safe_round(idle_hours),
+                "outage_hours":      _safe_round(outage_hours),
+                "maintenance_hours": _safe_round(maintenance_hours),
             },
             "shifts": {
                 shift: {
-                    "hours":          round(shift_hours.get(shift, 0.0), 1),
-                    "fuel_consumed":  round(shift_fuel.get(shift, 0.0), 1),
+                    "hours":          _safe_round(shift_hours.get(shift, 0.0)),
+                    "fuel_consumed":  _safe_round(shift_fuel.get(shift, 0.0)),
                 }
                 for shift in ("m", "d", "e", "x")
             },
