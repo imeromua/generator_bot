@@ -11,18 +11,15 @@ Telegram Mini App — веб-сервер.
     WEBAPP_PORT=3000 python webapp_server.py
 """
 
-import hashlib
-import hmac
 import io
 import json
 import logging
 import math
 import os
 import sys
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, quote
+from urllib.parse import quote
 
 from aiohttp import web
 
@@ -37,14 +34,6 @@ except ImportError:
     MergedCell = None
     get_column_letter = None
 
-try:
-    from pdf_reports import generate_pdf_report, REPORTLAB_AVAILABLE
-except ImportError:  # pragma: no cover
-    REPORTLAB_AVAILABLE = False
-
-    def generate_pdf_report(*args, **kwargs) -> bytes:  # type: ignore[misc]
-        raise RuntimeError("ReportLab недоступний")
-
 # Додаємо кореневу директорію проєкту до sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -54,6 +43,13 @@ import config  # noqa: E402
 import database.models as db_models  # noqa: E402
 import database.db_api as db  # noqa: E402
 
+from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE  # noqa: E402
+from webapp.utils.validation import validate_init_data as _validate_init_data, extract_user as _extract_user  # noqa: E402
+from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
+from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
+from webapp.middleware.cors import cors_middleware  # noqa: E402
+from webapp.middleware.rate_limit import rate_limit_middleware  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -61,170 +57,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MAX_EVENTS_LIMIT = 100
 MAX_NAME_LENGTH = 100
-
-# ---------------------------------------------------------------------------
-# Telegram WebApp — валідація initData
-# ---------------------------------------------------------------------------
-
-def _validate_init_data(init_data: str, bot_token: str) -> dict | None:
-    """Перевіряє підпис Telegram WebApp initData.
-
-    Повертає розпарсені дані користувача або ``None`` якщо підпис
-    невалідний.
-
-    Алгоритм: https://core.telegram.org/bots/webapps#validating-data
-    """
-    if not init_data:
-        return None
-
-    parsed = parse_qs(init_data, keep_blank_values=True)
-    received_hash = parsed.pop("hash", [None])[0]
-    if not received_hash:
-        return None
-
-    # Формуємо data-check-string
-    items = []
-    for key in sorted(parsed):
-        val = parsed[key][0]
-        items.append(f"{key}={val}")
-    data_check_string = "\n".join(items)
-
-    # HMAC-SHA256
-    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    computed = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(computed, received_hash):
-        return None
-
-    # Витягуємо user
-    user_raw = parsed.get("user", [None])[0]
-    if user_raw:
-        try:
-            return json.loads(unquote(user_raw))
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    return {}
-
-
-def _extract_user(request: web.Request) -> dict | None:
-    """Витягує та валідує користувача з заголовка або query-параметра init_data."""
-    # Спочатку заголовок
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    # Якщо відсутній — перевіряємо query-параметр (для прямих завантажень)
-    if not init_data:
-        init_data = request.query.get("init_data", "")
-    if not init_data:
-        return None
-    bot_token = config.BOT_TOKEN or ""
-    return _validate_init_data(init_data, bot_token)
-
-
-# ---------------------------------------------------------------------------
-# Middleware — CORS
-# ---------------------------------------------------------------------------
-
-@web.middleware
-async def cors_middleware(request: web.Request, handler):
-    """Додає CORS-заголовки до всіх відповідей."""
-    if request.method == "OPTIONS":
-        resp = web.Response(status=204)
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Telegram-Init-Data"
-        return resp
-
-    try:
-        resp = await handler(request)
-    except web.HTTPException as exc:
-        resp = exc
-
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Telegram-Init-Data"
-    return resp
-
-
-# ---------------------------------------------------------------------------
-# Rate limiting (in-memory, per-IP, 100 req/min)
-# ---------------------------------------------------------------------------
-
-import time as _time
-from collections import defaultdict
-
-_rate_limit_counts: dict = defaultdict(list)
-_RATE_LIMIT_MAX = 100
-_RATE_LIMIT_WINDOW = 60  # seconds
-_RATE_LIMIT_CLEANUP_INTERVAL = 300  # clean stale IPs every 5 minutes
-_rate_limit_last_cleanup = 0.0
-
-
-@web.middleware
-async def rate_limit_middleware(request: web.Request, handler):
-    """Simple in-memory rate limiter: 100 requests per minute per IP."""
-    global _rate_limit_last_cleanup
-
-    if request.method == "OPTIONS":
-        return await handler(request)
-
-    ip = request.remote or "unknown"
-    now = _time.monotonic()
-    window_start = now - _RATE_LIMIT_WINDOW
-
-    # Periodically clean up IPs with no recent requests to prevent memory growth
-    if now - _rate_limit_last_cleanup > _RATE_LIMIT_CLEANUP_INTERVAL:
-        stale = [k for k, v in _rate_limit_counts.items() if not v or v[-1] < window_start]
-        for k in stale:
-            del _rate_limit_counts[k]
-        _rate_limit_last_cleanup = now
-
-    # Remove old entries for this IP
-    _rate_limit_counts[ip] = [t for t in _rate_limit_counts[ip] if t > window_start]
-
-    if len(_rate_limit_counts[ip]) >= _RATE_LIMIT_MAX:
-        logger.warning(f"⚠️ Rate limit exceeded for IP {ip}")
-        return web.json_response(
-            {"error": "Забагато запитів. Спробуйте пізніше."},
-            status=429,
-        )
-
-    _rate_limit_counts[ip].append(now)
-    return await handler(request)
-
-
-# ---------------------------------------------------------------------------
-# Утиліти для роботи з БД
-# ---------------------------------------------------------------------------
-
-@contextmanager
-def atomic_transaction():
-    """Context manager для безпечної роботи з транзакцією БД.
-
-    Відкриває з'єднання, починає транзакцію, при успіху виконує commit,
-    при помилці — rollback. З'єднання закривається у будь-якому випадку.
-    """
-    conn = db_models.get_connection()
-    try:
-        db_models.begin_transaction(conn)
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-def _get_admin_info(user: dict) -> tuple[int, str]:
-    """Extract (user_id, admin_name) from validated user dict."""
-    try:
-        user_id = int(user.get("id", 0))
-    except (TypeError, ValueError):
-        user_id = 0
-    user_info = db.get_user(user_id) if user_id else None
-    admin_name = user_info[1] if user_info else user.get("first_name", "Адмін")
-    return user_id, admin_name
-
 
 # ---------------------------------------------------------------------------
 # API — endpoints
@@ -410,16 +242,6 @@ async def api_schedule_week(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------------------
 # Нові API-ендпоінти для повного функціоналу Mini App
 # ---------------------------------------------------------------------------
-
-def _is_admin(user: dict | None) -> bool:
-    """Перевіряє чи є користувач адміністратором."""
-    if not user:
-        return False
-    try:
-        user_id = int(user.get("id", 0))
-    except (TypeError, ValueError):
-        return False
-    return bool(user_id and user_id in config.ADMIN_IDS)
 
 
 def _within_work_window(now_t, start_t, end_t) -> bool:
@@ -2490,19 +2312,17 @@ async def api_analytics_forecast(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
-# Task 12: PDF Report API
+# Enhanced Excel Report API (replaces PDF endpoint)
 # ---------------------------------------------------------------------------
 
-async def api_report_pdf(request: web.Request) -> web.Response:
-    """GET /api/report/pdf — генерація PDF-звіту."""
+async def api_report_excel_v2(request: web.Request) -> web.Response:
+    """GET /api/report/excel/v2?type=quick&days=30&generator=main — enhanced Excel report."""
     user = _extract_user(request)
     if not user:
         return web.json_response({"error": "Не авторизовано"}, status=401)
-    if not REPORTLAB_AVAILABLE:
-        return web.json_response(
-            {"error": "PDF-звіти недоступні. Встановіть ReportLab: pip install reportlab"},
-            status=503,
-        )
+    if not _EXCEL_RPT_AVAILABLE:
+        return web.json_response({"error": "Модуль openpyxl не встановлено"}, status=500)
+
     try:
         report_type = request.query.get("type", "quick")
         valid_types = ("quick", "detailed", "personnel", "technical", "financial")
@@ -2511,110 +2331,23 @@ async def api_report_pdf(request: web.Request) -> web.Response:
 
         days = int(request.query.get("days", "30"))
         days = max(1, min(days, 365))
-        gen_id = request.query.get("generator") or None
+        gen_id = (request.query.get("generator") or "").strip().lower() or None
+        if gen_id not in ("main", "emergency"):
+            gen_id = None
 
-        from utils.time import now_kiev
-        from database.api.generator import get_generator_stats
-        from database.api.maintenance import get_maintenance_stats
-        now = now_kiev()
-        start_dt = now - timedelta(days=days - 1)
+        now = datetime.now(config.KYIV)
+        excel_bytes = generate_excel_report(report_type, days, gen_id)
 
-        period_start = start_dt.strftime("%d.%m.%Y")
-        period_end   = now.strftime("%d.%m.%Y")
-
-        daily = _build_daily_stats(start_dt, now, gen_id)
-
-        total_hours = sum(d["work_hours"] for d in daily)
-        total_fuel  = sum(d["fuel_consumed"] for d in daily)
-        avg_rate    = total_fuel / total_hours if total_hours > 0 else 0.0
-        fuel_price  = getattr(config, "FUEL_PRICE", 50.0)
-        fuel_cost   = total_fuel * fuel_price
-        total_outage = sum(d["outage_hours"] for d in daily)
-        total_avail  = days * 24
-        efficiency   = round((total_outage / total_avail) * 100, 1) if total_avail > 0 else 0
-
-        main_stats = get_generator_stats("main")
-        emrg_stats = get_generator_stats("emergency")
-
-        mnt_stats = {}
-        try:
-            mnt_stats = get_maintenance_stats(gen_id or "main") or {}
-        except Exception:
-            pass
-
-        oil_interval   = getattr(config, "OIL_CHANGE_INTERVAL",   250)
-        spark_interval = getattr(config, "SPARK_CHANGE_INTERVAL",  500)
-        oil_h   = main_stats.get("last_oil_change", 0)
-        spark_h = main_stats.get("last_spark_change", 0)
-
-        # Заправки
-        from database.api.logs import get_logs_for_period
-        logs = get_logs_for_period(start_dt.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"), gen_id)
-        refill_history = [
-            {"date": row[1][:10], "liters": float(row[3] or 0), "driver": row[4] or "", "receipt": row[5] or ""}
-            for row in logs if row[0] == "refill"
-        ]
-
-        # Персонал
-        personnel_stats: list = []
-        pname_map: dict = {}
-        for row in logs:
-            event_type, ts_str, user_name = row[0], row[1], row[2]
-            if event_type in ("m_start", "d_start", "e_start", "x_start"):
-                pname_map[user_name] = pname_map.get(user_name, {"name": user_name, "shifts": 0, "hours": 0.0, "fuel": 0.0})
-                pname_map[user_name]["shifts"] += 1
-
-        for name, p in pname_map.items():
-            rate = getattr(config, "FUEL_CONSUMPTION", 5.0)
-            p["fuel"] = round(p["hours"] * rate, 1)
-            p["rate"] = rate
-            personnel_stats.append(p)
-
-        recommendations = []
-        if oil_h > oil_interval * 0.9:
-            recommendations.append("Заміна мастила — виконайте ТО найближчим часом")
-        if spark_h > spark_interval * 0.9:
-            recommendations.append("Заміна свічок — наближається термін")
-        if total_fuel > 0 and avg_rate > 7.0:
-            recommendations.append("Підвищена витрата палива — перевірте технічний стан")
-
-        report_data = {
-            "total_hours":       round(total_hours, 1),
-            "total_fuel":        round(total_fuel, 1),
-            "avg_rate":          round(avg_rate, 3),
-            "fuel_cost":         round(fuel_cost, 0),
-            "efficiency":        efficiency,
-            "maintenance_count": 0,
-            "fuel_price":        fuel_price,
-            "refill_history":    refill_history,
-            "daily_stats":       daily,
-            "personnel_stats":   personnel_stats,
-            "generator_stats": [
-                {"name": "Основний",   "total_hours": main_stats.get("total_hours", 0), "total_fuel": 0},
-                {"name": "Аварійний",  "total_hours": emrg_stats.get("total_hours", 0), "total_fuel": 0},
-            ],
-            "maintenance": {
-                "last_oil":            "н/д",
-                "last_spark":          "н/д",
-                "oil_remaining":       round(max(0, oil_interval   - oil_h), 1),
-                "spark_remaining":     round(max(0, spark_interval - spark_h), 1),
-                "next_service_hours":  round(max(0, oil_interval   - oil_h), 1),
-            },
-            "recommendations": recommendations,
-        }
-
-        pdf_bytes = generate_pdf_report(report_type, period_start, period_end, report_data)
-
-        filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.pdf"
+        filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.xlsx"
         return web.Response(
-            body=pdf_bytes,
-            content_type="application/pdf",
+            body=excel_bytes,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
-    except RuntimeError as e:
-        return web.json_response({"error": str(e)}, status=503)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
     except Exception as e:
-        logger.exception("api_report_pdf error")
+        logger.exception("api_report_excel_v2 error")
         return web.json_response({"error": str(e)}, status=500)
 
 
@@ -2672,7 +2405,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/shifts/schedule", api_shifts_set)
     app.router.add_post("/api/shifts/auto", api_shifts_auto)
     app.router.add_get("/api/shifts/analytics", api_shifts_analytics)
-    # Tasks 9-12: Analytics, Trends, Forecast, PDF report endpoints
+    # Tasks 9-12: Analytics, Trends, Forecast, Enhanced Excel report endpoints
     app.router.add_get("/api/analytics/kpi", api_analytics_kpi)
     app.router.add_get("/api/analytics/fuel-timeline", api_analytics_fuel_timeline)
     app.router.add_get("/api/analytics/motor-hours", api_analytics_motor_hours)
@@ -2680,7 +2413,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/analytics/calendar", api_analytics_calendar)
     app.router.add_get("/api/analytics/trends", api_analytics_trends)
     app.router.add_get("/api/analytics/forecast", api_analytics_forecast)
-    app.router.add_get("/api/report/pdf", api_report_pdf)
+    app.router.add_get("/api/report/excel/v2", api_report_excel_v2)
 
     # Статичні файли (CSS, JS)
     webapp_dir = _PROJECT_ROOT / "webapp"

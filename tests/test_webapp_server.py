@@ -391,7 +391,7 @@ class TestApiShifts:
 
 
 # ---------------------------------------------------------------------------
-# Tasks 9-12: API /api/analytics, /api/report/pdf
+# Tasks 9-12: API /api/analytics, /api/report/excel/v2
 # ---------------------------------------------------------------------------
 
 class TestApiAnalytics:
@@ -440,9 +440,9 @@ class TestApiAnalytics:
         assert resp.status == 401
 
     @pytest.mark.asyncio
-    async def test_pdf_report_no_auth(self, client):
-        """Unauthenticated request should return 401."""
-        resp = await (await client).get("/api/report/pdf")
+    async def test_excel_v2_report_no_auth(self, client):
+        """Unauthenticated request to enhanced Excel endpoint should return 401."""
+        resp = await (await client).get("/api/report/excel/v2")
         assert resp.status == 401
 
     @pytest.mark.asyncio
@@ -544,40 +544,41 @@ class TestApiAnalytics:
         assert len(data["daily_forecast"]) == 7
 
     @pytest.mark.asyncio
-    async def test_pdf_report_invalid_type(self, client, monkeypatch):
+    async def test_excel_v2_report_invalid_type(self, client, monkeypatch):
         """Invalid report type should return 400."""
         monkeypatch.setattr(
             "webapp_server._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
-        resp = await (await client).get("/api/report/pdf?type=invalid")
+        resp = await (await client).get("/api/report/excel/v2?type=invalid")
         assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_pdf_report_reportlab_unavailable(self, client, monkeypatch):
-        """Returns 503 when ReportLab is not installed."""
+    async def test_excel_v2_report_quick(self, client, monkeypatch):
+        """Quick Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
             "webapp_server._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
-        monkeypatch.setattr("webapp_server.REPORTLAB_AVAILABLE", False)
-        resp = await (await client).get("/api/report/pdf?type=quick")
-        assert resp.status == 503
-        data = await resp.json()
-        assert "error" in data
+        resp = await (await client).get("/api/report/excel/v2?type=quick&days=7")
+        assert resp.status == 200
+        assert resp.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        body = await resp.read()
+        # xlsx files start with PK (ZIP magic bytes)
+        assert body[:2] == b"PK"
 
     @pytest.mark.asyncio
-    async def test_pdf_report_quick(self, client, monkeypatch):
-        """Quick PDF report should return PDF bytes."""
+    async def test_excel_v2_report_detailed(self, client, monkeypatch):
+        """Detailed Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
             "webapp_server._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
-        resp = await (await client).get("/api/report/pdf?type=quick&days=7")
+        resp = await (await client).get("/api/report/excel/v2?type=detailed&days=14")
         assert resp.status == 200
-        assert resp.content_type == "application/pdf"
+        assert resp.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         body = await resp.read()
-        assert body[:4] == b"%PDF"  # PDF magic bytes
+        assert body[:2] == b"PK"
 
 
 class TestMiniAppUi:
