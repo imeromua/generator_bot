@@ -6,6 +6,7 @@
     <title>⚡ Генератор — Mini App</title>
     <link rel="stylesheet" href="/css/style.css">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- Task 7: Dark Theme Switcher -->
@@ -28,6 +29,9 @@
             <button class="tab" data-tab="fuel-orders">⛽ Паливо</button>
             <button class="tab" data-tab="shifts">📆 Зміни</button>
             <button class="tab" data-tab="notifications">🔔 Сповіщення</button>
+            <button class="tab" data-tab="analytics">📊 Аналітика</button>
+            <button class="tab" data-tab="trends">📈 Тренди</button>
+            <button class="tab" data-tab="forecast">🔮 Прогнози</button>
             <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️ Адмін</button>
         </nav>
 
@@ -558,6 +562,176 @@
             <div class="spinner"></div>
             <p>Завантаження даних...</p>
         </div>
+
+        <!-- Вкладка: Аналітика (Task 9) -->
+        <section class="page" id="page-analytics">
+            <!-- Фільтр периоду -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📊 Аналітика</h2>
+                    <div class="analytics-period-filter" id="analytics-period-filter">
+                        <button class="btn-period active" data-days="7">7д</button>
+                        <button class="btn-period" data-days="14">14д</button>
+                        <button class="btn-period" data-days="30">30д</button>
+                        <button class="btn-period" data-days="90">90д</button>
+                    </div>
+                </div>
+            </div>
+            <!-- KPI картки -->
+            <div class="card">
+                <div class="card-header"><h2>📈 Ключові показники</h2></div>
+                <div class="card-body">
+                    <div class="kpi-grid" id="analytics-kpi-grid">
+                        <div class="kpi-card">
+                            <span class="kpi-icon">📊</span>
+                            <span class="kpi-label">Мотогодини</span>
+                            <span class="kpi-value" id="kpi-total-hours">—</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-icon">⏱</span>
+                            <span class="kpi-label">Сер. год/добу</span>
+                            <span class="kpi-value" id="kpi-avg-hours">—</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-icon">⛽</span>
+                            <span class="kpi-label">Витрата л/год</span>
+                            <span class="kpi-value" id="kpi-fuel-rate">—</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-icon">💰</span>
+                            <span class="kpi-label">Вартість</span>
+                            <span class="kpi-value" id="kpi-fuel-cost">—</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-icon">🎯</span>
+                            <span class="kpi-label">Відключень %</span>
+                            <span class="kpi-value" id="kpi-efficiency">—</span>
+                        </div>
+                        <div class="kpi-card">
+                            <span class="kpi-icon">⛽</span>
+                            <span class="kpi-label">Паливо всього</span>
+                            <span class="kpi-value" id="kpi-total-fuel">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Графік 1: Витрата палива (Timeline) -->
+            <div class="card">
+                <div class="card-header"><h2>⛽ Витрата палива</h2></div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="chart-fuel-timeline"></canvas>
+                    </div>
+                </div>
+            </div>
+            <!-- Графік 2: Мотогодини -->
+            <div class="card">
+                <div class="card-header"><h2>⏱ Мотогодини генераторів</h2></div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="chart-motor-hours"></canvas>
+                    </div>
+                </div>
+            </div>
+            <!-- Графік 3: Ефективність -->
+            <div class="card">
+                <div class="card-header"><h2>🎯 Ефективність роботи</h2></div>
+                <div class="card-body">
+                    <div class="charts-row">
+                        <div class="chart-container chart-half">
+                            <canvas id="chart-efficiency-pie"></canvas>
+                        </div>
+                        <div class="chart-container chart-half">
+                            <canvas id="chart-shifts-bar"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Графік 4: Календар відключень -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>📅 Календар відключень</h2>
+                    <div class="date-nav">
+                        <button class="btn-icon" id="cal-prev">◀</button>
+                        <span id="cal-month-label">—</span>
+                        <button class="btn-icon" id="cal-next">▶</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="outage-calendar" id="outage-calendar">
+                        <!-- Заповнюється JS -->
+                    </div>
+                    <div class="calendar-legend">
+                        <span class="cal-legend-item"><span class="cal-dot" style="background:#4CAF50"></span> 0 год</span>
+                        <span class="cal-legend-item"><span class="cal-dot" style="background:#FFC107"></span> 1-8 год</span>
+                        <span class="cal-legend-item"><span class="cal-dot" style="background:#FF5722"></span> 9-16 год</span>
+                        <span class="cal-legend-item"><span class="cal-dot" style="background:#B71C1C"></span> &gt;16 год</span>
+                    </div>
+                </div>
+            </div>
+            <!-- Кнопка PDF звіту -->
+            <div class="card">
+                <div class="card-header"><h2>📄 Звіт</h2></div>
+                <div class="card-body">
+                    <div class="report-controls">
+                        <select id="report-type-select" class="form-input">
+                            <option value="quick">Швидкий (1 стор.)</option>
+                            <option value="detailed">Детальний (3-5 стор.)</option>
+                            <option value="personnel">По персоналу</option>
+                            <option value="technical">Технічний</option>
+                            <option value="financial">Фінансовий</option>
+                        </select>
+                        <button class="btn btn-primary btn-full" id="btn-download-pdf" onclick="App.downloadPdfReport()">
+                            📄 Завантажити PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Тренди (Task 10) -->
+        <section class="page" id="page-trends">
+            <div class="card">
+                <div class="card-header">
+                    <h2>📈 Тренди та інсайти</h2>
+                    <button class="btn-sm" id="trends-refresh" onclick="App.loadTrends()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div id="trends-insights-list">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📊</div>
+                            <p>Натисніть 🔄 для завантаження</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Прогнози (Task 11) -->
+        <section class="page" id="page-forecast">
+            <div class="card">
+                <div class="card-header">
+                    <h2>🔮 Прогноз витрати палива</h2>
+                    <button class="btn-sm" id="forecast-refresh" onclick="App.loadForecast()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container" id="forecast-chart-container" style="display:none">
+                        <canvas id="chart-forecast"></canvas>
+                    </div>
+                    <div id="forecast-cards" class="forecast-cards">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><h2>🔧 ТО прогноз</h2></div>
+                <div class="card-body">
+                    <div id="forecast-maintenance">
+                        <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <!-- Модальне вікно: Прийом палива -->

@@ -195,6 +195,9 @@
             case "fuel-orders":   loadFuelOrders(); break;
             case "shifts":        loadShifts();    break;
             case "notifications": loadNotifications(); break;
+            case "analytics":     loadAnalytics(); break;
+            case "trends":        loadTrends(); break;
+            case "forecast":      loadForecast(); break;
         }
     }
 
@@ -1666,3 +1669,436 @@
     }
 
     init();
+
+    // -------------------------------------------------------------------
+    // Tasks 9-12: Аналітика, Тренди, Прогнози
+    // -------------------------------------------------------------------
+
+    // Поточний стан аналітики
+    let analyticsPeriod = 7;
+    let analyticsCharts = {};
+    let calendarMonth = new Date();
+
+    // --- Ініціалізація фільтрів периоду ---
+    document.querySelectorAll(".btn-period").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".btn-period").forEach((b) => b.classList.remove("active"));
+            btn.classList.add("active");
+            analyticsPeriod = parseInt(btn.dataset.days, 10);
+            loadAnalytics();
+        });
+    });
+
+    // Навігація по місяцях календаря
+    const calPrev = document.getElementById("cal-prev");
+    const calNext = document.getElementById("cal-next");
+    if (calPrev) calPrev.addEventListener("click", () => {
+        calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
+        loadCalendar();
+    });
+    if (calNext) calNext.addEventListener("click", () => {
+        calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
+        loadCalendar();
+    });
+
+    // --- Помічники Chart.js ---
+    function _destroyChart(id) {
+        if (analyticsCharts[id]) {
+            analyticsCharts[id].destroy();
+            delete analyticsCharts[id];
+        }
+    }
+
+    function _shortDate(dateStr) {
+        // "2025-03-15" → "15.03"
+        const parts = dateStr.split("-");
+        return parts[2] + "." + parts[1];
+    }
+
+    // --- loadAnalytics ---
+    async function loadAnalytics() {
+        try {
+            const [kpi, timeline, motorHours, efficiency] = await Promise.all([
+                API.getAnalyticsKpi(analyticsPeriod),
+                API.getFuelTimeline(analyticsPeriod),
+                API.getMotorHours(analyticsPeriod),
+                API.getEfficiency(analyticsPeriod),
+            ]);
+
+            // KPI картки
+            const fmt = (v, d) => (v !== undefined && v !== null ? (typeof v === "number" ? v.toFixed(d || 0) : v) : "—");
+            document.getElementById("kpi-total-hours") && (document.getElementById("kpi-total-hours").textContent = fmt(kpi.total_hours, 1) + " год");
+            document.getElementById("kpi-avg-hours")   && (document.getElementById("kpi-avg-hours").textContent   = fmt(kpi.avg_hours_per_day, 1) + " год");
+            document.getElementById("kpi-fuel-rate")   && (document.getElementById("kpi-fuel-rate").textContent   = fmt(kpi.avg_fuel_rate, 2) + " л/год");
+            document.getElementById("kpi-fuel-cost")   && (document.getElementById("kpi-fuel-cost").textContent   = fmt(kpi.fuel_cost, 0) + " грн");
+            document.getElementById("kpi-efficiency")  && (document.getElementById("kpi-efficiency").textContent  = fmt(kpi.efficiency_pct, 1) + "%");
+            document.getElementById("kpi-total-fuel")  && (document.getElementById("kpi-total-fuel").textContent  = fmt(kpi.total_fuel, 1) + " л");
+
+            // Кольорові індикатори KPI
+            _colorizeKpi("kpi-fuel-rate", kpi.avg_fuel_rate, 5.5, 8.0);
+            _colorizeKpi("kpi-efficiency", kpi.efficiency_pct, 30, 50);
+
+            // Графік 1: Витрата палива
+            _renderFuelTimeline(timeline);
+
+            // Графік 2: Мотогодини
+            _renderMotorHours(motorHours);
+
+            // Графік 3: Ефективність
+            _renderEfficiency(efficiency);
+
+            // Графік 4: Календар відключень
+            loadCalendar();
+        } catch (e) {
+            console.error("loadAnalytics error:", e);
+        }
+    }
+
+    function _colorizeKpi(id, value, warnThreshold, critThreshold) {
+        const el = document.getElementById(id);
+        if (!el || value === undefined) return;
+        el.classList.remove("kpi-warn", "kpi-critical");
+        if (value >= critThreshold) el.classList.add("kpi-critical");
+        else if (value >= warnThreshold) el.classList.add("kpi-warn");
+    }
+
+    function _renderFuelTimeline(data) {
+        const canvas = document.getElementById("chart-fuel-timeline");
+        if (!canvas || typeof Chart === "undefined") return;
+        _destroyChart("fuel-timeline");
+
+        const actual   = data.actual   || [];
+        const forecast = data.forecast || [];
+
+        const labels         = actual.map(d => _shortDate(d.date));
+        const actualFuel     = actual.map(d => d.fuel_consumed);
+        const forecastLabels = forecast.map(d => _shortDate(d.date));
+        const forecastFuel   = forecast.map(d => d.predicted_fuel);
+
+        const allLabels = labels.concat(forecastLabels);
+        const actualFull = actualFuel.concat(new Array(forecastLabels.length).fill(null));
+        const forecastFull = new Array(labels.length).fill(null).concat(forecastFuel);
+
+        // Маркери заправок
+        const refillPoints = actual.map(d => d.refill_liters > 0 ? d.refill_liters : null);
+        const refillFull   = refillPoints.concat(new Array(forecastLabels.length).fill(null));
+
+        analyticsCharts["fuel-timeline"] = new Chart(canvas, {
+            type: "line",
+            data: {
+                labels: allLabels,
+                datasets: [
+                    {
+                        label: "Витрата (л)",
+                        data: actualFull,
+                        borderColor: "#1976D2",
+                        backgroundColor: "rgba(25,118,210,0.08)",
+                        tension: 0.3,
+                        fill: true,
+                        pointRadius: 3,
+                    },
+                    {
+                        label: "Прогноз (л)",
+                        data: forecastFull,
+                        borderColor: "#42A5F5",
+                        borderDash: [6, 4],
+                        tension: 0.3,
+                        fill: false,
+                        pointRadius: 2,
+                    },
+                    {
+                        label: "Заправки (л)",
+                        data: refillFull,
+                        borderColor: "#2E7D32",
+                        backgroundColor: "#2E7D32",
+                        type: "scatter",
+                        pointStyle: "triangle",
+                        pointRadius: 8,
+                        showLine: false,
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: "top" },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => ctx.dataset.label + ": " + (ctx.parsed.y !== null ? ctx.parsed.y.toFixed(1) + " л" : "—"),
+                        },
+                    },
+                },
+                scales: {
+                    x: { ticks: { maxTicksLimit: 10 } },
+                    y: { beginAtZero: true, title: { display: true, text: "Літри" } },
+                },
+            },
+        });
+    }
+
+    function _renderMotorHours(data) {
+        const canvas = document.getElementById("chart-motor-hours");
+        if (!canvas || typeof Chart === "undefined") return;
+        _destroyChart("motor-hours");
+
+        const daily  = data.daily || [];
+        const labels = daily.map(d => _shortDate(d.date));
+
+        analyticsCharts["motor-hours"] = new Chart(canvas, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "Основний (год)",
+                        data: daily.map(d => d.main),
+                        backgroundColor: "rgba(25,118,210,0.75)",
+                    },
+                    {
+                        label: "Аварійний (год)",
+                        data: daily.map(d => d.emergency),
+                        backgroundColor: "rgba(245,124,0,0.75)",
+                    },
+                ],
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: "top" } },
+                scales: {
+                    x: { stacked: true, ticks: { maxTicksLimit: 12 } },
+                    y: { stacked: true, beginAtZero: true, title: { display: true, text: "Години" } },
+                },
+            },
+        });
+    }
+
+    function _renderEfficiency(data) {
+        // Pie
+        const canvasPie = document.getElementById("chart-efficiency-pie");
+        if (canvasPie && typeof Chart !== "undefined") {
+            _destroyChart("efficiency-pie");
+            const pie = data.pie || {};
+            analyticsCharts["efficiency-pie"] = new Chart(canvasPie, {
+                type: "doughnut",
+                data: {
+                    labels: ["Робота", "Простій", "Відключення", "ТО"],
+                    datasets: [{
+                        data: [
+                            pie.work_hours || 0,
+                            pie.idle_hours || 0,
+                            pie.outage_hours || 0,
+                            pie.maintenance_hours || 0,
+                        ],
+                        backgroundColor: ["#1976D2", "#78909C", "#F57C00", "#C62828"],
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: "bottom" },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => ctx.label + ": " + ctx.parsed.toFixed(1) + " год",
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        // Bar chart по змінах
+        const canvasBar = document.getElementById("chart-shifts-bar");
+        if (canvasBar && typeof Chart !== "undefined") {
+            _destroyChart("shifts-bar");
+            const shifts = data.shifts || {};
+            const shiftNames = { m: "Зміна 1", d: "Зміна 2", e: "Зміна 3", x: "Екстра" };
+            analyticsCharts["shifts-bar"] = new Chart(canvasBar, {
+                type: "bar",
+                data: {
+                    labels: Object.keys(shiftNames).map(k => shiftNames[k]),
+                    datasets: [
+                        {
+                            label: "Мотогод.",
+                            data: Object.keys(shiftNames).map(k => (shifts[k] || {}).hours || 0),
+                            backgroundColor: "rgba(25,118,210,0.75)",
+                            yAxisID: "y",
+                        },
+                        {
+                            label: "Паливо (л)",
+                            data: Object.keys(shiftNames).map(k => (shifts[k] || {}).fuel_consumed || 0),
+                            backgroundColor: "rgba(245,124,0,0.75)",
+                            yAxisID: "y1",
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: "top" } },
+                    scales: {
+                        y:  { beginAtZero: true, position: "left",  title: { display: true, text: "Год" } },
+                        y1: { beginAtZero: true, position: "right", title: { display: true, text: "Л" }, grid: { drawOnChartArea: false } },
+                    },
+                },
+            });
+        }
+    }
+
+    async function loadCalendar() {
+        const container = document.getElementById("outage-calendar");
+        const label     = document.getElementById("cal-month-label");
+        if (!container) return;
+
+        const y = calendarMonth.getFullYear();
+        const m = String(calendarMonth.getMonth() + 1).padStart(2, "0");
+        const monthStr = `${y}-${m}`;
+        if (label) {
+            const ukMonths = ["Січень","Лютий","Березень","Квітень","Травень","Червень",
+                              "Липень","Серпень","Вересень","Жовтень","Листопад","Грудень"];
+            label.textContent = ukMonths[calendarMonth.getMonth()] + " " + y;
+        }
+
+        try {
+            const data = await API.getOutageCalendar(monthStr);
+            const days = data.days || [];
+
+            container.innerHTML = "";
+
+            // Заголовки днів тижня
+            const dayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"];
+            dayNames.forEach(dn => {
+                const dh = document.createElement("div");
+                dh.className = "cal-day-header";
+                dh.textContent = dn;
+                container.appendChild(dh);
+            });
+
+            // Відступ для першого дня
+            const firstDay = new Date(y, calendarMonth.getMonth(), 1).getDay();
+            const offset   = (firstDay === 0 ? 6 : firstDay - 1);
+            for (let i = 0; i < offset; i++) {
+                const blank = document.createElement("div");
+                blank.className = "cal-day-blank";
+                container.appendChild(blank);
+            }
+
+            days.forEach(d => {
+                const dayNum = parseInt(d.date.split("-")[2], 10);
+                const hours  = d.outage_hours;
+                const cell   = document.createElement("div");
+                cell.className = "cal-day";
+                cell.title     = `${d.date}: ${hours} год відключень`;
+                // Колір за тяжкістю
+                let color = "#4CAF50";
+                if (hours > 16) color = "#B71C1C";
+                else if (hours > 8) color = "#FF5722";
+                else if (hours > 0) color = "#FFC107";
+                cell.style.setProperty("--cal-color", color);
+                cell.innerHTML = `<span class="cal-day-num">${dayNum}</span><span class="cal-day-hours">${hours > 0 ? hours + "год" : ""}</span>`;
+                container.appendChild(cell);
+            });
+        } catch (e) {
+            container.innerHTML = "<p class='hint-text'>Помилка завантаження календаря</p>";
+        }
+    }
+
+    // --- loadTrends ---
+    async function loadTrends() {
+        const list = document.getElementById("trends-insights-list");
+        if (!list) return;
+        list.innerHTML = "<p class='hint-text'>Завантаження...</p>";
+        try {
+            const data = await API.getTrends(analyticsPeriod);
+            const insights = data.insights || [];
+
+            if (!insights.length) {
+                list.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>✅</div><p>Аномалій не виявлено</p></div>";
+                return;
+            }
+
+            const severityColors = { info: "#1976D2", warning: "#F57C00", critical: "#C62828" };
+            list.innerHTML = insights.map(ins => `
+                <div class="insight-card" style="border-left: 4px solid ${severityColors[ins.severity] || '#78909C'}">
+                    <span class="insight-icon">${ins.icon || "ℹ️"}</span>
+                    <span class="insight-text">${ins.text}</span>
+                </div>
+            `).join("");
+        } catch (e) {
+            list.innerHTML = "<p class='hint-text'>Помилка: " + e.message + "</p>";
+        }
+    }
+
+    // --- loadForecast ---
+    async function loadForecast() {
+        const cardsEl = document.getElementById("forecast-cards");
+        const mntEl   = document.getElementById("forecast-maintenance");
+        const chartContainer = document.getElementById("forecast-chart-container");
+        if (!cardsEl) return;
+        cardsEl.innerHTML = "<p class='hint-text'>Завантаження...</p>";
+        try {
+            const data = await API.getForecast();
+            const fc   = data.daily_forecast || [];
+            const mnt  = data.maintenance    || {};
+
+            // Картки прогнозу
+            cardsEl.innerHTML = fc.map(f => `
+                <div class="forecast-card">
+                    <span class="forecast-date">${_shortDate(f.date)}</span>
+                    <span class="forecast-value">${f.predicted_fuel} л</span>
+                    <span class="forecast-confidence">${Math.round((f.confidence || 0) * 100)}% впевненість</span>
+                </div>
+            `).join("");
+
+            // Загальний прогноз
+            const totalEl = document.createElement("div");
+            totalEl.className = "forecast-total";
+            totalEl.innerHTML = `<b>Прогноз на тиждень: ${data.total_forecast_fuel || "—"} л</b>`;
+            cardsEl.prepend(totalEl);
+
+            // ТО
+            if (mntEl) {
+                mntEl.innerHTML = `
+                    <div class="mnt-row"><span>🛢️ До заміни мастила</span><span><b>${mnt.oil_remaining_hours || "—"} год</b> (≈${mnt.days_to_oil_change || "?"} дн)</span></div>
+                    <div class="mnt-row"><span>🔩 До заміни свічок</span><span><b>${mnt.spark_remaining_hours || "—"} год</b> (≈${mnt.days_to_spark_change || "?"} дн)</span></div>
+                `;
+            }
+
+            // Графік прогнозу
+            const canvas = document.getElementById("chart-forecast");
+            if (canvas && typeof Chart !== "undefined" && fc.length) {
+                _destroyChart("forecast");
+                if (chartContainer) chartContainer.style.display = "";
+                analyticsCharts["forecast"] = new Chart(canvas, {
+                    type: "bar",
+                    data: {
+                        labels: fc.map(f => _shortDate(f.date)),
+                        datasets: [{
+                            label: "Прогноз витрати (л)",
+                            data: fc.map(f => f.predicted_fuel),
+                            backgroundColor: fc.map(f => `rgba(25,118,210,${0.4 + 0.5 * (f.confidence || 0.5)})`),
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, title: { display: true, text: "Літри" } },
+                        },
+                    },
+                });
+            }
+        } catch (e) {
+            cardsEl.innerHTML = "<p class='hint-text'>Помилка: " + e.message + "</p>";
+        }
+    }
+
+    // --- PDF звіт ---
+    function downloadPdfReport() {
+        const typeEl = document.getElementById("report-type-select");
+        const type   = typeEl ? typeEl.value : "quick";
+        const url    = API.getPdfReportUrl(type, analyticsPeriod);
+        window.open(url, "_blank");
+    }
+
+    // Публічний API для зовнішнього виклику
+    window.App = window.App || {};
+    Object.assign(window.App, { loadAnalytics, loadTrends, loadForecast, downloadPdfReport });

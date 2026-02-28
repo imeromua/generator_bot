@@ -1519,3 +1519,261 @@ body, body * {
     color: var(--dark-text);
 }
 
+
+/* ====================================================================
+   Tasks 9-12: Analytics, Trends, Forecast, PDF
+   ==================================================================== */
+
+/* Period filter buttons */
+.analytics-period-filter {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.btn-period {
+    padding: 4px 12px;
+    border: 1px solid var(--color-border, #e0e0e8);
+    border-radius: 16px;
+    background: transparent;
+    color: var(--tg-text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-period.active,
+.btn-period:hover {
+    background: var(--color-primary, #1976D2);
+    color: #fff;
+    border-color: var(--color-primary, #1976D2);
+}
+
+/* KPI grid */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+}
+
+.kpi-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 8px;
+    background: var(--tg-secondary-bg, #f5f7fa);
+    border-radius: 10px;
+    border: 1px solid var(--color-border, #e0e0e8);
+    gap: 4px;
+}
+
+.kpi-icon {
+    font-size: 20px;
+}
+
+.kpi-label {
+    font-size: 11px;
+    color: var(--tg-hint);
+    text-align: center;
+}
+
+.kpi-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-primary, #1976D2);
+}
+
+.kpi-value.kpi-warn {
+    color: #F57C00;
+}
+
+.kpi-value.kpi-critical {
+    color: #C62828;
+}
+
+/* Chart containers */
+.chart-container {
+    position: relative;
+    width: 100%;
+    max-height: 260px;
+}
+
+.charts-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.chart-half {
+    flex: 1;
+    min-width: 140px;
+    max-height: 200px;
+}
+
+/* Outage calendar */
+.outage-calendar {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.cal-day-header {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--tg-hint);
+    padding: 4px 2px;
+}
+
+.cal-day-blank {
+    min-height: 42px;
+}
+
+.cal-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    border-radius: 8px;
+    background: var(--cal-color, #4CAF50);
+    cursor: default;
+    transition: opacity 0.15s;
+    padding: 2px;
+}
+
+.cal-day:hover {
+    opacity: 0.85;
+}
+
+.cal-day-num {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.cal-day-hours {
+    font-size: 9px;
+    color: rgba(255,255,255,0.9);
+}
+
+.calendar-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.cal-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--tg-hint);
+}
+
+.cal-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    display: inline-block;
+}
+
+/* Trend insights */
+.insight-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--tg-secondary-bg, #f5f7fa);
+    border-radius: 10px;
+}
+
+.insight-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.insight-text {
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Forecast cards */
+.forecast-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.forecast-card {
+    flex: 1;
+    min-width: 70px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 6px;
+    background: var(--tg-secondary-bg, #f5f7fa);
+    border-radius: 8px;
+    border: 1px solid var(--color-border, #e0e0e8);
+    gap: 3px;
+}
+
+.forecast-date {
+    font-size: 11px;
+    color: var(--tg-hint);
+}
+
+.forecast-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-primary, #1976D2);
+}
+
+.forecast-confidence {
+    font-size: 10px;
+    color: var(--tg-hint);
+}
+
+.forecast-total {
+    width: 100%;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--color-primary, #1976D2);
+    color: #fff;
+    border-radius: 8px;
+    text-align: center;
+    font-size: 14px;
+}
+
+/* Maintenance rows in forecast */
+.mnt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--color-border, #e0e0e8);
+    font-size: 13px;
+}
+
+.mnt-row:last-child {
+    border-bottom: none;
+}
+
+/* Report controls */
+.report-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* Dark theme overrides */
+[data-theme="dark"] .kpi-card,
+[data-theme="dark"] .insight-card,
+[data-theme="dark"] .forecast-card {
+    background: var(--dark-accent, #2a2a3e);
+    border-color: var(--dark-border, #3a3a5c);
+}
