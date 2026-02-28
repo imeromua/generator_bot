@@ -168,6 +168,62 @@
     function showSuccess(msg) { showToast(msg, "success"); }
     function showError(msg)   { showToast(msg, "error"); }
 
+    /**
+     * Знаходить найдовший безперервний період відключень
+     * @param {Array} hours - масив годин з графіка [{hour: 0, off: true}, ...]
+     * @returns {Object|null} {duration: number, startHour: number, endHour: number}
+     */
+    function findLongestOutage(hours) {
+        if (!hours || hours.length === 0) return null;
+
+        let maxDuration = 0;
+        let maxStart = 0;
+        let currentStart = -1;
+        let currentDuration = 0;
+
+        for (let i = 0; i < hours.length; i++) {
+            const h = hours[i];
+
+            if (h.off) {
+                if (currentStart === -1) currentStart = h.hour;
+                currentDuration++;
+            } else {
+                if (currentDuration > maxDuration) {
+                    maxDuration = currentDuration;
+                    maxStart = currentStart;
+                }
+                currentStart = -1;
+                currentDuration = 0;
+            }
+        }
+
+        // Перевіряємо останній блок
+        if (currentDuration > maxDuration) {
+            maxDuration = currentDuration;
+            maxStart = currentStart;
+        }
+
+        return maxDuration > 0 ? {
+            duration: maxDuration,
+            startHour: maxStart,
+            endHour: maxStart + maxDuration
+        } : null;
+    }
+
+    /**
+     * Форматує тривалість відключення
+     * @param {number} hours - кількість годин
+     * @returns {string} - "17:00" або "03:30"
+     */
+    function formatHoursDuration(hours) {
+        const h = Math.floor(hours);
+        const m = Math.round((hours - h) * 60);
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+
+    // Зберігаємо дані останнього відключення для tooltip
+    let lastOutageData = null;
+
     function setLoading(show) {
         const loader = $("loader");
         if (show) loader.classList.add("visible");
@@ -216,6 +272,15 @@
         btn.addEventListener("click", () => switchTab(btn.dataset.tab));
     });
 
+    // Tooltip для найдовшого відключення
+    $("stat-longest-outage").addEventListener("click", () => {
+        if (lastOutageData) {
+            const start = String(lastOutageData.startHour).padStart(2, "0") + ":00";
+            const end = String(lastOutageData.endHour).padStart(2, "0") + ":00";
+            showToast(`Найдовше відключення: ${start} - ${end} (${lastOutageData.duration} год)`, "info");
+        }
+    });
+
     // -------------------------------------------------------------------
     // Завантаження даних
     // -------------------------------------------------------------------
@@ -249,6 +314,8 @@
             renderStatus(status);
             renderWeek(week);
             renderActionButtons(status);
+            // Завантажуємо графік на сьогодні для розрахунку найдовшого відключення
+            loadTodayScheduleForOutage();
         } catch (e) {
             showError("Помилка завантаження: " + e.message);
         } finally {
@@ -324,6 +391,41 @@
                 statusEl.className = "shift-status";
             }
         });
+    }
+
+    async function loadTodayScheduleForOutage() {
+        const today = getToday();
+
+        try {
+            const scheduleData = await API.getSchedule(today);
+            const outage = findLongestOutage(scheduleData.hours);
+            lastOutageData = outage;
+            const el = $("stat-longest-outage");
+
+            if (!outage || outage.duration === 0) {
+                el.textContent = "✅ Немає";
+                el.className = "stat-value outage-ok";
+            } else {
+                const durationText = formatHoursDuration(outage.duration);
+                el.className = "stat-value";
+
+                // Кольорова індикація
+                if (outage.duration >= 12) el.classList.add("outage-critical");
+                else if (outage.duration >= 6) el.classList.add("outage-warning");
+                else el.classList.add("outage-ok");
+
+                // Індикатор якщо відключення триває зараз
+                const currentHour = new Date().getHours();
+                if (currentHour >= outage.startHour && currentHour < outage.endHour) {
+                    el.textContent = durationText + " 🔴";
+                } else {
+                    el.textContent = durationText;
+                }
+            }
+        } catch (e) {
+            console.error("Failed to load schedule for outage:", e);
+            $("stat-longest-outage").textContent = "—";
+        }
     }
 
     function renderActionButtons(data) {

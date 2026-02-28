@@ -244,6 +244,30 @@ body {
     color: var(--color-success, #27ae60);
 }
 
+/* --- Outage color indication --- */
+.stat-value.outage-critical {
+    color: var(--color-danger, #e74c3c);
+    font-weight: 600;
+}
+
+.stat-value.outage-warning {
+    color: var(--color-warn, #f39c12);
+    font-weight: 600;
+}
+
+.stat-value.outage-ok {
+    color: var(--color-success, #27ae60);
+}
+
+#stat-longest-outage {
+    transition: color 0.3s, transform 0.2s;
+    cursor: pointer;
+}
+
+#stat-longest-outage:active {
+    transform: scale(0.95);
+}
+
 /* --- Shifts Grid --- */
 .shifts-grid {
     display: grid;
