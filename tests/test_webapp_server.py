@@ -388,3 +388,236 @@ class TestApiShifts:
         """Unauthenticated analytics should return 401."""
         resp = await (await client).get("/api/shifts/analytics")
         assert resp.status == 401
+
+
+# ---------------------------------------------------------------------------
+# Tasks 9-12: API /api/analytics, /api/report/pdf
+# ---------------------------------------------------------------------------
+
+class TestApiAnalytics:
+    """Tests for analytics endpoints (Tasks 9-12)."""
+
+    @pytest.mark.asyncio
+    async def test_kpi_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/kpi")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_fuel_timeline_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/fuel-timeline")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_motor_hours_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/motor-hours")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_efficiency_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/efficiency")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_calendar_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/calendar")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_trends_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/trends")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_forecast_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/analytics/forecast")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_pdf_report_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = await (await client).get("/api/report/pdf")
+        assert resp.status == 401
+
+    @pytest.mark.asyncio
+    async def test_kpi_returns_fields(self, client, monkeypatch):
+        """KPI endpoint returns expected fields for authenticated user."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/kpi?days=7")
+        assert resp.status == 200
+        data = await resp.json()
+        for field in ("total_hours", "avg_fuel_rate", "total_fuel", "fuel_cost", "efficiency_pct"):
+            assert field in data, f"Missing field: {field}"
+
+    @pytest.mark.asyncio
+    async def test_fuel_timeline_returns_actual_forecast(self, client, monkeypatch):
+        """Fuel timeline returns actual data and forecast."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/fuel-timeline?days=7")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "actual" in data
+        assert "forecast" in data
+        assert isinstance(data["actual"], list)
+        assert isinstance(data["forecast"], list)
+
+    @pytest.mark.asyncio
+    async def test_motor_hours_returns_daily_totals(self, client, monkeypatch):
+        """Motor hours endpoint returns daily data and totals."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/motor-hours?days=7")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "daily" in data
+        assert "totals" in data
+        assert "main" in data["totals"]
+        assert "emergency" in data["totals"]
+
+    @pytest.mark.asyncio
+    async def test_efficiency_returns_pie_and_shifts(self, client, monkeypatch):
+        """Efficiency endpoint returns pie chart data and shift breakdown."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/efficiency?days=7")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "pie" in data
+        assert "shifts" in data
+        assert "work_hours" in data["pie"]
+
+    @pytest.mark.asyncio
+    async def test_calendar_returns_days(self, client, monkeypatch):
+        """Calendar endpoint returns days array for the month."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/calendar?month=2025-01")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "month" in data
+        assert "days" in data
+        assert len(data["days"]) == 31  # January has 31 days
+
+    @pytest.mark.asyncio
+    async def test_trends_returns_insights(self, client, monkeypatch):
+        """Trends endpoint returns insights list."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/trends?days=14")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "insights" in data
+        assert isinstance(data["insights"], list)
+
+    @pytest.mark.asyncio
+    async def test_forecast_returns_daily_forecast(self, client, monkeypatch):
+        """Forecast endpoint returns 7-day prediction and maintenance info."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/analytics/forecast")
+        assert resp.status == 200
+        data = await resp.json()
+        assert "daily_forecast" in data
+        assert "maintenance" in data
+        assert len(data["daily_forecast"]) == 7
+
+    @pytest.mark.asyncio
+    async def test_pdf_report_invalid_type(self, client, monkeypatch):
+        """Invalid report type should return 400."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/report/pdf?type=invalid")
+        assert resp.status == 400
+
+    @pytest.mark.asyncio
+    async def test_pdf_report_quick(self, client, monkeypatch):
+        """Quick PDF report should return PDF bytes."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Test"},
+        )
+        resp = await (await client).get("/api/report/pdf?type=quick&days=7")
+        assert resp.status == 200
+        assert resp.content_type == "application/pdf"
+        body = await resp.read()
+        assert body[:4] == b"%PDF"  # PDF magic bytes
+
+
+class TestMlModels:
+    """Unit tests for ml_models module."""
+
+    def test_fuel_forecast_insufficient_data(self):
+        """FuelForecast.train returns False with < 7 data points."""
+        from ml_models import FuelForecast
+        ff = FuelForecast()
+        result = ff.train([{"date": "2025-01-01", "fuel_consumed": 40, "outage_hours": 4}])
+        assert result is False
+
+    def test_fuel_forecast_fallback_predict(self):
+        """FuelForecast returns fallback predictions when not trained."""
+        from ml_models import FuelForecast
+        ff = FuelForecast()
+        preds = ff.predict(7)
+        assert len(preds) == 7
+        for p in preds:
+            assert "date" in p
+            assert "predicted_fuel" in p
+            assert p["predicted_fuel"] >= 0
+
+    def test_fuel_forecast_train_and_predict(self):
+        """FuelForecast trains on sufficient data and predicts 7 days."""
+        from ml_models import FuelForecast
+        from datetime import datetime, timedelta
+        ff = FuelForecast()
+        data = []
+        for i in range(30):
+            dt = datetime(2025, 1, 1) + timedelta(days=i)
+            data.append({
+                "date": dt.strftime("%Y-%m-%d"),
+                "fuel_consumed": 40 + (i % 7) * 2,
+                "outage_hours": 4,
+            })
+        ok = ff.train(data)
+        assert ok is True
+        preds = ff.predict(7)
+        assert len(preds) == 7
+        for p in preds:
+            assert p["predicted_fuel"] >= 0
+
+    def test_anomaly_detector_insufficient_data(self):
+        """AnomalyDetector.train returns False with < 10 data points."""
+        from ml_models import AnomalyDetector
+        ad = AnomalyDetector()
+        result = ad.train([{"fuel_consumed": 40, "work_hours": 8, "fuel_rate": 5}])
+        assert result is False
+
+    def test_anomaly_detector_no_anomaly_when_not_trained(self):
+        """AnomalyDetector.detect returns non-anomaly when not trained."""
+        from ml_models import AnomalyDetector
+        ad = AnomalyDetector()
+        result = ad.detect({"fuel_consumed": 40, "work_hours": 8, "fuel_rate": 5})
+        assert result["is_anomaly"] is False

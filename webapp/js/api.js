@@ -182,6 +182,30 @@ const API = (() => {
         autoSchedule: (month, save) => post("/api/shifts/auto", { month, save }),
         /** Аналітика змін */
         getShiftAnalytics: (month) => get("/api/shifts/analytics", month ? { month } : undefined),
+
+        // Tasks 9-12: Analytics, Trends, Forecast, PDF
+        /** KPI-картки аналітики */
+        getAnalyticsKpi: (days, generator) =>
+            get("/api/analytics/kpi", Object.assign({ days: days || 30 }, generator ? { generator } : {})),
+        /** Дані для графіка витрати палива */
+        getFuelTimeline: (days, generator) =>
+            get("/api/analytics/fuel-timeline", Object.assign({ days: days || 30 }, generator ? { generator } : {})),
+        /** Мотогодини генераторів */
+        getMotorHours: (days) => get("/api/analytics/motor-hours", { days: days || 30 }),
+        /** Ефективність роботи */
+        getEfficiency: (days) => get("/api/analytics/efficiency", { days: days || 30 }),
+        /** Календар відключень */
+        getOutageCalendar: (month) => get("/api/analytics/calendar", month ? { month } : undefined),
+        /** Тренди та інсайти */
+        getTrends: (days) => get("/api/analytics/trends", { days: days || 30 }),
+        /** ML-прогноз */
+        getForecast: () => get("/api/analytics/forecast"),
+        /** URL для PDF-звіту */
+        getPdfReportUrl: (type, days, generator) => {
+            let url = BASE + "/api/report/pdf?type=" + (type || "quick") + "&days=" + (days || 30);
+            if (generator) url += "&generator=" + encodeURIComponent(generator);
+            return url;
+        },
     };
 })();
 
