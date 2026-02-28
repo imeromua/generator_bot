@@ -238,6 +238,10 @@ body {
     color: var(--color-warn);
 }
 
+.stat-value.fuel-ok {
+    color: var(--color-success, #27ae60);
+}
+
 /* --- Shifts Grid --- */
 .shifts-grid {
     display: grid;

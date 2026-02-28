@@ -289,6 +289,19 @@
         $("stat-rate").textContent  = data.fuel_rate + " л/год";
         $("stat-work-hours").textContent = data.work_start + " — " + data.work_end;
 
+        const rate = parseFloat(data.fuel_rate) || 0;
+        const durationEl = $("stat-duration");
+        durationEl.className = "stat-value";
+        if (rate > 0 && fuel > 0) {
+            const hoursRemaining = fuel / rate;
+            durationEl.textContent = "~" + formatHoursMinutes(hoursRemaining);
+            if (hoursRemaining < 2) durationEl.classList.add("fuel-low");
+            else if (hoursRemaining < 5) durationEl.classList.add("fuel-warn");
+            else durationEl.classList.add("fuel-ok");
+        } else {
+            durationEl.textContent = "—";
+        }
+
         const shifts = ["m", "d", "e", "x"];
         const completed = new Set(data.completed_shifts || []);
         const activeCode = data.active_shift !== "none" ? data.active_shift.split("_")[0] : null;
