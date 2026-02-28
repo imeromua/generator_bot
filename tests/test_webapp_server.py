@@ -313,7 +313,7 @@ class TestApiFuelOrders:
         assert resp.status_code == 401
 
     def test_create_order_no_auth(self, client):
-        """Unauthenticated POST should return 403."""
+        """Unauthenticated POST should return 403 (admin required check fires first)."""
         resp = client.post(
             "/api/fuel/orders",
             json={"amount_liters": 200},

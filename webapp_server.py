@@ -1470,7 +1470,7 @@ async def api_admin_backup_create(request: Request):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_backup_download(request: Request):
+async def api_admin_backup_download(request: Request, filename: str):
     """GET /api/admin/backup/download/{filename} — завантажити резервну копію."""
     import re as _re
 
@@ -1478,7 +1478,7 @@ async def api_admin_backup_download(request: Request):
     if not _is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
-    filename = request.path_params.get("filename", "")
+    filename = filename or ""
     # Security: strictly validate the expected filename pattern to prevent path traversal
     # and injection attacks. Pattern: backup_YYYY-MM-DD_HH-MM.sql.gz
     _BACKUP_FILENAME_RE = _re.compile(r'^backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}\.sql\.gz$')
