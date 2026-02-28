@@ -32,7 +32,7 @@ async def check_fuel_alert(bot, state: dict):
     last_sent_ts_str = db.get_state_value("fuel_alert_last_sent_ts", "") or ""
 
     should_send = True
-    
+
     # FIX #28: Use now_kiev() for timezone consistency with rest of the system
     now = now_kiev()
 
@@ -40,11 +40,12 @@ async def check_fuel_alert(bot, state: dict):
         try:
             # Parse with timezone-aware datetime
             from datetime import datetime
+
             last_sent = datetime.strptime(last_sent_ts_str, "%Y-%m-%d %H:%M:%S")
             # Make it timezone-aware if needed
             if last_sent.tzinfo is None:
                 last_sent = last_sent.replace(tzinfo=config.KYIV)
-            
+
             diff_min = (now - last_sent).total_seconds() / 60.0
             if diff_min < config.FUEL_ALERT_COOLDOWN_MIN:
                 should_send = False
@@ -71,9 +72,6 @@ async def check_fuel_alert(bot, state: dict):
         await send_single_window(bot, int(admin_id), txt, reply_markup=kb_home)
 
     # FIX #25: Save alert to message history for ALL users
-    notify_all_users(
-        f"⚠️ Паливо на нулі: {current_fuel:.1f} л",
-        "warning"
-    )
+    notify_all_users(f"⚠️ Паливо на нулі: {current_fuel:.1f} л", "warning")
 
     db.set_state("fuel_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))

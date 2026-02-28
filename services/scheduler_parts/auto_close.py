@@ -32,7 +32,7 @@ async def maybe_auto_close_shift(
     # FIX #23: Check if we're past grace period
     close_datetime = datetime.combine(now.date(), close_time).replace(tzinfo=config.KYIV)
     grace_end = close_datetime + timedelta(seconds=AUTO_CLOSE_GRACE_PERIOD_SECONDS)
-    
+
     if now < grace_end:
         # Still within grace period, give user time to close manually
         return auto_close_done_today, False
@@ -55,11 +55,11 @@ async def maybe_auto_close_shift(
                 res = db.try_stop_shift(end_event, "System", now)
                 close_ok = bool(res.get("ok"))
                 close_reason = str(res.get("reason", "") or "")
-                
+
                 # FIX #22: Get metrics from try_stop_shift (already calculated there)
                 duration_hours = res.get("duration_hours", 0.0)
                 fuel_consumed = res.get("fuel_consumed", 0.0)
-                
+
             except Exception as e:
                 close_ok = False
                 close_reason = f"error:{e}"
@@ -98,17 +98,15 @@ async def maybe_auto_close_shift(
             forced_close = True
             db.set_state("status", "OFF")
             db.set_state("active_shift", "none")
-            
+
             ts = now.strftime("%Y-%m-%d %H:%M:%S")
             try:
                 db.add_log("forced_close", "System", val=close_reason, ts=ts)
                 logger.info(f"📝 Logged forced_close event with reason: {close_reason}")
             except Exception as e:
                 logger.error(f"❌ Failed to log forced_close: {e}")
-            
-            logger.warning(
-                f"⚠️ Auto-close fallback: forced OFF (reason={close_reason}, active_shift={active_shift})"
-            )
+
+            logger.warning(f"⚠️ Auto-close fallback: forced OFF (reason={close_reason}, active_shift={active_shift})")
 
         # FIX #22: No need to manually update fuel/hours - try_stop_shift does it atomically
         # Just get current state for display

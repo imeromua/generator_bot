@@ -4,6 +4,7 @@ import database.db_api as db
 from datetime import datetime
 import config
 
+
 # --- ГОЛОВНЕ МЕНЮ ---
 def main_dashboard(role, active_shift, completed_shifts):
     kb = []
@@ -21,47 +22,57 @@ def main_dashboard(role, active_shift, completed_shifts):
     # NOTE: use only known-safe styles (danger/primary); other values may be rejected by the API.
     if active_shift != 'none':
         code = active_shift.split("_")[0]
-        kb.append([
-            InlineKeyboardButton(
-                text=f"🏁 {pretty(code)} СТОП",
-                callback_data=f"{code}_end",
-                style="danger",
-            )
-        ])
+        kb.append(
+            [
+                InlineKeyboardButton(
+                    text=f"🏁 {pretty(code)} СТОП",
+                    callback_data=f"{code}_end",
+                    style="danger",
+                )
+            ]
+        )
     else:
         if 'm' not in completed_shifts:
-            kb.append([
-                InlineKeyboardButton(
-                    text=f"{pretty('m')} СТАРТ",
-                    callback_data="m_start",
-                    style="primary",
-                )
-            ])
+            kb.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{pretty('m')} СТАРТ",
+                        callback_data="m_start",
+                        style="primary",
+                    )
+                ]
+            )
         elif 'd' not in completed_shifts:
-            kb.append([
-                InlineKeyboardButton(
-                    text=f"{pretty('d')} СТАРТ",
-                    callback_data="d_start",
-                    style="primary",
-                )
-            ])
+            kb.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{pretty('d')} СТАРТ",
+                        callback_data="d_start",
+                        style="primary",
+                    )
+                ]
+            )
         elif 'e' not in completed_shifts:
-            kb.append([
-                InlineKeyboardButton(
-                    text=f"{pretty('e')} СТАРТ",
-                    callback_data="e_start",
-                    style="primary",
-                )
-            ])
+            kb.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{pretty('e')} СТАРТ",
+                        callback_data="e_start",
+                        style="primary",
+                    )
+                ]
+            )
 
         if {'m', 'd', 'e'}.issubset(completed_shifts) and ('x' not in completed_shifts):
-            kb.append([
-                InlineKeyboardButton(
-                    text=f"{pretty('x')} СТАРТ",
-                    callback_data="x_start",
-                    style="primary",
-                )
-            ])
+            kb.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"{pretty('x')} СТАРТ",
+                        callback_data="x_start",
+                        style="primary",
+                    )
+                ]
+            )
 
     kb.append([InlineKeyboardButton(text="📅 Графік відключень", callback_data="schedule_today")])
     kb.append([InlineKeyboardButton(text="📥 ПРИЙОМ ПАЛИВА", callback_data="refill_init", style="primary")])
@@ -71,10 +82,14 @@ def main_dashboard(role, active_shift, completed_shifts):
 
     # Mini App button (якщо WEBAPP_URL налаштовано)
     if config.WEBAPP_URL:
-        kb.append([InlineKeyboardButton(
-            text="📱 Mini App",
-            web_app=WebAppInfo(url=config.WEBAPP_URL),
-        )])
+        kb.append(
+            [
+                InlineKeyboardButton(
+                    text="📱 Mini App",
+                    web_app=WebAppInfo(url=config.WEBAPP_URL),
+                )
+            ]
+        )
 
     if role == 'admin':
         kb.append([InlineKeyboardButton(text="⚙️ АДМІН ПАНЕЛЬ", callback_data="admin_home", style="primary")])
@@ -84,12 +99,12 @@ def main_dashboard(role, active_shift, completed_shifts):
 # --- АДМІН ПАНЕЛЬ ---
 def admin_panel():
     """Admin panel with streamlined operations.
-    
+
     Removed deprecated Correction menu - its functionality has been moved to:
     - Maintenance hours: TO menu (mnt_set_hours)
     - Fuel correction: Direct fuel management in appropriate contexts
     - Consumption rate: Generator-specific settings
-    
+
     Priority levels:
     - High (primary/blue): Frequent operations (Sync, Schedule)
     - Normal (no style): Regular operations (Personnel, Drivers, Maintenance, Users)
@@ -129,7 +144,7 @@ def admin_panel():
         # Row 8: Navigation
         [
             InlineKeyboardButton(text="🏠 На головну", callback_data="main_menu"),
-        ]
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -137,7 +152,7 @@ def admin_panel():
 # --- СИНХРОНІЗАЦІЯ (тільки розумна) ---
 def sync_menu():
     """Меню синхронізації - тільки розумна двонаправлена синхронізація.
-    
+
     Старі окремі імпорт/експорт видалені для запобігання помилкам.
     Розумна синхронізація автоматично визначає що треба синхронізувати.
     Модулі sheets_import.py та sheets_export.py залишені як резервні утиліти.
@@ -152,11 +167,11 @@ def sync_menu():
 # --- КОРЕКЦІЯ (DEPRECATED - залишено для зворотної сумісності) ---
 def correction_menu():
     """DEPRECATED: Correction menu is no longer used.
-    
+
     Functionality moved to:
     - Hours correction: Maintenance menu (mnt_set_hours)
     - Fuel/consumption: Generator-specific settings
-    
+
     This function is kept for backward compatibility but should not be called.
     """
     kb = [
@@ -169,7 +184,9 @@ def correction_menu():
 
 def back_to_corr():
     """DEPRECATED: Redirects to admin home."""
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 До адмін-панелі", callback_data="admin_home")]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 До адмін-панелі", callback_data="admin_home")]]
+    )
 
 
 # --- ГРАФІК ---
@@ -180,7 +197,7 @@ def schedule_date_selector(today_str, tom_str):
     kb = [
         [InlineKeyboardButton(text=f"Сьогодні ({d_today})", callback_data=f"sched_edit_{today_str}")],
         [InlineKeyboardButton(text=f"Завтра ({d_tom})", callback_data=f"sched_edit_{tom_str}")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -216,7 +233,7 @@ def maintenance_menu_new():
         [InlineKeyboardButton(text="✅ Виконати ТО", callback_data="mnt_perform", style="primary")],
         [InlineKeyboardButton(text="📜 Історія ТО", callback_data="mnt_history")],
         [InlineKeyboardButton(text="⏱ Коригувати мотогодини", callback_data="mnt_set_hours")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="admin_home")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -233,7 +250,7 @@ def maintenance_action_menu():
         [InlineKeyboardButton(text="🛢 Заміна мастила", callback_data="mnt_oil")],
         [InlineKeyboardButton(text="🕯 Заміна свічок", callback_data="mnt_spark")],
         [InlineKeyboardButton(text="🔧 Планове ТО", callback_data="mnt_maintenance")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="mnt_menu")]
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="mnt_menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
@@ -248,11 +265,15 @@ def drivers_list(drivers):
 
 
 def back_to_admin():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 Скасувати", callback_data="admin_home")]]
+    )
 
 
 def back_to_main():
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]])
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🔙 На головну", callback_data="main_menu")]]
+    )
 
 
 def back_to_mnt():
@@ -261,7 +282,5 @@ def back_to_mnt():
 
 def after_add_menu():
     """Universal 'after add' menu for both drivers and personnel."""
-    kb = [
-        [InlineKeyboardButton(text="🔙 В адмінку", callback_data="admin_home")]
-    ]
+    kb = [[InlineKeyboardButton(text="🔙 В адмінку", callback_data="admin_home")]]
     return InlineKeyboardMarkup(inline_keyboard=kb)

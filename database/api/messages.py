@@ -20,23 +20,23 @@ MAX_MESSAGES_PER_USER = 5
 
 def add_message(user_id: int, message_text: str, message_type: str = "info") -> None:
     """Зберігає повідомлення для користувача з автоматичною ротацією.
-    
+
     Args:
         user_id: Telegram user ID
         message_text: Текст повідомлення
         message_type: Тип повідомлення (info, success, warning, error, alert)
-    
+
     Якщо у користувача вже є MAX_MESSAGES_PER_USER повідомлень,
     видаляється найстаріше перед додаванням нового.
     """
     timestamp = datetime.now(config.KYIV).strftime("%Y-%m-%d %H:%M:%S")
-    
+
     with get_connection() as conn:
         try:
             # Перевіряємо кількість повідомлень
             count_query = "SELECT COUNT(*) FROM user_messages WHERE user_id = ?"
             count = conn.execute(count_query, (user_id,)).fetchone()[0]
-            
+
             # Якщо досягнуто ліміт - видаляємо найстаріше
             if count >= MAX_MESSAGES_PER_USER:
                 delete_query = """
@@ -50,7 +50,7 @@ def add_message(user_id: int, message_text: str, message_type: str = "info") -> 
                 """
                 conn.execute(delete_query, (user_id,))
                 logger.debug(f"🗑️ Видалено найстаріше повідомлення для user_id={user_id}")
-            
+
             # Додаємо нове повідомлення
             insert_query = """
                 INSERT INTO user_messages (user_id, message_text, message_type, timestamp)
@@ -58,18 +58,18 @@ def add_message(user_id: int, message_text: str, message_type: str = "info") -> 
             """
             conn.execute(insert_query, (user_id, message_text, message_type, timestamp))
             logger.info(f"📨 Збережено повідомлення [{message_type}] для user_id={user_id}")
-            
+
         except Exception as e:
             logger.error(f"⚠️ Помилка збереження повідомлення: {e}", exc_info=True)
 
 
 def get_user_messages(user_id: int, limit: int = 5):
     """Отримує останні повідомлення користувача.
-    
+
     Args:
         user_id: Telegram user ID
         limit: Максимальна кількість повідомлень
-    
+
     Returns:
         List[tuple]: Список (message_text, message_type, timestamp)
     """
@@ -91,7 +91,7 @@ def get_user_messages(user_id: int, limit: int = 5):
 
 def clear_user_messages(user_id: int) -> None:
     """Очищає всі повідомлення користувача.
-    
+
     Args:
         user_id: Telegram user ID
     """
@@ -106,10 +106,10 @@ def clear_user_messages(user_id: int) -> None:
 
 def get_message_count(user_id: int) -> int:
     """Повертає кількість повідомлень користувача.
-    
+
     Args:
         user_id: Telegram user ID
-    
+
     Returns:
         int: Кількість повідомлень
     """

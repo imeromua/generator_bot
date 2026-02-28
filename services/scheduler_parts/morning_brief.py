@@ -30,9 +30,7 @@ async def maybe_send_morning_brief(
     try:
         brief_time = datetime.strptime(config.MORNING_BRIEF_TIME, "%H:%M").time()
     except Exception:
-        logger.error(
-            f"❌ Неправильний формат MORNING_BRIEF_TIME: {getattr(config, 'MORNING_BRIEF_TIME', None)}"
-        )
+        logger.error(f"❌ Неправильний формат MORNING_BRIEF_TIME: {getattr(config, 'MORNING_BRIEF_TIME', None)}")
         brief_time = dt_time(7, 30)
 
     target_dt = datetime.combine(current_date, brief_time).replace(tzinfo=config.KYIV)
@@ -50,12 +48,12 @@ async def maybe_send_morning_brief(
         if not schedule or not isinstance(schedule, dict):
             logger.warning("⚠️ Графік недоступний або порожній, використовуємо порожній графік")
             schedule = {}
-        
+
         ranges = schedule_to_ranges(schedule)
         total_off = sum((e - s) for s, e in ranges)
 
         st = db.get_state()
-        
+
         # FIX #27: Safe dict access with .get() and defaults
         try:
             current_fuel = float(st.get("current_fuel", 0.0) or 0.0)
@@ -73,20 +71,15 @@ async def maybe_send_morning_brief(
         except Exception as e:
             logger.warning(f"⚠️ Помилка розрахунку ТО: {e}")
             to_service = config.MAINTENANCE_LIMIT
-        
+
         to_service_hhmm = format_hours_hhmm(to_service)
 
         now_h = now.hour
         now_status = (
-            "🔴 Зараз: <b>відключення</b>"
-            if int(schedule.get(now_h, 0) or 0) == 1
-            else "🟢 Зараз: <b>світло є</b>"
+            "🔴 Зараз: <b>відключення</b>" if int(schedule.get(now_h, 0) or 0) == 1 else "🟢 Зараз: <b>світло є</b>"
         )
 
-        txt = (
-            f"☀️ <b>Ранковий брифінг</b> ({now.strftime('%d.%m.%Y')})\n\n"
-            f"📅 <b>Графік відключень (сьогодні)</b>\n"
-        )
+        txt = f"☀️ <b>Ранковий брифінг</b> ({now.strftime('%d.%m.%Y')})\n\n" f"📅 <b>Графік відключень (сьогодні)</b>\n"
 
         if not ranges:
             txt += "✅ Відключень не заплановано.\n"

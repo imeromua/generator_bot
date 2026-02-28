@@ -11,7 +11,6 @@ from handlers.user_parts.refill import router as refill_router
 from handlers.user_parts.schedule import router as schedule_router
 from handlers.user_parts.shifts import router as shifts_router
 
-
 router = Router()
 router.include_router(home_router)
 router.include_router(refill_router)

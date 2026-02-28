@@ -1,4 +1,5 @@
 """Tests for webapp_server.py — Mini App API endpoints."""
+
 import pytest
 import os
 import sys
@@ -41,6 +42,7 @@ def client():
 # API /api/status
 # ---------------------------------------------------------------------------
 
+
 class TestApiStatus:
     """Tests for GET /api/status endpoint."""
 
@@ -57,10 +59,18 @@ class TestApiStatus:
         resp = client.get("/api/status")
         data = resp.json()
         expected_fields = [
-            "status", "generator", "generator_name",
-            "current_fuel", "estimated_fuel", "fuel_rate",
-            "total_hours", "active_shift", "completed_shifts",
-            "start_time", "work_start", "work_end",
+            "status",
+            "generator",
+            "generator_name",
+            "current_fuel",
+            "estimated_fuel",
+            "fuel_rate",
+            "total_hours",
+            "active_shift",
+            "completed_shifts",
+            "start_time",
+            "work_start",
+            "work_end",
         ]
         for field in expected_fields:
             assert field in data, f"Missing field: {field}"
@@ -124,6 +134,7 @@ class TestApiStatus:
 # API /api/schedule
 # ---------------------------------------------------------------------------
 
+
 class TestApiSchedule:
     """Tests for GET /api/schedule endpoint."""
 
@@ -163,6 +174,7 @@ class TestApiSchedule:
 # API /api/schedule/week
 # ---------------------------------------------------------------------------
 
+
 class TestApiScheduleWeek:
     """Tests for GET /api/schedule/week endpoint."""
 
@@ -187,6 +199,7 @@ class TestApiScheduleWeek:
 # ---------------------------------------------------------------------------
 # API /api/events
 # ---------------------------------------------------------------------------
+
 
 class TestApiEvents:
     """Tests for GET /api/events endpoint."""
@@ -227,6 +240,7 @@ class TestApiEvents:
 # API /api/maintenance
 # ---------------------------------------------------------------------------
 
+
 class TestApiMaintenance:
     """Tests for GET /api/maintenance endpoint."""
 
@@ -257,6 +271,7 @@ class TestApiMaintenance:
 # Telegram initData validation
 # ---------------------------------------------------------------------------
 
+
 class TestInitDataValidation:
     """Tests for Telegram WebApp initData validation."""
 
@@ -277,6 +292,7 @@ class TestInitDataValidation:
 # ---------------------------------------------------------------------------
 # Task 5: API /api/notifications
 # ---------------------------------------------------------------------------
+
 
 class TestApiNotifications:
     """Tests for notification preferences endpoints."""
@@ -303,6 +319,7 @@ class TestApiNotifications:
 # ---------------------------------------------------------------------------
 # Task 6: API /api/fuel/orders
 # ---------------------------------------------------------------------------
+
 
 class TestApiFuelOrders:
     """Tests for fuel orders endpoints."""
@@ -332,6 +349,7 @@ class TestApiFuelOrders:
 # ---------------------------------------------------------------------------
 # Task 8: API /api/shifts
 # ---------------------------------------------------------------------------
+
 
 class TestApiShifts:
     """Tests for shift schedule endpoints."""
@@ -366,6 +384,7 @@ class TestApiShifts:
 # ---------------------------------------------------------------------------
 # Tasks 9-12: API /api/analytics, /api/report/excel/v2
 # ---------------------------------------------------------------------------
+
 
 class TestApiAnalytics:
     """Tests for analytics endpoints (Tasks 9-12)."""
@@ -518,7 +537,9 @@ class TestApiAnalytics:
         )
         resp = client.get("/api/report/excel/v2?type=quick&days=7")
         assert resp.status_code == 200
-        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get("content-type", "")
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
+            "content-type", ""
+        )
         assert "attachment" in resp.headers.get("content-disposition", "")
         # xlsx files start with PK (ZIP magic bytes)
         assert resp.content[:2] == b"PK"
@@ -531,7 +552,9 @@ class TestApiAnalytics:
         )
         resp = client.get("/api/report/excel/v2?type=detailed&days=14")
         assert resp.status_code == 200
-        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get("content-type", "")
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
+            "content-type", ""
+        )
         assert "attachment" in resp.headers.get("content-disposition", "")
         assert resp.content[:2] == b"PK"
 
@@ -544,7 +567,9 @@ class TestApiAnalytics:
         monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
         resp = client.get("/api/report/excel?days=7")
         assert resp.status_code == 200
-        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get("content-type", "")
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
+            "content-type", ""
+        )
         assert "attachment" in resp.headers.get("content-disposition", "")
 
 
@@ -589,6 +614,7 @@ class TestServiceWorker:
     def test_service_worker_injects_build_version(self, client):
         """Service worker should have hardcoded version replaced with BUILD_VERSION."""
         from get_build_version import BUILD_VERSION
+
         resp = client.get("/service-worker.js")
         text = resp.text
         assert f"const CACHE_VERSION = '{BUILD_VERSION}';" in text
@@ -606,6 +632,7 @@ class TestMlModels:
     def test_fuel_forecast_insufficient_data(self):
         """FuelForecast.train returns False with < 7 data points."""
         from ml_models import FuelForecast
+
         ff = FuelForecast()
         result = ff.train([{"date": "2025-01-01", "fuel_consumed": 40, "outage_hours": 4}])
         assert result is False
@@ -613,6 +640,7 @@ class TestMlModels:
     def test_fuel_forecast_fallback_predict(self):
         """FuelForecast returns fallback predictions when not trained."""
         from ml_models import FuelForecast
+
         ff = FuelForecast()
         preds = ff.predict(7)
         assert len(preds) == 7
@@ -625,15 +653,18 @@ class TestMlModels:
         """FuelForecast trains on sufficient data and predicts 7 days."""
         from ml_models import FuelForecast
         from datetime import datetime, timedelta
+
         ff = FuelForecast()
         data = []
         for i in range(30):
             dt = datetime(2025, 1, 1) + timedelta(days=i)
-            data.append({
-                "date": dt.strftime("%Y-%m-%d"),
-                "fuel_consumed": 40 + (i % 7) * 2,
-                "outage_hours": 4,
-            })
+            data.append(
+                {
+                    "date": dt.strftime("%Y-%m-%d"),
+                    "fuel_consumed": 40 + (i % 7) * 2,
+                    "outage_hours": 4,
+                }
+            )
         ok = ff.train(data)
         assert ok is True
         preds = ff.predict(7)
@@ -644,6 +675,7 @@ class TestMlModels:
     def test_anomaly_detector_insufficient_data(self):
         """AnomalyDetector.train returns False with < 10 data points."""
         from ml_models import AnomalyDetector
+
         ad = AnomalyDetector()
         result = ad.train([{"fuel_consumed": 40, "work_hours": 8, "fuel_rate": 5}])
         assert result is False
@@ -651,6 +683,7 @@ class TestMlModels:
     def test_anomaly_detector_no_anomaly_when_not_trained(self):
         """AnomalyDetector.detect returns non-anomaly when not trained."""
         from ml_models import AnomalyDetector
+
         ad = AnomalyDetector()
         result = ad.detect({"fuel_consumed": 40, "work_hours": 8, "fuel_rate": 5})
         assert result["is_anomaly"] is False

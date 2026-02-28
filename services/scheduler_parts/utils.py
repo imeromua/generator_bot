@@ -32,7 +32,7 @@ def fmt_range(start_h: int, end_h: int) -> str:
 
 def yesterday_shifts_summary(now: datetime) -> str:
     """Генерує зведення по змінах за вчора.
-    
+
     FIX #20: Додано receipt_number (6-те поле) в розпакуванні логів.
     FIX (Postgres): Повернення generator_id як 7-го поля, ігноруємо зайві колонки через зріз.
     """

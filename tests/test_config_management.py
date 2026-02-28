@@ -42,6 +42,7 @@ def client():
 # Database API tests
 # ---------------------------------------------------------------------------
 
+
 class TestGetFuelConsumptionRateDb:
     def test_returns_db_value_when_set(self):
         db.set_generator_param("main", "fuel_consumption_rate", 7.0)
@@ -50,6 +51,7 @@ class TestGetFuelConsumptionRateDb:
     def test_returns_db_value_after_manual_set(self, monkeypatch):
         monkeypatch.setattr(config, "FUEL_CONSUMPTION", 6.2)
         from database.api.config import get_fuel_consumption_rate_db
+
         db.set_generator_param("main", "fuel_consumption_rate", 6.2)
         assert get_fuel_consumption_rate_db("main") == 6.2
 
@@ -95,17 +97,10 @@ class TestSetGeneratorParam:
         db.set_generator_param("main", "fuel_consumption_rate", 7.0)
         db.set_generator_param("main", "fuel_consumption_rate", 8.0)
         history = db.get_config_history(limit=5)
-        assert any(
-            h["param_name"] == "fuel_consumption_rate"
-            and h["new_value"] == 8.0
-            for h in history
-        )
+        assert any(h["param_name"] == "fuel_consumption_rate" and h["new_value"] == 8.0 for h in history)
 
     def test_set_with_admin_info(self):
-        result = db.set_generator_param(
-            "main", "fuel_consumption_rate", 7.5,
-            updated_by=123, updated_by_name="Admin"
-        )
+        result = db.set_generator_param("main", "fuel_consumption_rate", 7.5, updated_by=123, updated_by_name="Admin")
         assert result is True
         cfg = db.get_generator_config("main")
         assert cfg["fuel_consumption_rate"]["updated_by"] == "Admin"
@@ -133,10 +128,7 @@ class TestSetGlobalParam:
         db.set_global_param("fuel_price", 45.0)
         db.set_global_param("fuel_price", 55.0)
         history = db.get_config_history(limit=5)
-        assert any(
-            h["param_name"] == "fuel_price" and h["new_value"] == 55.0
-            for h in history
-        )
+        assert any(h["param_name"] == "fuel_price" and h["new_value"] == 55.0 for h in history)
 
 
 class TestGetConfigHistory:
@@ -151,15 +143,13 @@ class TestGetConfigHistory:
         db.set_generator_param("main", "fuel_consumption_rate", 7.0, 1, "Admin")
         db.set_generator_param("main", "fuel_consumption_rate", 8.0, 1, "Admin")
         history = db.get_config_history(limit=10)
-        changes = [h for h in history if h["param_name"] == "fuel_consumption_rate"
-                   and h["config_type"] == "generator"]
+        changes = [h for h in history if h["param_name"] == "fuel_consumption_rate" and h["config_type"] == "generator"]
         assert len(changes) >= 2
 
     def test_records_global_change(self):
         db.set_global_param("fuel_price", 60.0, 1, "Admin")
         history = db.get_config_history(limit=10)
-        changes = [h for h in history if h["param_name"] == "fuel_price"
-                   and h["config_type"] == "global"]
+        changes = [h for h in history if h["param_name"] == "fuel_price" and h["config_type"] == "global"]
         assert len(changes) >= 1
         assert changes[0]["new_value"] == 60.0
 
@@ -189,6 +179,7 @@ class TestGetFuelConsumptionRateState:
 # ---------------------------------------------------------------------------
 # API endpoint tests
 # ---------------------------------------------------------------------------
+
 
 class TestApiAdminConfig:
     """Tests for /api/admin/config endpoints."""

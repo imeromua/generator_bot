@@ -23,6 +23,7 @@ try:
     from openpyxl.chart import LineChart, BarChart, Reference
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
+
     EXCEL_AVAILABLE = True
 except ImportError:  # pragma: no cover
     EXCEL_AVAILABLE = False
@@ -157,8 +158,7 @@ class ExcelReportGenerator:
         ws['A7'] = 'Щоденна статистика'
         ws['A7'].font = Font(bold=True, size=12)
 
-        headers = ['Дата', 'Мотогодини', 'Витрата, л', 'Залишок ранок, л',
-                   'Залишок вечір, л', 'Заправка, л']
+        headers = ['Дата', 'Мотогодини', 'Витрата, л', 'Залишок ранок, л', 'Залишок вечір, л', 'Заправка, л']
         for ci, h in enumerate(headers, start=1):
             self._style_header(ws.cell(row=8, column=ci, value=h))
         ws.row_dimensions[8].height = 30
@@ -271,8 +271,16 @@ class ExcelReportGenerator:
         ws['A1'].fill = self._fill('header_bg')
         ws.row_dimensions[1].height = 24
 
-        headers = ['Дата', 'Мотогодини', 'Витрата, л', 'Сер. витрата, л/год',
-                   'Залишок ранок, л', 'Залишок вечір, л', 'Заправка, л', 'Зміни']
+        headers = [
+            'Дата',
+            'Мотогодини',
+            'Витрата, л',
+            'Сер. витрата, л/год',
+            'Залишок ранок, л',
+            'Залишок вечір, л',
+            'Заправка, л',
+            'Зміни',
+        ]
         for ci, h in enumerate(headers, start=1):
             self._style_header(ws.cell(row=2, column=ci, value=h))
         ws.row_dimensions[2].height = 36
@@ -286,9 +294,14 @@ class ExcelReportGenerator:
             rate = round(d['fuel_consumed'] / d['work_hours'], 2) if d['work_hours'] > 0 else ''
             shifts_str = ', '.join(d.get('shifts_active', []))
             row_vals = [
-                d['date'], d['work_hours'], d['fuel_consumed'], rate,
-                d.get('morning_fuel', ''), d.get('evening_fuel', ''),
-                d.get('refill_total', 0) or '', shifts_str,
+                d['date'],
+                d['work_hours'],
+                d['fuel_consumed'],
+                rate,
+                d.get('morning_fuel', ''),
+                d.get('evening_fuel', ''),
+                d.get('refill_total', 0) or '',
+                shifts_str,
             ]
             for ci, val in enumerate(row_vals, start=1):
                 c = ws.cell(row=ri, column=ci, value=val)
@@ -537,12 +550,14 @@ class ExcelReportGenerator:
         logs = db.get_logs_for_period(start_date, end_date, gen_id)
         fuel_rate = db.get_fuel_consumption_rate()
 
-        days_data = defaultdict(lambda: {
-            'shifts': {'m': {}, 'd': {}, 'e': {}, 'x': {}},
-            'refills': [],
-            'morning_fuel': None,
-            'evening_fuel': None,
-        })
+        days_data = defaultdict(
+            lambda: {
+                'shifts': {'m': {}, 'd': {}, 'e': {}, 'x': {}},
+                'refills': [],
+                'morning_fuel': None,
+                'evening_fuel': None,
+            }
+        )
 
         for row_data in logs:
             event_type, ts_str, user_name, value, driver_name, receipt_number, *_ = row_data
@@ -578,7 +593,7 @@ class ExcelReportGenerator:
         # Initialize fuel balance from current state
         state = db.get_state()
         current_fuel = float(state.get('current_fuel', 0) or 0)
-        
+
         # Calculate backwards from current fuel to get starting fuel for the period
         # We need to account for all refills and consumption from end_date to now
         total_period_fuel = sum(sum(day['refills']) for day in days_data.values())
@@ -644,17 +659,19 @@ class ExcelReportGenerator:
 
             prev_fuel = evening_fuel if isinstance(evening_fuel, float) else None
 
-            result.append({
-                'date': date_fmt,
-                'work_hours': work_hours,
-                'fuel_consumed': fuel_consumed,
-                'morning_fuel': morning_fuel,
-                'evening_fuel': evening_fuel,
-                'refill_total': refill_total if refill_total > 0 else None,
-                # outage_hours = work_hours because the generator runs during power outages
-                'outage_hours': work_hours,
-                'shifts_active': shifts_active,
-            })
+            result.append(
+                {
+                    'date': date_fmt,
+                    'work_hours': work_hours,
+                    'fuel_consumed': fuel_consumed,
+                    'morning_fuel': morning_fuel,
+                    'evening_fuel': evening_fuel,
+                    'refill_total': refill_total if refill_total > 0 else None,
+                    # outage_hours = work_hours because the generator runs during power outages
+                    'outage_hours': work_hours,
+                    'shifts_active': shifts_active,
+                }
+            )
 
         return result
 

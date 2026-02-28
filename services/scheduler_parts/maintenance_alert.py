@@ -21,7 +21,7 @@ MAINTENANCE_ALERT_COOLDOWN_MIN = 60  # Кулдаун 1 година між ал
 
 async def check_maintenance_alert(bot, state: dict):
     """Перевіряє чи наближається час ТО і надсилає алерти.
-    
+
     Викликається з планувальника раз на хвилину.
     Алерти надсилаються тільки адмінам.
     """
@@ -68,6 +68,7 @@ async def check_maintenance_alert(bot, state: dict):
         if last_sent_ts_str:
             try:
                 from datetime import datetime
+
                 last_sent = datetime.strptime(last_sent_ts_str, "%Y-%m-%d %H:%M:%S")
                 if last_sent.tzinfo is None:
                     last_sent = last_sent.replace(tzinfo=config.KYIV)
@@ -112,11 +113,7 @@ async def check_maintenance_alert(bot, state: dict):
         await send_single_window(bot, int(admin_id), txt, reply_markup=kb_home)
 
     # FIX #25: Save alert to message history (only for admins)
-    notify_all_users(
-        f"🔔 Час ТО: {hours_str} ({urgency})",
-        "alert",
-        admin_only=True
-    )
+    notify_all_users(f"🔔 Час ТО: {hours_str} ({urgency})", "alert", admin_only=True)
 
     # Зберігаємо час та поріг
     db.set_state("maintenance_alert_last_sent_ts", now.strftime("%Y-%m-%d %H:%M:%S"))

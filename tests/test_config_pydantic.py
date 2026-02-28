@@ -1,4 +1,5 @@
 """Comprehensive tests for Pydantic-based configuration models."""
+
 import pytest
 from pathlib import Path
 import os
@@ -41,10 +42,7 @@ class TestDatabaseSettings:
 
     def test_pool_constraints(self):
         """Test pool size constraints."""
-        db = DatabaseSettings(
-            pg_pool_min_size=5,
-            pg_pool_max_size=20
-        )
+        db = DatabaseSettings(pg_pool_min_size=5, pg_pool_max_size=20)
         assert db.pg_pool_min_size == 5
         assert db.pg_pool_max_size == 20
 
@@ -80,10 +78,7 @@ class TestSheetsSettings:
 
     def test_service_account_path(self):
         """Test service account path uses default."""
-        sheets = SheetsSettings(
-            sheet_id_prod="prod_id",
-            sheet_id_test="test_id"
-        )
+        sheets = SheetsSettings(sheet_id_prod="prod_id", sheet_id_test="test_id")
         assert sheets.service_account_path == Path("service_account.json")
 
 
@@ -102,7 +97,7 @@ class TestLoggingSettings:
         """Test log level accepts various formats."""
         log_debug = LoggingSettings(log_level="DEBUG")
         assert log_debug.log_level == "DEBUG"
-        
+
         log_info = LoggingSettings(log_level="info")
         assert log_info.log_level == "info"
 
@@ -135,10 +130,7 @@ class TestWorkScheduleSettings:
 
     def test_time_format_validation(self):
         """Test time format flexibility."""
-        schedule = WorkScheduleSettings(
-            work_start_time="09:00",
-            work_end_time="18:00"
-        )
+        schedule = WorkScheduleSettings(work_start_time="09:00", work_end_time="18:00")
         assert schedule.work_start_time == "09:00"
         assert schedule.work_end_time == "18:00"
 
@@ -156,19 +148,13 @@ class TestMaintenanceSettings:
 
     def test_positive_intervals(self):
         """Test positive interval values."""
-        maint = MaintenanceSettings(
-            oil_change_interval=150,
-            spark_change_interval=200
-        )
+        maint = MaintenanceSettings(oil_change_interval=150, spark_change_interval=200)
         assert maint.oil_change_interval == 150
         assert maint.spark_change_interval == 200
 
     def test_oil_limit_compatibility(self):
         """Test oil_limit as independent value."""
-        maint = MaintenanceSettings(
-            oil_change_interval=100,
-            oil_limit=150
-        )
+        maint = MaintenanceSettings(oil_change_interval=100, oil_limit=150)
         assert maint.oil_limit == 150
 
 
@@ -194,10 +180,7 @@ class TestFuelSettings:
 
     def test_positive_values(self):
         """Test fuel values can be any float."""
-        fuel = FuelSettings(
-            fuel_consumption=0.5,
-            emergency_fuel_consumption=0.7
-        )
+        fuel = FuelSettings(fuel_consumption=0.5, emergency_fuel_consumption=0.7)
         assert fuel.fuel_consumption == 0.5
         assert fuel.emergency_fuel_consumption == 0.7
 
@@ -232,7 +215,7 @@ class TestAccessSettings:
         """Test registration_open property logic."""
         access_on = AccessSettings(bot_status="ON")
         access_off = AccessSettings(bot_status="OFF")
-        
+
         # Current implementation: registration_open is always True
         assert access_on.registration_open is True
         assert access_off.registration_open is True
@@ -244,10 +227,10 @@ class TestMainSettings:
     def test_is_test_mode(self, monkeypatch):
         """Test is_test_mode property."""
         monkeypatch.setenv("BOT_TOKEN", "token")
-        
+
         settings_test = Settings(mode="TEST")
         assert settings_test.is_test_mode is True
-        
+
         settings_prod = Settings(mode="PROD")
         assert settings_prod.is_test_mode is False
 
@@ -256,10 +239,10 @@ class TestMainSettings:
         monkeypatch.setenv("BOT_TOKEN", "token")
         monkeypatch.setenv("SHEET_ID_PROD", "prod_sheet")
         monkeypatch.setenv("SHEET_ID_TEST", "test_sheet")
-        
+
         settings_test = Settings(mode="TEST")
         settings_prod = Settings(mode="PROD")
-        
+
         assert settings_test.sheet_id == "test_sheet"
         assert settings_prod.sheet_id == "prod_sheet"
 
@@ -285,7 +268,7 @@ class TestBackwardCompatibility:
         """Test core uppercase exports."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         settings = Settings()
-        
+
         assert settings.BOT_TOKEN == settings.bot_token
         assert settings.MODE == settings.mode
 
@@ -293,7 +276,7 @@ class TestBackwardCompatibility:
         """Test database-related exports."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         settings = Settings()
-        
+
         assert settings.DB_BACKEND == settings.database.backend
         assert settings.SQLITE_PATH == settings.database.sqlite_path
 
@@ -301,31 +284,33 @@ class TestBackwardCompatibility:
         """Test fuel-related exports."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         settings = Settings()
-        
+
         assert settings.FUEL_CONSUMPTION == settings.fuel.fuel_consumption
 
     def test_admin_ids_export(self, monkeypatch):
         """Test ADMIN_IDS export."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         settings = Settings()
-        
+
         assert settings.ADMIN_IDS == settings.access.get_admin_ids()
 
     def test_timezone_exports(self, monkeypatch):
         """Test timezone exports."""
         monkeypatch.setenv("BOT_TOKEN", "token")
         settings = Settings()
-        
+
         assert settings.KYIV == settings.kyiv_tz
 
     def test_validate_env_function(self):
         """Test validate_env function exists."""
         from config import validate_env
+
         assert callable(validate_env)
 
     def test_env_bool_helper(self):
         """Test env_bool helper function exists."""
         from config import env_bool
+
         assert callable(env_bool)
 
 
@@ -359,20 +344,16 @@ class TestConfigIntegration:
         """Test loading configuration from .env file."""
         # Clean environment
         monkeypatch.delenv("BOT_TOKEN", raising=False)
-        
+
         # Create test env file
         env_file = tmp_path / ".env.test"
-        env_file.write_text(
-            "BOT_TOKEN=env_file_token\n"
-            "MODE=TEST\n"
-            "ADMINS=123,456\n"
-        )
-        
+        env_file.write_text("BOT_TOKEN=env_file_token\n" "MODE=TEST\n" "ADMINS=123,456\n")
+
         # Load config (in real app would use python-dotenv)
         monkeypatch.setenv("BOT_TOKEN", "env_file_token")
         monkeypatch.setenv("MODE", "TEST")
         monkeypatch.setenv("ADMINS", "123,456")
-        
+
         test_settings = Settings()
         assert test_settings.bot_token == "env_file_token"
         assert test_settings.mode == "TEST"
@@ -382,7 +363,7 @@ class TestConfigIntegration:
         monkeypatch.setenv("BOT_TOKEN", "override_token")
         monkeypatch.setenv("LOG_LEVEL", "DEBUG")
         monkeypatch.setenv("FUEL_CONSUMPTION", "1.5")
-        
+
         settings = Settings()
         assert settings.bot_token == "override_token"
         assert settings.logging.log_level == "DEBUG"

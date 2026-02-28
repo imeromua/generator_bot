@@ -7,7 +7,6 @@ import config
 import database.db_api as db
 from handlers.common_parts.dash import show_dash
 
-
 router = Router()
 
 

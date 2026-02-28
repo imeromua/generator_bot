@@ -22,6 +22,7 @@ try:
     from sklearn.linear_model import LinearRegression
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
+
     ML_AVAILABLE = True
 except ImportError:  # pragma: no cover
     ML_AVAILABLE = False
@@ -35,6 +36,7 @@ except ImportError:  # pragma: no cover
 # Допоміжні функції
 # ---------------------------------------------------------------------------
 
+
 def _day_features(dt: datetime) -> list:
     """Повертає ознаки для дня: [день_тижня, місяць, день_місяця]."""
     return [dt.weekday(), dt.month, dt.day]
@@ -43,6 +45,7 @@ def _day_features(dt: datetime) -> list:
 # ---------------------------------------------------------------------------
 # Модель 1: Прогноз витрати палива
 # ---------------------------------------------------------------------------
+
 
 class FuelForecast:
     """Прогноз витрати палива на 7 днів.
@@ -118,11 +121,13 @@ class FuelForecast:
                 pred = float(self._model.predict(np.array([features]))[0])
                 pred = max(0.0, pred)  # не може бути від'ємним
 
-                results.append({
-                    "date": (today + timedelta(days=i)).strftime("%Y-%m-%d"),
-                    "predicted_fuel": round(pred, 1),
-                    "confidence": 0.75,  # фіксований confidence для linear regression
-                })
+                results.append(
+                    {
+                        "date": (today + timedelta(days=i)).strftime("%Y-%m-%d"),
+                        "predicted_fuel": round(pred, 1),
+                        "confidence": 0.75,  # фіксований confidence для linear regression
+                    }
+                )
             return results
         except Exception as e:
             logger.error(f"FuelForecast.predict error: {e}", exc_info=True)
@@ -144,6 +149,7 @@ class FuelForecast:
 # ---------------------------------------------------------------------------
 # Модель 2: Виявлення аномалій
 # ---------------------------------------------------------------------------
+
 
 class AnomalyDetector:
     """Виявлення аномалій у витраті палива.
@@ -179,11 +185,13 @@ class AnomalyDetector:
         try:
             X = []
             for row in daily_stats:
-                X.append([
-                    float(row.get("fuel_consumed", 0)),
-                    float(row.get("work_hours", 0)),
-                    float(row.get("fuel_rate", 0)),
-                ])
+                X.append(
+                    [
+                        float(row.get("fuel_consumed", 0)),
+                        float(row.get("work_hours", 0)),
+                        float(row.get("fuel_rate", 0)),
+                    ]
+                )
 
             self._scaler = StandardScaler()
             X_scaled = self._scaler.fit_transform(np.array(X))
@@ -214,11 +222,15 @@ class AnomalyDetector:
             return {"is_anomaly": False, "score": 0.0, "reason": ""}
 
         try:
-            X = np.array([[
-                float(record.get("fuel_consumed", 0)),
-                float(record.get("work_hours", 0)),
-                float(record.get("fuel_rate", 0)),
-            ]])
+            X = np.array(
+                [
+                    [
+                        float(record.get("fuel_consumed", 0)),
+                        float(record.get("work_hours", 0)),
+                        float(record.get("fuel_rate", 0)),
+                    ]
+                ]
+            )
             X_scaled = self._scaler.transform(X)
             prediction = self._model.predict(X_scaled)[0]
             score = float(self._model.score_samples(X_scaled)[0])

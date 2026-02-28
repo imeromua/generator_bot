@@ -1,4 +1,5 @@
 """DB API for notification_preferences table (Task 5)."""
+
 from database.models import get_connection
 
 # Notification type categories

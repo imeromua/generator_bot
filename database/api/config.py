@@ -31,6 +31,7 @@ VALID_GLOBAL_PARAMS = ("fuel_price",)
 # Initialisation helpers (called by init_db)
 # ---------------------------------------------------------------------------
 
+
 def _ensure_tables(conn) -> None:
     """Create config tables if they don't exist (called from init_db)."""
     conn.execute("""
@@ -102,14 +103,14 @@ def _seed_defaults(conn) -> None:
 # generator_config
 # ---------------------------------------------------------------------------
 
+
 def get_generator_param(generator_id: str, param_name: str) -> float | None:
     """Return the stored value for a generator parameter, or None if not found."""
     try:
         conn = db_models.get_connection()
         try:
             row = conn.execute(
-                "SELECT param_value FROM generator_config "
-                "WHERE generator_id = ? AND param_name = ?",
+                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             ).fetchone()
             return float(row[0]) if row else None
@@ -174,8 +175,7 @@ def set_generator_param(
         conn = db_models.get_connection()
         try:
             row = conn.execute(
-                "SELECT param_value FROM generator_config "
-                "WHERE generator_id = ? AND param_name = ?",
+                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             ).fetchone()
             old_value = float(row[0]) if row else None
@@ -197,8 +197,7 @@ def set_generator_param(
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
                    VALUES ('generator', ?, ?, ?, ?, ?, ?, ?)""",
-                (generator_id, param_name, old_value, value, now,
-                 updated_by or None, updated_by_name or None),
+                (generator_id, param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             return True
         finally:
@@ -214,6 +213,7 @@ def set_generator_param(
 # ---------------------------------------------------------------------------
 # global_config
 # ---------------------------------------------------------------------------
+
 
 def get_global_param(param_name: str) -> float | None:
     """Return the stored value for a global parameter, or None if not found."""
@@ -303,8 +303,7 @@ def set_global_param(
                    (config_type, entity_id, param_name, old_value, new_value,
                     changed_at, changed_by, changed_by_name)
                    VALUES ('global', NULL, ?, ?, ?, ?, ?, ?)""",
-                (param_name, old_value, value, now,
-                 updated_by or None, updated_by_name or None),
+                (param_name, old_value, value, now, updated_by or None, updated_by_name or None),
             )
             return True
         finally:
@@ -320,6 +319,7 @@ def set_global_param(
 # ---------------------------------------------------------------------------
 # config_history
 # ---------------------------------------------------------------------------
+
 
 def get_config_history(limit: int = 20, offset: int = 0) -> list[dict]:
     """Return recent config changes as a list of dicts."""
@@ -363,14 +363,14 @@ def get_config_history(limit: int = 20, offset: int = 0) -> list[dict]:
 # Dynamic getters (with .env fallback)
 # ---------------------------------------------------------------------------
 
+
 def get_fuel_consumption_rate_db(generator_id: str = "main") -> float:
     """Get fuel consumption rate from DB, fallback to .env value."""
     value = get_generator_param(generator_id, "fuel_consumption_rate")
     if value is not None:
         return value
     if generator_id == "emergency":
-        return float(getattr(_config, "EMERGENCY_FUEL_CONSUMPTION",
-                             getattr(_config, "FUEL_CONSUMPTION", 5.3)))
+        return float(getattr(_config, "EMERGENCY_FUEL_CONSUMPTION", getattr(_config, "FUEL_CONSUMPTION", 5.3)))
     return float(getattr(_config, "FUEL_CONSUMPTION", 5.3))
 
 
@@ -386,6 +386,7 @@ def get_fuel_price_db() -> float:
 # Validation helpers
 # ---------------------------------------------------------------------------
 
+
 def _validate_generator_param(param_name: str, value: float) -> None:
     if param_name == "fuel_consumption_rate":
         if not (FUEL_CONSUMPTION_MIN <= value <= FUEL_CONSUMPTION_MAX):
@@ -398,7 +399,4 @@ def _validate_generator_param(param_name: str, value: float) -> None:
 def _validate_global_param(param_name: str, value: float) -> None:
     if param_name == "fuel_price":
         if not (FUEL_PRICE_MIN <= value <= FUEL_PRICE_MAX):
-            raise ValueError(
-                f"fuel_price must be between {FUEL_PRICE_MIN} "
-                f"and {FUEL_PRICE_MAX}, got {value}"
-            )
+            raise ValueError(f"fuel_price must be between {FUEL_PRICE_MIN} " f"and {FUEL_PRICE_MAX}, got {value}")

@@ -56,9 +56,7 @@ def _backup_postgres(backup_path: Path) -> None:
         )
         stdout, stderr = proc.communicate()
         if proc.returncode != 0:
-            raise RuntimeError(
-                f"pg_dump failed (exit {proc.returncode}): {stderr.decode()}"
-            )
+            raise RuntimeError(f"pg_dump failed (exit {proc.returncode}): {stderr.decode()}")
         gz_file.write(stdout)
 
 
@@ -129,7 +127,7 @@ def apply_retention_policy(backup_dir: Path | None = None) -> list[Path]:
         try:
             # filename format: backup_YYYY-MM-DD_HH-MM.sql.gz
             # strip the prefix and double extension to get the date part
-            date_part = f.name[len("backup_"):].replace(".sql.gz", "")
+            date_part = f.name[len("backup_") :].replace(".sql.gz", "")
             dt = datetime.strptime(date_part, "%Y-%m-%d_%H-%M")
             backups.append((dt, f))
         except Exception:
@@ -138,7 +136,7 @@ def apply_retention_policy(backup_dir: Path | None = None) -> list[Path]:
     backups.sort(key=lambda x: x[0])
 
     # Buckets: daily, weekly, monthly
-    kept_weeks: dict[str, Path] = {}   # "YYYY-WW" → file
+    kept_weeks: dict[str, Path] = {}  # "YYYY-WW" → file
     kept_months: dict[str, Path] = {}  # "YYYY-MM" → file
     deleted: list[Path] = []
 
@@ -189,18 +187,20 @@ def list_backups(backup_dir: Path | None = None) -> list[dict]:
     result = []
     for f in backup_dir.glob("backup_*.sql.gz"):
         try:
-            date_part = f.name[len("backup_"):].replace(".sql.gz", "")
+            date_part = f.name[len("backup_") :].replace(".sql.gz", "")
             dt = datetime.strptime(date_part, "%Y-%m-%d_%H-%M")
         except Exception:
             dt = datetime.fromtimestamp(f.stat().st_mtime)
 
         size_bytes = f.stat().st_size
-        result.append({
-            "filename": f.name,
-            "timestamp": dt.strftime("%Y-%m-%d %H:%M"),
-            "size_bytes": size_bytes,
-            "size_kb": round(size_bytes / 1024, 1),
-        })
+        result.append(
+            {
+                "filename": f.name,
+                "timestamp": dt.strftime("%Y-%m-%d %H:%M"),
+                "size_bytes": size_bytes,
+                "size_kb": round(size_bytes / 1024, 1),
+            }
+        )
 
     result.sort(key=lambda x: x["timestamp"], reverse=True)
     return result

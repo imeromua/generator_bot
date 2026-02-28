@@ -30,9 +30,7 @@ def import_initial_state_from_sheet(sheet):
 
         row = find_row_by_date_in_column_a(sheet, today, config.SHEET_NAME)
         if not row:
-            logging.warning(
-                f"⚠️ Не можу імпортувати стартові значення: дата {today_str} не знайдена в колонці A"
-            )
+            logging.warning(f"⚠️ Не можу імпортувати стартові значення: дата {today_str} не знайдена в колонці A")
             return
 
         fuel_raw = sheet.cell(row, 11).value

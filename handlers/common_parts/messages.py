@@ -21,14 +21,14 @@ def _format_message_time(ts_str: str) -> str:
     """Форматує час повідомлення."""
     if not ts_str:
         return "невідомо"
-    
+
     try:
         dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
         dt = dt.replace(tzinfo=config.KYIV)
         now = datetime.now(config.KYIV)
-        
+
         diff = now - dt
-        
+
         if diff.total_seconds() < 60:
             return "щойно"
         elif diff.total_seconds() < 3600:
@@ -61,36 +61,29 @@ def _get_message_icon(message_type: str) -> str:
 async def view_messages(cb: types.CallbackQuery, state: FSMContext):
     """Показує історію повідомлень."""
     await state.clear()
-    
+
     user_id = cb.from_user.id
     messages = db.get_user_messages(user_id, limit=5)
-    
+
     if not messages:
-        txt = (
-            "📨 <b>Повідомлення</b>\n"
-            "──────────────\n\n"
-            "🔕 <i>Повідомлень поки немає</i>"
-        )
+        txt = "📨 <b>Повідомлення</b>\n" "──────────────\n\n" "🔕 <i>Повідомлень поки немає</i>"
     else:
-        txt = (
-            f"📨 <b>Повідомлення</b> ({len(messages)}/5)\n"
-            "──────────────\n\n"
-        )
-        
+        txt = f"📨 <b>Повідомлення</b> ({len(messages)}/5)\n" "──────────────\n\n"
+
         for i, (message_text, message_type, timestamp) in enumerate(messages, 1):
             icon = _get_message_icon(message_type)
             time_str = _format_message_time(timestamp)
             txt += f"{icon} {message_text}\n<i>⏰ {time_str}</i>\n\n"
-    
+
     # Кнопки: Очистити | На головну
     builder = InlineKeyboardBuilder()
-    
+
     if messages:
         builder.button(text="🗑️ Очистити", callback_data="clear_messages")
-    
+
     builder.button(text="🏠 Головне меню", callback_data="main_menu")
     builder.adjust(1)
-    
+
     await cb.message.edit_text(txt, reply_markup=builder.as_markup())
     await cb.answer()
 
@@ -99,18 +92,14 @@ async def view_messages(cb: types.CallbackQuery, state: FSMContext):
 async def clear_messages(cb: types.CallbackQuery, state: FSMContext):
     """Очищає історію повідомлень."""
     await state.clear()
-    
+
     user_id = cb.from_user.id
     db.clear_user_messages(user_id)
-    
-    txt = (
-        "📨 <b>Повідомлення</b>\n"
-        "──────────────\n\n"
-        "✅ <i>Історія повідомлень очищена</i>"
-    )
-    
+
+    txt = "📨 <b>Повідомлення</b>\n" "──────────────\n\n" "✅ <i>Історія повідомлень очищена</i>"
+
     builder = InlineKeyboardBuilder()
     builder.button(text="🏠 Головне меню", callback_data="main_menu")
-    
+
     await cb.message.edit_text(txt, reply_markup=builder.as_markup())
     await cb.answer("✅ Повідомлення очищено")

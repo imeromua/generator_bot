@@ -118,13 +118,11 @@ def _restore_generator_state():
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        """
+    cur.execute("""
         SELECT event_type, timestamp, value
         FROM logs
         ORDER BY timestamp ASC
-    """
-    )
+    """)
     rows = cur.fetchall()
 
     rate = _fuel_rate()

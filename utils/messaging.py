@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def notify_success(user_id: int, message: str, save_to_history: bool = True) -> None:
     """Повідомлення про успішну операцію.
-    
+
     Args:
         user_id: Telegram user ID
         message: Текст повідомлення
@@ -30,7 +30,7 @@ def notify_success(user_id: int, message: str, save_to_history: bool = True) -> 
 
 def notify_error(user_id: int, message: str, save_to_history: bool = True) -> None:
     """Повідомлення про помилку.
-    
+
     Args:
         user_id: Telegram user ID
         message: Текст повідомлення
@@ -46,7 +46,7 @@ def notify_error(user_id: int, message: str, save_to_history: bool = True) -> No
 
 def notify_warning(user_id: int, message: str, save_to_history: bool = True) -> None:
     """Повідомлення-попередження.
-    
+
     Args:
         user_id: Telegram user ID
         message: Текст повідомлення
@@ -62,7 +62,7 @@ def notify_warning(user_id: int, message: str, save_to_history: bool = True) -> 
 
 def notify_alert(user_id: int, message: str, save_to_history: bool = True) -> None:
     """Важливий алерт.
-    
+
     Args:
         user_id: Telegram user ID
         message: Текст повідомлення
@@ -78,7 +78,7 @@ def notify_alert(user_id: int, message: str, save_to_history: bool = True) -> No
 
 def notify_info(user_id: int, message: str, save_to_history: bool = True) -> None:
     """Інформаційне повідомлення.
-    
+
     Args:
         user_id: Telegram user ID
         message: Текст повідомлення
@@ -94,33 +94,33 @@ def notify_info(user_id: int, message: str, save_to_history: bool = True) -> Non
 
 def notify_all_users(message: str, message_type: str = "info", admin_only: bool = False) -> int:
     """Відправляє повідомлення всім користувачам.
-    
+
     Args:
         message: Текст повідомлення
         message_type: Тип (info, success, warning, error, alert)
         admin_only: Тільки адмінам (за замовчуванням False)
-    
+
     Returns:
         Кількість користувачів, яким відправлено повідомлення
     """
     import config
-    
+
     count = 0
     try:
         users = db.get_all_users()
-        
+
         for user_id, _ in users:
             if admin_only and user_id not in config.ADMIN_IDS:
                 continue
-            
+
             try:
                 db.add_message(user_id, message, message_type)
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to send message to user {user_id}: {e}")
-        
+
         logger.info(f"📢 Broadcast message sent to {count} users: {message}")
     except Exception as e:
         logger.error(f"Failed to broadcast message: {e}", exc_info=True)
-    
+
     return count

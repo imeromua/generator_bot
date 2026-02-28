@@ -1,4 +1,5 @@
 """Tests for config.py with corrected assertions."""
+
 import pytest
 from pathlib import Path
 
@@ -26,10 +27,7 @@ class TestDatabaseSettings:
 
     def test_postgres_backend(self):
         """Test PostgreSQL backend configuration."""
-        db = DatabaseSettings(
-            backend="postgres",
-            postgres_dsn="postgresql://user:pass@localhost/db"
-        )
+        db = DatabaseSettings(backend="postgres", postgres_dsn="postgresql://user:pass@localhost/db")
         assert db.backend == "postgres"
         assert "localhost" in db.postgres_dsn
 
@@ -44,10 +42,7 @@ class TestRedisSettings:
 
     def test_enabled_with_url(self):
         """Test Redis enabled with URL."""
-        redis = RedisSettings(
-            enabled=True,
-            url="redis://localhost:6379/0"
-        )
+        redis = RedisSettings(enabled=True, url="redis://localhost:6379/0")
         assert redis.enabled is True
         assert "localhost" in redis.url
 
@@ -57,10 +52,7 @@ class TestSheetsSettings:
 
     def test_default_service_account_path(self):
         """Test default service account path."""
-        sheets = SheetsSettings(
-            sheet_id_prod="test_prod",
-            sheet_id_test="test_test"
-        )
+        sheets = SheetsSettings(sheet_id_prod="test_prod", sheet_id_test="test_test")
         assert sheets.service_account_path == Path("service_account.json")
 
 
@@ -122,10 +114,7 @@ class TestFuelSettings:
 
     def test_custom_emergency_consumption(self):
         """Test custom emergency fuel consumption."""
-        fuel = FuelSettings(
-            fuel_consumption=1.0,
-            emergency_fuel_consumption=1.5
-        )
+        fuel = FuelSettings(fuel_consumption=1.0, emergency_fuel_consumption=1.5)
         assert fuel.fuel_consumption == 1.0
         assert fuel.emergency_fuel_consumption == 1.5
 
@@ -157,10 +146,10 @@ class TestMainSettings:
     def test_is_test_mode_property(self, monkeypatch):
         """Test is_test_mode property."""
         monkeypatch.setenv("BOT_TOKEN", "test_token")
-        
+
         settings_test = Settings(mode="TEST")
         assert settings_test.is_test_mode is True
-        
+
         settings_prod = Settings(mode="PROD")
         assert settings_prod.is_test_mode is False
 
@@ -178,7 +167,7 @@ class TestBackwardCompatibility:
         """Test uppercase attribute exports for backward compatibility."""
         monkeypatch.setenv("BOT_TOKEN", "test_token")
         settings = Settings()
-        
+
         # Test that uppercase versions exist and match
         assert settings.BOT_TOKEN == settings.bot_token
         assert settings.DB_BACKEND == settings.database.backend

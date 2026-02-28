@@ -115,7 +115,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # --- НАЛАШТУВАННЯ ТАБЛИЦІ ---
 MODE = os.getenv("MODE", "TEST")
-IS_TEST_MODE = (MODE == "TEST")
+IS_TEST_MODE = MODE == "TEST"
 
 if IS_TEST_MODE:
     print("⚠️  УВАГА: Бот запущено в ТЕСТОВОМУ режимі (SHEET_ID_TEST)")
@@ -162,7 +162,7 @@ MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", str(OIL_CHANGE_INTERVAL)))
 # --- ДОСТУП ---
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
 BOT_STATUS = os.getenv("BOT_STATUS", "ON")
-REGISTRATION_OPEN = (BOT_STATUS == "ON")
+REGISTRATION_OPEN = BOT_STATUS == "ON"
 WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
 
 # --- ПАЛИВО (ОСНОВНИЙ ГЕНЕРАТОР) ---
@@ -172,9 +172,7 @@ if FUEL_RATE_STR:
     try:
         FUEL_CONSUMPTION = float(FUEL_RATE_STR)
     except ValueError:
-        print(
-            f"⚠️  УВАГА: FUEL_RATE/FUEL_CONSUMPTION='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням"
-        )
+        print(f"⚠️  УВАГА: FUEL_RATE/FUEL_CONSUMPTION='{FUEL_RATE_STR}' не є числом, використано 5.3 за замовчуванням")
         FUEL_CONSUMPTION = 5.3
 else:
     print("⚠️  УВАГА: FUEL_RATE не вказано в .env, використано 5.3 л/год за замовчуванням")
@@ -225,7 +223,9 @@ if __name__ == "__main__":
         print(f"SQLite path: {SQLITE_PATH}")
     if DB_BACKEND == "postgres":
         print(f"Postgres DSN: {'(set)' if bool(POSTGRES_DSN) else '(missing)'}")
-        print(f"Connection pool: min={PG_POOL_MIN_SIZE}, max={PG_POOL_MAX_SIZE}, timeout={PG_POOL_TIMEOUT}s, max_idle={PG_POOL_MAX_IDLE}s")
+        print(
+            f"Connection pool: min={PG_POOL_MIN_SIZE}, max={PG_POOL_MAX_SIZE}, timeout={PG_POOL_TIMEOUT}s, max_idle={PG_POOL_MAX_IDLE}s"
+        )
     print(f"Redis enabled: {REDIS_ENABLED}")
     print(f"Sheets runtime enabled: {SHEETS_RUNTIME_ENABLED}")
     print(f"Service account path: {SERVICE_ACCOUNT_PATH}")
@@ -261,7 +261,6 @@ except ValueError:
 
 from pathlib import Path as _Path
 
-
 # Alias for backward compatibility (tests import env_bool)
 env_bool = _env_bool
 
@@ -269,10 +268,18 @@ env_bool = _env_bool
 class DatabaseSettings:
     """Налаштування бази даних."""
 
-    def __init__(self, *, backend="sqlite", sqlite_path=":memory:",
-                 postgres_dsn=None, postgres_admin_dsn=None,
-                 pg_pool_min_size=2, pg_pool_max_size=10,
-                 pg_pool_timeout=30, pg_pool_max_idle=300):
+    def __init__(
+        self,
+        *,
+        backend="sqlite",
+        sqlite_path=":memory:",
+        postgres_dsn=None,
+        postgres_admin_dsn=None,
+        pg_pool_min_size=2,
+        pg_pool_max_size=10,
+        pg_pool_timeout=30,
+        pg_pool_max_idle=300,
+    ):
         self.backend = backend
         self.sqlite_path = sqlite_path
         self.postgres_dsn = postgres_dsn
@@ -294,8 +301,7 @@ class RedisSettings:
 class SheetsSettings:
     """Налаштування Google Sheets."""
 
-    def __init__(self, *, sheet_id_prod=None, sheet_id_test=None,
-                 service_account_path=None):
+    def __init__(self, *, sheet_id_prod=None, sheet_id_test=None, service_account_path=None):
         self.sheet_id_prod = sheet_id_prod
         self.sheet_id_test = sheet_id_test
         self.service_account_path = _Path(service_account_path or "service_account.json")
@@ -304,8 +310,7 @@ class SheetsSettings:
 class LoggingSettings:
     """Налаштування логування."""
 
-    def __init__(self, *, log_level="ERROR", log_file="bot.log",
-                 log_max_bytes=10 * 1024 * 1024, log_backup_count=5):
+    def __init__(self, *, log_level="ERROR", log_file="bot.log", log_max_bytes=10 * 1024 * 1024, log_backup_count=5):
         self.log_level = log_level
         self.log_file = log_file
         self.log_max_bytes = log_max_bytes
@@ -315,9 +320,9 @@ class LoggingSettings:
 class WorkScheduleSettings:
     """Налаштування робочого графіка."""
 
-    def __init__(self, *, timezone="Europe/Kyiv",
-                 work_start_time="07:30", work_end_time="20:30",
-                 morning_brief_time="07:30"):
+    def __init__(
+        self, *, timezone="Europe/Kyiv", work_start_time="07:30", work_end_time="20:30", morning_brief_time="07:30"
+    ):
         self.timezone = timezone
         self.work_start_time = work_start_time
         self.work_end_time = work_end_time
@@ -327,8 +332,7 @@ class WorkScheduleSettings:
 class MaintenanceSettings:
     """Налаштування техобслуговування."""
 
-    def __init__(self, *, oil_change_interval=100, spark_change_interval=100,
-                 maintenance_interval=300, oil_limit=100):
+    def __init__(self, *, oil_change_interval=100, spark_change_interval=100, maintenance_interval=300, oil_limit=100):
         self.oil_change_interval = oil_change_interval
         self.spark_change_interval = spark_change_interval
         self.maintenance_interval = maintenance_interval
@@ -338,9 +342,9 @@ class MaintenanceSettings:
 class FuelSettings:
     """Налаштування палива."""
 
-    def __init__(self, *, fuel_consumption=0.8, fuel_rate=None,
-                 emergency_fuel_consumption=0.9,
-                 fuel_alert_threshold=40.0):
+    def __init__(
+        self, *, fuel_consumption=0.8, fuel_rate=None, emergency_fuel_consumption=0.9, fuel_alert_threshold=40.0
+    ):
         # fuel_rate -- аліас для fuel_consumption (зворотна сумісність)
         if fuel_rate is not None:
             self.fuel_consumption = fuel_rate
@@ -388,10 +392,21 @@ class Settings:
     Підтримує вкладені об'єкти (database, logging, fuel, access тощо).
     """
 
-    def __init__(self, *, bot_token=None, mode=None, database=None,
-                 redis=None, sheets=None, logging_settings=None,
-                 schedule=None, maintenance=None, fuel=None, access=None,
-                 **kwargs):
+    def __init__(
+        self,
+        *,
+        bot_token=None,
+        mode=None,
+        database=None,
+        redis=None,
+        sheets=None,
+        logging_settings=None,
+        schedule=None,
+        maintenance=None,
+        fuel=None,
+        access=None,
+        **kwargs,
+    ):
         self.bot_token = bot_token or os.getenv("BOT_TOKEN", "")
         self.mode = mode or os.getenv("MODE", "TEST")
 

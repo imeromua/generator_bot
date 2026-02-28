@@ -1,4 +1,5 @@
 """DB API for shift_schedule table (Task 8)."""
+
 from database.models import get_connection
 
 VALID_SHIFT_TYPES = ("m", "d", "e")  # morning, day, evening
@@ -133,17 +134,18 @@ def auto_schedule_month(year: int, month: int, personnel_list: list[str]) -> lis
             # Avoid giving same person consecutive night shifts (shift 'e')
             if shift_type == "e":
                 candidates = [
-                    p for p in candidates
-                    if last_night.get(p) != f"{year:04d}-{month:02d}-{day - 1:02d}"
+                    p for p in candidates if last_night.get(p) != f"{year:04d}-{month:02d}-{day - 1:02d}"
                 ] or candidates
             chosen = candidates[0]
-            assignments.append({
-                "date": date_str,
-                "shift_type": shift_type,
-                "assigned_personnel_id": chosen,
-                "status": "planned",
-                "notes": None,
-            })
+            assignments.append(
+                {
+                    "date": date_str,
+                    "shift_type": shift_type,
+                    "assigned_personnel_id": chosen,
+                    "status": "planned",
+                    "notes": None,
+                }
+            )
             shift_counts[chosen] += 1
             if shift_type == "e":
                 last_night[chosen] = date_str

@@ -13,7 +13,6 @@ from utils.time import now_kiev
 from utils.sheets_dates import find_row_by_date_in_column_a
 from utils.sheets_guard import sheets_forced_offline
 
-
 _SHIFT_COLS = {
     "m": (2, 3),
     "d": (4, 5),
@@ -48,7 +47,7 @@ def shift_pretty(code_or_event: str) -> str:
         "m": "🌅 Зміна 1",  # Ранок (morning)
         "d": "☀️ Зміна 2",  # День (day)
         "e": "🌙 Зміна 3",  # Вечір (evening)
-        "x": "⚡ Екстра",   # Екстра зміна
+        "x": "⚡ Екстра",  # Екстра зміна
     }.get(code, code_or_event)
 
 
@@ -65,7 +64,7 @@ def open_ws_sync():
 
     if not config.SHEET_ID:
         return None
-    
+
     # FIX #26: Use configurable service account path
     service_account_path = getattr(config, 'SERVICE_ACCOUNT_PATH', 'service_account.json')
     if not os.path.exists(service_account_path):
@@ -93,7 +92,7 @@ def get_sheet_shift_info_sync():
         return False, None, set(), {}
 
     rng = ws.get(f"A{row}:I{row}")
-    vals = (rng[0] if rng else [])
+    vals = rng[0] if rng else []
 
     def cell(col: int) -> str:
         idx = col - 1
@@ -125,17 +124,17 @@ def get_sheet_shift_info_sync():
 
 def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
     """Якщо таблиця показує відкриту зміну — синхронізуємо мінімальний стан в БД для блокування.
-    
+
     FIX #25: Now uses transaction to ensure atomicity of all state updates.
     """
     conn = None
     try:
         conn = get_connection()
         begin_transaction(conn)
-        
+
         # Update all state values atomically
         from database.api.state import _conn_set_state_value
-        
+
         _conn_set_state_value(conn, "status", "ON")
         _conn_set_state_value(conn, "active_shift", f"{open_shift_code}_start")
 
@@ -154,7 +153,7 @@ def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
                 _conn_set_state_value(conn, "last_start_date", start_date.strftime("%Y-%m-%d"))
             except Exception:
                 _conn_set_state_value(conn, "last_start_date", now_kiev().strftime("%Y-%m-%d"))
-        
+
         conn.commit()
 
     except Exception as e:
@@ -164,8 +163,9 @@ def sync_db_from_sheet_open_shift(open_shift_code: str, start_times: dict):
             except Exception:
                 pass
         import logging
+
         logging.error(f"❌ Failed to sync DB from Sheet: {e}", exc_info=True)
-        
+
     finally:
         if conn:
             try:

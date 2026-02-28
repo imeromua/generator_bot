@@ -58,14 +58,10 @@ async def scheduler_loop(bot):
                 close_time = datetime.strptime("20:30", "%H:%M").time()
 
             # 1. РАНКОВИЙ БРИФІНГ
-            brief_sent_today = await maybe_send_morning_brief(
-                bot, now, today_str, brief_sent_today, BRIEF_WINDOW
-            )
+            brief_sent_today = await maybe_send_morning_brief(bot, now, today_str, brief_sent_today, BRIEF_WINDOW)
 
             # 2. АВТО-ЗАКРИТТЯ ЗМІНИ (о WORK_END_TIME)
-            auto_close_done_today, skip_rest = await maybe_auto_close_shift(
-                bot, now, close_time, auto_close_done_today
-            )
+            auto_close_done_today, skip_rest = await maybe_auto_close_shift(bot, now, close_time, auto_close_done_today)
             if skip_rest:
                 # Якщо відбулося закриття, даємо паузу і йдемо на нове коло
                 await asyncio.sleep(60)
@@ -75,14 +71,13 @@ async def scheduler_loop(bot):
             # (щоб не смикати БД в кожній функції окремо)
             try:
                 import database.db_api as db
+
                 state = db.get_state()
             except Exception:
                 state = {}
 
             # 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" (за N хв до кінця)
-            await maybe_send_stop_reminder(
-                bot, now, current_date, close_time, today_str, state
-            )
+            await maybe_send_stop_reminder(bot, now, current_date, close_time, today_str, state)
 
             # 4. АЛЕРТИ ПО ПАЛИВУ (низький рівень)
             await check_fuel_alert(bot, state)

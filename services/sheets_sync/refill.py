@@ -40,8 +40,8 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
     drivers = []
 
     for ts, user_name, value, driver_name in refills:
-        l, r = parse_refill_value(value)
-        total_liters += float(l or 0.0)
+        liters, r = parse_refill_value(value)
+        total_liters += float(liters or 0.0)
         if r and r not in receipts:
             receipts.append(r)
         if driver_name:
@@ -54,7 +54,7 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
         sheet.update(
             range_name=rowcol_to_a1(row, 14),
             values=[[str(round(total_liters, 2)).replace(".", ",")]],
-            value_input_option='USER_ENTERED'
+            value_input_option='USER_ENTERED',
         )
     except Exception as e:
         logging.error(f"❌ Refill total update error date={date_str}: {e}")
@@ -62,19 +62,13 @@ def update_refill_aggregates_for_date(sheet, row: int, date_str: str):
     # P(16): Номер чека (всі через кому)
     try:
         sheet.update(
-            range_name=rowcol_to_a1(row, 16),
-            values=[[", ".join(receipts)]],
-            value_input_option='USER_ENTERED'
+            range_name=rowcol_to_a1(row, 16), values=[[", ".join(receipts)]], value_input_option='USER_ENTERED'
         )
     except Exception as e:
         logging.error(f"❌ Refill receipt update error date={date_str}: {e}")
 
     # AA(27): водії/хто привіз (через кому)
     try:
-        sheet.update(
-            range_name=rowcol_to_a1(row, 27),
-            values=[[", ".join(drivers)]],
-            value_input_option='USER_ENTERED'
-        )
+        sheet.update(range_name=rowcol_to_a1(row, 27), values=[[", ".join(drivers)]], value_input_option='USER_ENTERED')
     except Exception as e:
         logging.error(f"❌ Refill drivers update error date={date_str}: {e}")

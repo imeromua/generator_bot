@@ -10,7 +10,6 @@ from handlers.common_parts.help import router as help_router
 from handlers.common_parts.registration import router as registration_router
 from handlers.common_parts.messages import router as messages_router  # FIX #25
 
-
 router = Router()
 router.include_router(registration_router)
 router.include_router(help_router)

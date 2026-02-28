@@ -1,4 +1,5 @@
 """Pytest configuration and fixtures."""
+
 import pytest
 import os
 from pathlib import Path
@@ -25,10 +26,10 @@ def clean_env(monkeypatch):
         "FUEL_CONSUMPTION",
         "EMERGENCY_FUEL_CONSUMPTION",
     ]
-    
+
     for var in env_vars_to_clean:
         monkeypatch.delenv(var, raising=False)
-    
+
     yield
 
 
@@ -36,9 +37,5 @@ def clean_env(monkeypatch):
 def temp_env_file(tmp_path):
     """Create a temporary .env file for testing."""
     env_file = tmp_path / ".env"
-    env_file.write_text(
-        "BOT_TOKEN=test_token_123\n"
-        "MODE=TEST\n"
-        "ADMINS=123,456\n"
-    )
+    env_file.write_text("BOT_TOKEN=test_token_123\n" "MODE=TEST\n" "ADMINS=123,456\n")
     return env_file

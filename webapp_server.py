@@ -32,6 +32,7 @@ try:
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.cell.cell import MergedCell
     from openpyxl.utils import get_column_letter
+
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False
@@ -48,7 +49,10 @@ import database.models as db_models  # noqa: E402
 import database.db_api as db  # noqa: E402
 
 from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE  # noqa: E402
-from webapp.utils.validation import validate_init_data as _validate_init_data, extract_user as _extract_user  # noqa: E402
+from webapp.utils.validation import (
+    validate_init_data as _validate_init_data,
+    extract_user as _extract_user,
+)  # noqa: E402
 from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
 from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
 from webapp.middleware.rate_limit import RateLimitMiddleware  # noqa: E402
@@ -102,13 +106,15 @@ async def sw_handler(request: Request):
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0',
-            'Service-Worker-Allowed': '/'
-        }
+            'Service-Worker-Allowed': '/',
+        },
     )
+
 
 # ---------------------------------------------------------------------------
 # API — endpoints
 # ---------------------------------------------------------------------------
+
 
 async def api_status(request: Request):
     """GET /api/status — поточний стан генератора."""
@@ -130,9 +136,7 @@ async def api_status(request: Request):
             if start_time_str:
                 try:
                     if start_date_str:
-                        start_dt = datetime.strptime(
-                            f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M"
-                        )
+                        start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
                     else:
                         logger.warning(
                             f"start_date_str відсутній для активної зміни {state.get('active_shift')}! "
@@ -188,17 +192,21 @@ async def api_schedule(request: Request):
             if parsed.year < 2000 or parsed.year > 2100:
                 raise ValueError("Дата поза допустимим діапазоном")
         except ValueError:
-            return JSONResponse(content={"error": "Невірний формат або нереальна дата. Використовуйте YYYY-MM-DD"}, status_code=400)
+            return JSONResponse(
+                content={"error": "Невірний формат або нереальна дата. Використовуйте YYYY-MM-DD"}, status_code=400
+            )
 
         schedule = db.get_schedule(date_str)
         hours = []
         for h in range(24):
             end_h = "24:00" if h == 23 else f"{(h + 1):02d}:00"
-            hours.append({
-                "hour": h,
-                "label": f"{h:02d}:00 — {end_h}",
-                "off": schedule.get(h, 0) == 1,
-            })
+            hours.append(
+                {
+                    "hour": h,
+                    "label": f"{h:02d}:00 — {end_h}",
+                    "off": schedule.get(h, 0) == 1,
+                }
+            )
 
         return {"date": date_str, "hours": hours}
     except Exception as e:
@@ -217,14 +225,16 @@ async def api_events(request: Request):
         rows = db.get_last_logs(limit)
         events = []
         for row in rows:
-            events.append({
-                "event_type": row[0] if len(row) > 0 else "",
-                "timestamp": row[1] if len(row) > 1 else "",
-                "actor": row[2] if len(row) > 2 else "",
-                "value": row[3] if len(row) > 3 else "",
-                "driver": row[4] if len(row) > 4 else "",
-                "receipt": row[5] if len(row) > 5 else "",
-            })
+            events.append(
+                {
+                    "event_type": row[0] if len(row) > 0 else "",
+                    "timestamp": row[1] if len(row) > 1 else "",
+                    "actor": row[2] if len(row) > 2 else "",
+                    "value": row[3] if len(row) > 3 else "",
+                    "driver": row[4] if len(row) > 4 else "",
+                    "receipt": row[5] if len(row) > 5 else "",
+                }
+            )
         return {"events": events, "count": len(events)}
     except Exception as e:
         logger.exception("api_events error")
@@ -240,13 +250,15 @@ async def api_maintenance(request: Request):
 
         history_list = []
         for row in history:
-            history_list.append({
-                "id": row[0] if len(row) > 0 else None,
-                "date": row[1] if len(row) > 1 else "",
-                "type": row[2] if len(row) > 2 else "",
-                "hours": row[3] if len(row) > 3 else 0,
-                "admin": row[4] if len(row) > 4 else "",
-            })
+            history_list.append(
+                {
+                    "id": row[0] if len(row) > 0 else None,
+                    "date": row[1] if len(row) > 1 else "",
+                    "type": row[2] if len(row) > 2 else "",
+                    "hours": row[3] if len(row) > 3 else 0,
+                    "admin": row[4] if len(row) > 4 else "",
+                }
+            )
 
         # Додаємо інтервали ТО з конфігурації для прогрес-барів
         stats["oil_interval"] = config.OIL_CHANGE_INTERVAL
@@ -273,11 +285,13 @@ async def api_schedule_week(request: Request):
             date_str = day.strftime("%Y-%m-%d")
             schedule = db.get_schedule(date_str)
             off_count = sum(1 for v in schedule.values() if v == 1)
-            days.append({
-                "date": date_str,
-                "weekday": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][day.weekday()],
-                "off_hours": off_count,
-            })
+            days.append(
+                {
+                    "date": date_str,
+                    "weekday": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][day.weekday()],
+                    "off_hours": off_count,
+                }
+            )
         return {"days": days}
     except Exception as e:
         logger.exception("api_schedule_week error")
@@ -384,7 +398,9 @@ async def api_action_start(request: Request):
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
+        return JSONResponse(
+            content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400
+        )
 
     now = datetime.now(config.KYIV)
 
@@ -393,7 +409,10 @@ async def api_action_start(request: Request):
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         if not _within_work_window(now.time(), start_t, end_t):
-            return JSONResponse(content={"error": f"Заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"Заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"},
+                status_code=400,
+            )
     except Exception:
         pass
 
@@ -432,7 +451,9 @@ async def api_action_stop(request: Request):
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
+        return JSONResponse(
+            content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400
+        )
 
     now = datetime.now(config.KYIV)
     event_type = shift_code + "_end"
@@ -488,7 +509,9 @@ async def api_action_refill(request: Request):
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
+        return JSONResponse(
+            content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400
+        )
 
     # Перевірка робочого часу
     now = datetime.now(config.KYIV)
@@ -496,7 +519,12 @@ async def api_action_refill(request: Request):
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         if not _within_work_window(now.time(), start_t, end_t):
-            return JSONResponse(content={"error": f"Прийом палива заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"}, status_code=400)
+            return JSONResponse(
+                content={
+                    "error": f"Прийом палива заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"
+                },
+                status_code=400,
+            )
     except Exception:
         pass
 
@@ -548,7 +576,9 @@ async def api_schedule_toggle(request: Request):
         new_state = bool(schedule.get(hour, 0))
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "schedule_toggle",
+            admin_id,
+            admin_name,
+            "schedule_toggle",
             f"Перемикання графіка {date_str} {hour:02d}:00 → {'відключення' if new_state else 'подача'}",
             target_entity=f"schedule:{date_str}:{hour}",
             new_value={"off": new_state},
@@ -588,7 +618,9 @@ async def api_generator_switch(request: Request):
         prev_gen = db.get_active_generator()
         success, message = db.switch_generator(target, admin_name)
         db.log_admin_action(
-            user_id, admin_name, "gen_switch",
+            user_id,
+            admin_name,
+            "gen_switch",
             f"Перемикання генератора: {prev_gen} → {target}",
             target_entity=f"generator:{target}",
             old_value=prev_gen,
@@ -630,7 +662,9 @@ async def api_maintenance_perform(request: Request):
         db.record_maintenance(action, actor, generator_id)
         action_names = {"oil": "Заміна мастила", "spark": "Заміна свічок", "maintenance": "Планове ТО"}
         db.log_admin_action(
-            user_id, actor, "maintenance_perform",
+            user_id,
+            actor,
+            "maintenance_perform",
             f"{action_names.get(action, action)} на генераторі {generator_id}",
             target_entity=f"generator:{generator_id}",
             new_value={"action": action, "generator": generator_id},
@@ -664,7 +698,9 @@ async def api_maintenance_set_hours(request: Request):
     if generator_id not in ("main", "emergency"):
         return JSONResponse(content={"error": "Невірний генератор"}, status_code=400)
     if hours < 0 or hours > 100000:
-        return JSONResponse(content={"error": "Значення мотогодин поза допустимим діапазоном (0–100000)"}, status_code=400)
+        return JSONResponse(
+            content={"error": "Значення мотогодин поза допустимим діапазоном (0–100000)"}, status_code=400
+        )
 
     try:
         old_stats = db.get_generator_stats(generator_id)
@@ -672,7 +708,9 @@ async def api_maintenance_set_hours(request: Request):
         db.set_total_hours(hours, generator_id)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "mnt_set_hours",
+            admin_id,
+            admin_name,
+            "mnt_set_hours",
             f"Корекція мотогодин генератора {generator_id}: {old_hours:.1f} → {hours:.1f} год",
             target_entity=f"generator:{generator_id}",
             old_value=old_hours,
@@ -716,7 +754,9 @@ async def api_fuel_set(request: Request):
         actor = user_info[1] if user_info else user.get("first_name", "Адмін")
         db.add_log("corr_fuel_set", actor, str(fuel))
         db.log_admin_action(
-            user_id, actor, "fuel_set",
+            user_id,
+            actor,
+            "fuel_set",
             f"Корекція палива: {old_fuel:.1f} → {fuel:.1f} л",
             target_entity="fuel",
             old_value=old_fuel,
@@ -747,15 +787,16 @@ def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -
     start_date = (now - timedelta(days=period_days)).strftime("%Y-%m-%d")
 
     # --- Кольори ---
-    BLUE_FILL   = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
-    LBLUE_FILL  = PatternFill(start_color="D6E8FA", end_color="D6E8FA", fill_type="solid")
-    GREEN_FILL  = PatternFill(start_color="27AE60", end_color="27AE60", fill_type="solid")
+    BLUE_FILL = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
+    LBLUE_FILL = PatternFill(start_color="D6E8FA", end_color="D6E8FA", fill_type="solid")
+    GREEN_FILL = PatternFill(start_color="27AE60", end_color="27AE60", fill_type="solid")
     ORANGE_FILL = PatternFill(start_color="F39C12", end_color="F39C12", fill_type="solid")
-    WHITE_FONT  = Font(bold=True, color="FFFFFF", size=11)
-    BOLD_FONT   = Font(bold=True, size=11)
+    WHITE_FONT = Font(bold=True, color="FFFFFF", size=11)
+    BOLD_FONT = Font(bold=True, size=11)
     BORDER_SIDE = None
     try:
         from openpyxl.styles import Border, Side
+
         thin = Side(style="thin", color="AAAAAA")
         BORDER_SIDE = Border(left=thin, right=thin, top=thin, bottom=thin)
     except Exception:
@@ -794,11 +835,17 @@ def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -
     # Рядки заголовків стовпців
     col_headers_r2 = [
         "Дата",
-        "Зміна 1\nпочаток", "Зміна 1\nкінець",
-        "Зміна 2\nпочаток", "Зміна 2\nкінець",
-        "Зміна 3\nпочаток", "Зміна 3\nкінець",
-        "Залишок\nранок, л", "Витрата\nза день, л", "Залишок\nвечір, л",
-        "Мотогодини\n(накопичено)", "Заправка\n(прихід), л",
+        "Зміна 1\nпочаток",
+        "Зміна 1\nкінець",
+        "Зміна 2\nпочаток",
+        "Зміна 2\nкінець",
+        "Зміна 3\nпочаток",
+        "Зміна 3\nкінець",
+        "Залишок\nранок, л",
+        "Витрата\nза день, л",
+        "Залишок\nвечір, л",
+        "Мотогодини\n(накопичено)",
+        "Заправка\n(прихід), л",
         "Хто привіз / № чека",
     ]
     for ci, h in enumerate(col_headers_r2, start=1):
@@ -828,14 +875,16 @@ def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -
     logs = db.get_logs_for_period(start_date, end_date, generator_id)
 
     # Агрегуємо по датах
-    days_data = defaultdict(lambda: {
-        "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
-        "refills": [],
-        "morning_fuel": None,
-        "evening_fuel": None,
-        "hours_start": None,
-        "hours_end": None,
-    })
+    days_data = defaultdict(
+        lambda: {
+            "shifts": {"m": {}, "d": {}, "e": {}, "x": {}},
+            "refills": [],
+            "morning_fuel": None,
+            "evening_fuel": None,
+            "hours_start": None,
+            "hours_end": None,
+        }
+    )
 
     for row_data in logs:
         event_type, ts_str, user_name, value, driver_name, receipt_number, *_ = row_data
@@ -915,10 +964,7 @@ def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -
 
         prev_fuel = evening_fuel if isinstance(evening_fuel, float) else None
 
-        drivers_str = ", ".join(
-            f"{drv} (чек {rec})" if rec else drv
-            for _, drv, rec in day["refills"] if drv
-        ) or "—"
+        drivers_str = ", ".join(f"{drv} (чек {rec})" if rec else drv for _, drv, rec in day["refills"] if drv) or "—"
 
         row_vals = [
             date_fmt,
@@ -1030,7 +1076,9 @@ async def api_report_excel(request: Request):
         filename = f"report_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "export_excel",
+            admin_id,
+            admin_name,
+            "export_excel",
             f"Експорт Excel-звіту: {gen_name} за {period_days} дн.",
             target_entity=f"generator:{generator_param}",
             new_value={"days": period_days, "generator": generator_param},
@@ -1048,6 +1096,7 @@ async def api_report_excel(request: Request):
 # ---------------------------------------------------------------------------
 # Admin CRUD: drivers & personnel
 # ---------------------------------------------------------------------------
+
 
 async def api_admin_drivers_list(request: Request):
     """GET /api/admin/drivers — список водіїв (лише для адмінів)."""
@@ -1083,7 +1132,9 @@ async def api_admin_drivers_add(request: Request):
             return JSONResponse(content={"error": f"Водій «{name}» вже існує"}, status_code=409)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "driver_add",
+            admin_id,
+            admin_name,
+            "driver_add",
             f"Додано водія «{name}»",
             target_entity=f"driver:{name}",
             new_value=name,
@@ -1115,7 +1166,9 @@ async def api_admin_drivers_delete(request: Request):
             return JSONResponse(content={"error": f"Водія «{name}» не знайдено"}, status_code=404)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "driver_delete",
+            admin_id,
+            admin_name,
+            "driver_delete",
             f"Видалено водія «{name}»",
             target_entity=f"driver:{name}",
             old_value=name,
@@ -1134,10 +1187,7 @@ async def api_admin_personnel_list(request: Request):
     try:
         names = db.get_personnel_names()
         users_with_p = db.get_all_users_with_personnel()
-        users_list = [
-            {"user_id": row[0], "full_name": row[1] or "", "personnel": row[2] or ""}
-            for row in users_with_p
-        ]
+        users_list = [{"user_id": row[0], "full_name": row[1] or "", "personnel": row[2] or ""} for row in users_with_p]
         return {"personnel": names, "users": users_list}
     except Exception as e:
         logger.exception("api_admin_personnel_list error")
@@ -1165,7 +1215,9 @@ async def api_admin_personnel_add(request: Request):
             return JSONResponse(content={"error": f"Персонал «{name}» вже існує"}, status_code=409)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "personnel_add",
+            admin_id,
+            admin_name,
+            "personnel_add",
             f"Додано персонал «{name}»",
             target_entity=f"personnel:{name}",
             new_value=name,
@@ -1197,7 +1249,9 @@ async def api_admin_personnel_delete(request: Request):
             return JSONResponse(content={"error": f"Персонал «{name}» не знайдено"}, status_code=404)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "personnel_delete",
+            admin_id,
+            admin_name,
+            "personnel_delete",
             f"Видалено персонал «{name}»",
             target_entity=f"personnel:{name}",
             old_value=name,
@@ -1238,7 +1292,9 @@ async def api_admin_personnel_assign(request: Request):
         else:
             msg = f"Прив'язку для user {target_user_id} знято"
         db.log_admin_action(
-            admin_id, admin_name, "personnel_assign",
+            admin_id,
+            admin_name,
+            "personnel_assign",
             msg,
             target_entity=f"user:{target_user_id}",
             old_value=old_personnel,
@@ -1258,12 +1314,15 @@ async def api_admin_sync(request: Request):
 
     try:
         from services.sheets_export import full_export
+
         result = full_export()
         updated = result.get("updated", [])
         skipped = result.get("skipped", [])
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "export_sheets",
+            admin_id,
+            admin_name,
+            "export_sheets",
             f"Синхронізація з Google Sheets: {len(updated)} дн. оновлено",
             new_value={"updated": len(updated), "skipped": len(skipped)},
         )
@@ -1281,6 +1340,7 @@ async def api_admin_sync(request: Request):
 # ---------------------------------------------------------------------------
 # Admin Audit Log endpoints
 # ---------------------------------------------------------------------------
+
 
 async def api_admin_audit(request: Request):
     """GET /api/admin/audit — журнал дій адміністраторів.
@@ -1316,13 +1376,18 @@ async def api_admin_audit(request: Request):
 
     try:
         rows = db.get_audit_logs(
-            limit=limit, offset=offset,
-            action_type=action_type, admin_user_id=admin_filter,
-            date_from=date_from, date_to=date_to,
+            limit=limit,
+            offset=offset,
+            action_type=action_type,
+            admin_user_id=admin_filter,
+            date_from=date_from,
+            date_to=date_to,
         )
         total = db.count_audit_logs(
-            action_type=action_type, admin_user_id=admin_filter,
-            date_from=date_from, date_to=date_to,
+            action_type=action_type,
+            admin_user_id=admin_filter,
+            date_from=date_from,
+            date_to=date_to,
         )
         entries = [
             {
@@ -1369,9 +1434,12 @@ async def api_admin_audit_export(request: Request):
 
     try:
         rows = db.get_audit_logs(
-            limit=5000, offset=0,
-            action_type=action_type, admin_user_id=admin_filter,
-            date_from=date_from, date_to=date_to,
+            limit=5000,
+            offset=0,
+            action_type=action_type,
+            admin_user_id=admin_filter,
+            date_from=date_from,
+            date_to=date_to,
         )
 
         from openpyxl import Workbook
@@ -1381,8 +1449,18 @@ async def api_admin_audit_export(request: Request):
         ws = wb.active
         ws.title = "Журнал дій"
 
-        headers = ["#", "Час", "Адмін ID", "Адмін", "Тип дії",
-                   "Опис", "Об'єкт", "Старе значення", "Нове значення", "Успішно"]
+        headers = [
+            "#",
+            "Час",
+            "Адмін ID",
+            "Адмін",
+            "Тип дії",
+            "Опис",
+            "Об'єкт",
+            "Старе значення",
+            "Нове значення",
+            "Успішно",
+        ]
         header_fill = PatternFill(start_color="2481CC", end_color="2481CC", fill_type="solid")
         for ci, h in enumerate(headers, start=1):
             c = ws.cell(row=1, column=ci, value=h)
@@ -1392,6 +1470,7 @@ async def api_admin_audit_export(request: Request):
 
         col_widths = [6, 20, 12, 20, 18, 40, 25, 20, 20, 10]
         from openpyxl.utils import get_column_letter as _gcl
+
         for ci, w in enumerate(col_widths, start=1):
             ws.column_dimensions[_gcl(ci)].width = w
 
@@ -1426,6 +1505,7 @@ async def api_admin_audit_export(request: Request):
 # ---------------------------------------------------------------------------
 # Backup endpoints
 # ---------------------------------------------------------------------------
+
 
 async def api_admin_config_get(request: Request):
     """GET /api/admin/config — поточні налаштування генераторів та глобальні."""
@@ -1485,11 +1565,21 @@ async def api_admin_config_set_generator(request: Request):
         return JSONResponse(content={"error": "value має бути числом"}, status_code=400)
 
     try:
-        from database.api.config import set_generator_param, get_generator_param, VALID_GENERATOR_IDS, VALID_GENERATOR_PARAMS
+        from database.api.config import (
+            set_generator_param,
+            get_generator_param,
+            VALID_GENERATOR_IDS,
+            VALID_GENERATOR_PARAMS,
+        )
+
         if generator_id not in VALID_GENERATOR_IDS:
-            return JSONResponse(content={"error": f"generator_id має бути одним із: {', '.join(VALID_GENERATOR_IDS)}"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"generator_id має бути одним із: {', '.join(VALID_GENERATOR_IDS)}"}, status_code=400
+            )
         if param_name not in VALID_GENERATOR_PARAMS:
-            return JSONResponse(content={"error": f"param_name має бути одним із: {', '.join(VALID_GENERATOR_PARAMS)}"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"param_name має бути одним із: {', '.join(VALID_GENERATOR_PARAMS)}"}, status_code=400
+            )
 
         admin_id, admin_name = _get_admin_info(user)
         old_value = get_generator_param(generator_id, param_name)
@@ -1499,7 +1589,9 @@ async def api_admin_config_set_generator(request: Request):
             return JSONResponse(content={"error": "Не вдалося зберегти налаштування"}, status_code=500)
 
         db.log_admin_action(
-            admin_id, admin_name, "config_generator_set",
+            admin_id,
+            admin_name,
+            "config_generator_set",
             f"Змінено {param_name} для {generator_id}: {old_value} → {value}",
             target_entity=f"generator:{generator_id}",
             old_value=old_value,
@@ -1536,8 +1628,11 @@ async def api_admin_config_set_global(request: Request):
 
     try:
         from database.api.config import set_global_param, get_global_param, VALID_GLOBAL_PARAMS
+
         if param_name not in VALID_GLOBAL_PARAMS:
-            return JSONResponse(content={"error": f"param_name має бути одним із: {', '.join(VALID_GLOBAL_PARAMS)}"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"param_name має бути одним із: {', '.join(VALID_GLOBAL_PARAMS)}"}, status_code=400
+            )
 
         admin_id, admin_name = _get_admin_info(user)
         old_value = get_global_param(param_name)
@@ -1547,7 +1642,9 @@ async def api_admin_config_set_global(request: Request):
             return JSONResponse(content={"error": "Не вдалося зберегти налаштування"}, status_code=500)
 
         db.log_admin_action(
-            admin_id, admin_name, "config_global_set",
+            admin_id,
+            admin_name,
+            "config_global_set",
             f"Змінено {param_name}: {old_value} → {value}",
             target_entity=f"global:{param_name}",
             old_value=old_value,
@@ -1573,6 +1670,7 @@ async def api_admin_config_history(request: Request):
         offset = max(0, offset)
 
         from database.api.config import get_config_history
+
         history = get_config_history(limit=limit, offset=offset)
         return {"history": history}
     except Exception as e:
@@ -1584,6 +1682,7 @@ async def api_admin_config_history(request: Request):
 # Backup endpoints
 # ---------------------------------------------------------------------------
 
+
 async def api_admin_backups_list(request: Request):
     """GET /api/admin/backups — список резервних копій."""
     user = _extract_user(request)
@@ -1592,6 +1691,7 @@ async def api_admin_backups_list(request: Request):
 
     try:
         from backup import list_backups, DEFAULT_BACKUP_DIR
+
         backups = list_backups()
         return {"backups": backups, "count": len(backups)}
     except Exception as e:
@@ -1607,11 +1707,14 @@ async def api_admin_backup_create(request: Request):
 
     try:
         from backup import create_backup
+
         backup_path = create_backup()
         size_kb = round(backup_path.stat().st_size / 1024, 1)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name, "backup_create",
+            admin_id,
+            admin_name,
+            "backup_create",
             f"Створено резервну копію вручну: {backup_path.name} ({size_kb} KB)",
             target_entity=backup_path.name,
             new_value={"filename": backup_path.name, "size_kb": size_kb},
@@ -1644,6 +1747,7 @@ async def api_admin_backup_download(request: Request, filename: str):
 
     try:
         from backup import DEFAULT_BACKUP_DIR
+
         backup_path = DEFAULT_BACKUP_DIR / filename
         if not backup_path.exists():
             return JSONResponse(content={"error": "Файл не знайдено"}, status_code=404)
@@ -1661,10 +1765,10 @@ async def api_admin_backup_download(request: Request, filename: str):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-
 # ---------------------------------------------------------------------------
 # Task 5: Notification preferences API
 # ---------------------------------------------------------------------------
+
 
 async def api_notifications_get(request: Request):
     """GET /api/notifications/preferences — get user notification preferences."""
@@ -1673,12 +1777,12 @@ async def api_notifications_get(request: Request):
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.notifications import get_user_preferences, NOTIFICATION_TYPES
+
         user_id = int(user.get("id", 0))
         prefs = get_user_preferences(user_id)
         return {
             "preferences": prefs,
-            "types": {k: {"label": v["label"], "category": v["category"]}
-                      for k, v in NOTIFICATION_TYPES.items()},
+            "types": {k: {"label": v["label"], "category": v["category"]} for k, v in NOTIFICATION_TYPES.items()},
         }
     except Exception as e:
         logger.exception("api_notifications_get error")
@@ -1705,6 +1809,7 @@ async def api_notifications_set(request: Request):
 
     try:
         from database.api.notifications import set_user_preference, NOTIFICATION_TYPES
+
         if notification_type not in NOTIFICATION_TYPES:
             return JSONResponse(content={"error": "Невідомий тип сповіщення"}, status_code=400)
         user_id = int(user.get("id", 0))
@@ -1737,6 +1842,7 @@ async def api_notifications_test(request: Request):
 # Task 6: Fuel orders API
 # ---------------------------------------------------------------------------
 
+
 async def api_fuel_orders_list(request: Request):
     """GET /api/fuel/orders — list fuel orders."""
     user = _extract_user(request)
@@ -1744,6 +1850,7 @@ async def api_fuel_orders_list(request: Request):
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.fuel_orders import get_orders, get_fuel_consumption_stats
+
         status_filter = request.query_params.get("status") or None
         orders = get_orders(status=status_filter, limit=50)
         stats = get_fuel_consumption_stats(days=30)
@@ -1777,6 +1884,7 @@ async def api_fuel_orders_create(request: Request):
     try:
         from database.api.fuel_orders import create_order
         from utils.time import now_kiev
+
         now = now_kiev()
         user_id = int(user.get("id", 0))
         order_id = create_order(
@@ -1810,9 +1918,12 @@ async def api_fuel_orders_update(request: Request):
 
     try:
         from database.api.fuel_orders import update_order, update_order_status, VALID_STATUSES
+
         new_status = str(body.get("status", "")).strip()
         if new_status and new_status not in VALID_STATUSES:
-            return JSONResponse(content={"error": f"Статус має бути одним із: {', '.join(VALID_STATUSES)}"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"Статус має бути одним із: {', '.join(VALID_STATUSES)}"}, status_code=400
+            )
 
         updated = update_order(
             int(order_id),
@@ -1828,6 +1939,7 @@ async def api_fuel_orders_update(request: Request):
         # If delivered, add fuel to current level
         if new_status == "delivered":
             from database.api.fuel_orders import get_order
+
             order = get_order(int(order_id))
             if order:
                 current_fuel = float(db.get_state_value("current_fuel", "0") or "0")
@@ -1848,6 +1960,7 @@ async def api_fuel_orders_update(request: Request):
 # Task 8: Shift schedule API
 # ---------------------------------------------------------------------------
 
+
 async def api_shifts_get(request: Request):
     """GET /api/shifts/schedule — get shift schedule for a month or date."""
     user = _extract_user(request)
@@ -1855,6 +1968,7 @@ async def api_shifts_get(request: Request):
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.shift_schedule import get_month_schedule, get_date_schedule, get_personnel_shift_counts
+
         date_param = request.query_params.get("date")
         month_param = request.query_params.get("month")  # YYYY-MM
 
@@ -1868,6 +1982,7 @@ async def api_shifts_get(request: Request):
             return {"shifts": entries, "personnel_counts": counts, "month": month_param}
         else:
             from utils.time import now_kiev
+
             now = now_kiev()
             month_str = now.strftime("%Y-%m")
             year, month = now.year, now.month
@@ -1896,8 +2011,11 @@ async def api_shifts_set(request: Request):
 
     try:
         from database.api.shift_schedule import upsert_shift, VALID_SHIFT_TYPES
+
         if shift_type not in VALID_SHIFT_TYPES:
-            return JSONResponse(content={"error": f"shift_type має бути одним із: {', '.join(VALID_SHIFT_TYPES)}"}, status_code=400)
+            return JSONResponse(
+                content={"error": f"shift_type має бути одним із: {', '.join(VALID_SHIFT_TYPES)}"}, status_code=400
+            )
 
         upsert_shift(
             date=date,
@@ -1930,6 +2048,7 @@ async def api_shifts_auto(request: Request):
 
     try:
         from database.api.shift_schedule import auto_schedule_month, upsert_shift
+
         year, month = int(month_param[:4]), int(month_param[5:7])
         # Get personnel list from DB
         personnel_list = db.get_personnel_names()
@@ -1967,6 +2086,7 @@ async def api_shifts_analytics(request: Request):
     try:
         from database.api.shift_schedule import get_personnel_shift_counts, get_month_schedule
         from utils.time import now_kiev
+
         now = now_kiev()
         month_str = request.query_params.get("month") or now.strftime("%Y-%m")
         year, month = int(month_str[:4]), int(month_str[5:7])
@@ -1999,6 +2119,7 @@ async def api_shifts_analytics(request: Request):
 # Analytics helpers
 # ---------------------------------------------------------------------------
 
+
 def _safe_round(v: float, ndigits: int = 1) -> float:
     """Round a float, replacing non-finite values with 0.0."""
     try:
@@ -2019,7 +2140,7 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
     import config as _cfg
 
     start_str = start_dt.strftime("%Y-%m-%d")
-    end_str   = end_dt.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
 
     logs = get_logs_for_period(start_str, end_str, generator_id)
 
@@ -2093,6 +2214,7 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
 # Task 9: Analytics API
 # ---------------------------------------------------------------------------
 
+
 async def api_analytics_kpi(request: Request):
     """GET /api/analytics/kpi — KPI картки для дашборду аналітики."""
     user = _extract_user(request)
@@ -2104,27 +2226,28 @@ async def api_analytics_kpi(request: Request):
         gen_id = request.query_params.get("generator") or None
 
         from utils.time import now_kiev
+
         now = now_kiev()
         start_dt = now - timedelta(days=days - 1)
 
         daily = _build_daily_stats(start_dt, now, gen_id)
 
-        total_hours  = sum(d["work_hours"] for d in daily)
-        total_fuel   = sum(d["fuel_consumed"] for d in daily)
-        avg_per_day  = total_hours / len(daily) if daily else 0
-        avg_rate     = total_fuel / total_hours if total_hours > 0 else 0
-        fuel_price   = db.get_fuel_price_db()
-        fuel_cost    = total_fuel * fuel_price
+        total_hours = sum(d["work_hours"] for d in daily)
+        total_fuel = sum(d["fuel_consumed"] for d in daily)
+        avg_per_day = total_hours / len(daily) if daily else 0
+        avg_rate = total_fuel / total_hours if total_hours > 0 else 0
+        fuel_price = db.get_fuel_price_db()
+        fuel_cost = total_fuel * fuel_price
         total_outage = sum(d["outage_hours"] for d in daily)
-        total_avail  = days * 24
-        efficiency   = round((total_outage / total_avail) * 100, 1) if total_avail > 0 else 0
+        total_avail = days * 24
+        efficiency = round((total_outage / total_avail) * 100, 1) if total_avail > 0 else 0
 
         # Порівняння з попереднім таким же періодом
         prev_start = start_dt - timedelta(days=days)
-        prev_end   = start_dt - timedelta(days=1)
+        prev_end = start_dt - timedelta(days=1)
         prev_daily = _build_daily_stats(prev_start, prev_end, gen_id)
         prev_hours = sum(d["work_hours"] for d in prev_daily)
-        prev_fuel  = sum(d["fuel_consumed"] for d in prev_daily)
+        prev_fuel = sum(d["fuel_consumed"] for d in prev_daily)
 
         def _percent_change(curr, prev):
             if prev == 0:
@@ -2161,6 +2284,7 @@ async def api_analytics_fuel_timeline(request: Request):
         gen_id = request.query_params.get("generator") or None
 
         from utils.time import now_kiev
+
         now = now_kiev()
         start_dt = now - timedelta(days=days - 1)
 
@@ -2168,6 +2292,7 @@ async def api_analytics_fuel_timeline(request: Request):
 
         # Прогноз (наступні 7 днів)
         from ml_models import get_fuel_forecast
+
         forecast_obj = get_fuel_forecast()
         forecast_obj.train(daily)
         avg_outage = sum(d["outage_hours"] for d in daily) / len(daily) if daily else 4.0
@@ -2201,10 +2326,11 @@ async def api_analytics_motor_hours(request: Request):
         days = max(1, min(days, 365))
 
         from utils.time import now_kiev
+
         now = now_kiev()
         start_dt = now - timedelta(days=days - 1)
 
-        main_daily      = _build_daily_stats(start_dt, now, "main")
+        main_daily = _build_daily_stats(start_dt, now, "main")
         emergency_daily = _build_daily_stats(start_dt, now, "emergency")
 
         # Об'єднуємо по датах
@@ -2220,7 +2346,8 @@ async def api_analytics_motor_hours(request: Request):
         combined = sorted(date_map.values(), key=lambda x: x["date"])
 
         from database.api.generator import get_generator_stats
-        main_stats      = get_generator_stats("main")
+
+        main_stats = get_generator_stats("main")
         emergency_stats = get_generator_stats("emergency")
 
         return {
@@ -2252,14 +2379,15 @@ async def api_analytics_efficiency(request: Request):
 
         from utils.time import now_kiev
         from database.api.maintenance import get_maintenance_stats
+
         now = now_kiev()
         start_dt = now - timedelta(days=days - 1)
 
         daily = _build_daily_stats(start_dt, now, None)
 
         total_hours_avail = days * 24
-        work_hours        = sum(d["work_hours"] for d in daily)
-        outage_hours      = float(sum(d["outage_hours"] for d in daily))
+        work_hours = sum(d["work_hours"] for d in daily)
+        outage_hours = float(sum(d["outage_hours"] for d in daily))
         maintenance_hours = 0.0
         # Guard against NaN/Inf from summing DB values
         if not math.isfinite(work_hours):
@@ -2273,10 +2401,12 @@ async def api_analytics_efficiency(request: Request):
         shift_hours: dict = {"m": 0.0, "d": 0.0, "e": 0.0, "x": 0.0}
 
         from database.api.logs import get_logs_for_period
+
         start_str = start_dt.strftime("%Y-%m-%d")
-        end_str   = now.strftime("%Y-%m-%d")
+        end_str = now.strftime("%Y-%m-%d")
         logs = get_logs_for_period(start_str, end_str)
         import config as _cfg
+
         pending: dict = {}
         for row in logs:
             event_type, ts_str, *_ = row
@@ -2295,19 +2425,19 @@ async def api_analytics_efficiency(request: Request):
                     if 0 < h < 24:
                         fuel_rate = float(getattr(_cfg, "FUEL_CONSUMPTION", 5.0) or 5.0)
                         shift_hours[shift_key] = shift_hours.get(shift_key, 0.0) + h
-                        shift_fuel[shift_key]  = shift_fuel.get(shift_key, 0.0) + h * fuel_rate
+                        shift_fuel[shift_key] = shift_fuel.get(shift_key, 0.0) + h * fuel_rate
 
         return {
             "pie": {
-                "work_hours":        _safe_round(work_hours),
-                "idle_hours":        _safe_round(idle_hours),
-                "outage_hours":      _safe_round(outage_hours),
+                "work_hours": _safe_round(work_hours),
+                "idle_hours": _safe_round(idle_hours),
+                "outage_hours": _safe_round(outage_hours),
                 "maintenance_hours": _safe_round(maintenance_hours),
             },
             "shifts": {
                 shift: {
-                    "hours":          _safe_round(shift_hours.get(shift, 0.0)),
-                    "fuel_consumed":  _safe_round(shift_fuel.get(shift, 0.0)),
+                    "hours": _safe_round(shift_hours.get(shift, 0.0)),
+                    "fuel_consumed": _safe_round(shift_fuel.get(shift, 0.0)),
                 }
                 for shift in ("m", "d", "e", "x")
             },
@@ -2326,6 +2456,7 @@ async def api_analytics_calendar(request: Request):
         from utils.time import now_kiev
         from database.api.schedule import get_schedule
         import calendar
+
         now = now_kiev()
         month_str = request.query_params.get("month") or now.strftime("%Y-%m")
         year, month = int(month_str[:4]), int(month_str[5:7])
@@ -2348,6 +2479,7 @@ async def api_analytics_calendar(request: Request):
 # Task 10: Trends API
 # ---------------------------------------------------------------------------
 
+
 async def api_analytics_trends(request: Request):
     """GET /api/analytics/trends — тренди та автоматичні інсайти."""
     user = _extract_user(request)
@@ -2358,6 +2490,7 @@ async def api_analytics_trends(request: Request):
         days = max(7, min(days, 365))
 
         from utils.time import now_kiev
+
         now = now_kiev()
         start_dt = now - timedelta(days=days - 1)
 
@@ -2367,20 +2500,22 @@ async def api_analytics_trends(request: Request):
 
         # Тренд витрати палива
         if len(daily) >= 14:
-            first_half  = daily[: len(daily) // 2]
+            first_half = daily[: len(daily) // 2]
             second_half = daily[len(daily) // 2 :]
-            avg1 = sum(d["fuel_consumed"] for d in first_half)  / len(first_half)
+            avg1 = sum(d["fuel_consumed"] for d in first_half) / len(first_half)
             avg2 = sum(d["fuel_consumed"] for d in second_half) / len(second_half)
             if avg1 > 0:
                 change = (avg2 - avg1) / avg1 * 100
                 if abs(change) >= 5:
                     direction = "зросла" if change > 0 else "знизилась"
-                    insights.append({
-                        "type": "fuel_trend",
-                        "icon": "📈" if change > 0 else "📉",
-                        "text": f"Витрата {direction} на {abs(change):.0f}% за {days} днів",
-                        "severity": "warning" if change > 15 else "info",
-                    })
+                    insights.append(
+                        {
+                            "type": "fuel_trend",
+                            "icon": "📈" if change > 0 else "📉",
+                            "text": f"Витрата {direction} на {abs(change):.0f}% за {days} днів",
+                            "severity": "warning" if change > 15 else "info",
+                        }
+                    )
 
         # День тижня з найбільшою кількістю відключень
         weekday_outage: dict = {}
@@ -2392,33 +2527,38 @@ async def api_analytics_trends(request: Request):
             weekday_outage[wd].append(d["outage_hours"])
         if weekday_outage:
             avg_by_day = {wd: sum(v) / len(v) for wd, v in weekday_outage.items()}
-            worst_day  = max(avg_by_day, key=avg_by_day.get)  # type: ignore[arg-type]
+            worst_day = max(avg_by_day, key=avg_by_day.get)  # type: ignore[arg-type]
             if avg_by_day[worst_day] > 2:
-                insights.append({
-                    "type": "outage_weekday",
-                    "icon": "📅",
-                    "text": f"Найбільше відключень у {weekday_names[worst_day]} (сер. {avg_by_day[worst_day]:.1f} год)",
-                    "severity": "info",
-                })
+                insights.append(
+                    {
+                        "type": "outage_weekday",
+                        "icon": "📅",
+                        "text": f"Найбільше відключень у {weekday_names[worst_day]} (сер. {avg_by_day[worst_day]:.1f} год)",
+                        "severity": "info",
+                    }
+                )
 
         # Порівняння генераторів
-        main_daily      = _build_daily_stats(start_dt, now, "main")
+        main_daily = _build_daily_stats(start_dt, now, "main")
         emergency_daily = _build_daily_stats(start_dt, now, "emergency")
-        main_hours  = sum(d["work_hours"] for d in main_daily)
+        main_hours = sum(d["work_hours"] for d in main_daily)
         emerg_hours = sum(d["work_hours"] for d in emergency_daily)
-        total_gen   = main_hours + emerg_hours
+        total_gen = main_hours + emerg_hours
         if total_gen > 0 and emerg_hours > 0:
             emerg_pct = emerg_hours / total_gen * 100
             if emerg_pct > 10:
-                insights.append({
-                    "type": "emergency_usage",
-                    "icon": "⚠️",
-                    "text": f"Аварійний генератор використовується {emerg_pct:.0f}% часу",
-                    "severity": "warning" if emerg_pct > 30 else "info",
-                })
+                insights.append(
+                    {
+                        "type": "emergency_usage",
+                        "icon": "⚠️",
+                        "text": f"Аварійний генератор використовується {emerg_pct:.0f}% часу",
+                        "severity": "warning" if emerg_pct > 30 else "info",
+                    }
+                )
 
         # Аномалії
         from ml_models import get_anomaly_detector
+
         anomaly_det = get_anomaly_detector()
         anomaly_det.train(daily)
         anomalies_found = []
@@ -2427,12 +2567,14 @@ async def api_analytics_trends(request: Request):
             if res["is_anomaly"]:
                 anomalies_found.append(f"{d['date']}: {res['reason']}")
         if anomalies_found:
-            insights.append({
-                "type": "anomaly",
-                "icon": "🔴",
-                "text": f"Виявлено аномалії: {', '.join(anomalies_found[:3])}",
-                "severity": "critical",
-            })
+            insights.append(
+                {
+                    "type": "anomaly",
+                    "icon": "🔴",
+                    "text": f"Виявлено аномалії: {', '.join(anomalies_found[:3])}",
+                    "severity": "critical",
+                }
+            )
 
         return {
             "period_days": days,
@@ -2447,6 +2589,7 @@ async def api_analytics_trends(request: Request):
 # Task 11: Forecast API
 # ---------------------------------------------------------------------------
 
+
 async def api_analytics_forecast(request: Request):
     """GET /api/analytics/forecast — ML-прогноз витрати палива."""
     user = _extract_user(request)
@@ -2455,30 +2598,32 @@ async def api_analytics_forecast(request: Request):
     try:
         from utils.time import now_kiev
         from database.api.generator import get_generator_stats
+
         now = now_kiev()
         # Тренуємо на останніх 60 днях
         start_dt = now - timedelta(days=60)
         daily = _build_daily_stats(start_dt, now, None)
 
         from ml_models import get_fuel_forecast
+
         forecast_obj = get_fuel_forecast()
         ok = forecast_obj.train(daily)
 
         avg_outage = sum(d["outage_hours"] for d in daily) / len(daily) if daily else 4.0
-        forecast   = forecast_obj.predict(7, avg_outage)
+        forecast = forecast_obj.predict(7, avg_outage)
 
         total_forecast_fuel = sum(f["predicted_fuel"] for f in forecast)
 
         # ТО
         main_stats = get_generator_stats("main")
-        oil_hours   = main_stats.get("last_oil_change", 0)
-        oil_interval  = getattr(config, "OIL_CHANGE_INTERVAL",  250)
+        oil_hours = main_stats.get("last_oil_change", 0)
+        oil_interval = getattr(config, "OIL_CHANGE_INTERVAL", 250)
         spark_interval = getattr(config, "SPARK_CHANGE_INTERVAL", 500)
-        oil_remaining   = max(0, oil_interval   - oil_hours)
+        oil_remaining = max(0, oil_interval - oil_hours)
         spark_remaining = max(0, spark_interval - main_stats.get("last_spark_change", 0))
 
         avg_daily_hours = sum(d["work_hours"] for d in daily[-7:]) / 7 if len(daily) >= 7 else 2.0
-        days_to_oil   = round(oil_remaining   / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
+        days_to_oil = round(oil_remaining / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
         days_to_spark = round(spark_remaining / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
 
         return {
@@ -2487,9 +2632,9 @@ async def api_analytics_forecast(request: Request):
             "daily_forecast": forecast,
             "total_forecast_fuel": round(total_forecast_fuel, 1),
             "maintenance": {
-                "oil_remaining_hours":   round(oil_remaining, 1),
+                "oil_remaining_hours": round(oil_remaining, 1),
                 "spark_remaining_hours": round(spark_remaining, 1),
-                "days_to_oil_change":   int(days_to_oil),
+                "days_to_oil_change": int(days_to_oil),
                 "days_to_spark_change": int(days_to_spark),
             },
         }
@@ -2501,6 +2646,7 @@ async def api_analytics_forecast(request: Request):
 # ---------------------------------------------------------------------------
 # Enhanced Excel Report API (replaces PDF endpoint)
 # ---------------------------------------------------------------------------
+
 
 async def api_report_excel_v2(request: Request):
     """GET /api/report/excel/v2?type=quick&days=30&generator=main — enhanced Excel report."""
@@ -2663,6 +2809,7 @@ def main():
     app = create_app()
 
     import uvicorn
+
     logger.info(f"🌐 Mini App сервер запускається на http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
 

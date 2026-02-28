@@ -67,8 +67,7 @@ async def sched_select(cb: types.CallbackQuery):
     hint = "🌙 Вже вечір, заповнюємо на <b>ЗАВТРА</b>?" if is_evening else "☀️ День, редагуємо <b>СЬОГОДНІ</b>?"
 
     await cb.message.edit_text(
-        f"📅 <b>Налаштування графіка</b>\n{hint}",
-        reply_markup=schedule_date_selector(today_str, tom_str)
+        f"📅 <b>Налаштування графіка</b>\n{hint}", reply_markup=schedule_date_selector(today_str, tom_str)
     )
     _track_ui(cb)
 
@@ -141,7 +140,7 @@ async def tog_hour(cb: types.CallbackQuery):
         now = datetime.now(config.KYIV)
         today_iso = now.strftime("%Y-%m-%d")
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
-        is_hot_edit = (date_str == today_iso and now.time() > start_t)
+        is_hot_edit = date_str == today_iso and now.time() > start_t
 
         try:
             await cb.message.edit_reply_markup(reply_markup=schedule_grid(date_str, is_hot_edit))

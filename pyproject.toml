@@ -1,0 +1,47 @@
+[tool.ruff]
+line-length = 200
+target-version = "py311"
+
+[tool.ruff.lint]
+# E402 – module-level imports not at top (intentional in some files that modify sys.path first)
+# F401 – unused imports (kept for re-export compatibility)
+# F841 – local variable assigned but never used (in except blocks)
+# E722 – bare except (broad patterns used intentionally)
+# F811 – redefinition of unused name (middleware override pattern)
+# E501 – line too long (handled by black; excluded to avoid conflicts)
+ignore = ["E402", "F401", "F841", "E722", "F811", "F541", "E501", "W291", "W293", "W292"]
+select = ["E", "F", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+skip-string-normalization = true
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+# Gradually enable strictness; many third-party libs lack stubs
+disallow_untyped_defs = false
+check_untyped_defs = false
+no_implicit_optional = false
+warn_return_any = false
+# Exclude files with many pre-existing type issues that would need larger refactor
+exclude = [
+    "webapp_server\\.py",
+    "handlers/",
+    "services/",
+    "database/",
+    "middlewares/",
+    "utils/",
+    "reports/",
+    "backup\\.py",
+    "ml_models\\.py",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
