@@ -43,6 +43,8 @@ body {
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 #app {
@@ -677,6 +679,32 @@ body {
 @keyframes toastOut {
     from { opacity: 1; }
     to { opacity: 0; }
+}
+
+/* --- Pull-to-Refresh --- */
+.ptr-spinner {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%) translateY(-60px);
+    transition: transform 0.3s ease;
+    z-index: 9999;
+    padding: 8px 16px;
+    background: var(--tg-section-bg);
+    border-radius: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--tg-text);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.ptr-spinner.visible {
+    transform: translateX(-50%) translateY(10px);
 }
 
 /* --- Scrollbar --- */
