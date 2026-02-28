@@ -22,7 +22,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from aiohttp import web
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 try:
     from openpyxl import Workbook
@@ -48,8 +51,7 @@ from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXC
 from webapp.utils.validation import validate_init_data as _validate_init_data, extract_user as _extract_user  # noqa: E402
 from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402
 from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info  # noqa: E402
-from webapp.middleware.cors import cors_middleware  # noqa: E402
-from webapp.middleware.rate_limit import rate_limit_middleware  # noqa: E402
+from webapp.middleware.rate_limit import RateLimitMiddleware  # noqa: E402
 from get_build_version import BUILD_VERSION  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -61,10 +63,54 @@ MAX_EVENTS_LIMIT = 100
 MAX_NAME_LENGTH = 100
 
 # ---------------------------------------------------------------------------
+# Module-level static file pre-loading
+# ---------------------------------------------------------------------------
+_webapp_dir = _PROJECT_ROOT / "webapp"
+_sw_path = _webapp_dir / "service-worker.js"
+try:
+    with open(_sw_path, 'r', encoding='utf-8') as f:
+        _sw_raw: str | None = f.read()
+except FileNotFoundError:
+    _sw_raw = None
+
+_sw_content = re.sub(
+    r"(const CACHE_VERSION\s*=\s*')[^']*(')",
+    rf"\g<1>{BUILD_VERSION}\2",
+    _sw_raw or "",
+)
+
+
+async def index_handler(request: Request):
+    return FileResponse(str(_webapp_dir / "index.html"))
+
+
+async def block_handler(request: Request):
+    return FileResponse(str(_webapp_dir / "block.html"))
+
+
+async def sw_handler(request: Request):
+    """
+    Serve service-worker.js with dynamic cache version injected.
+    """
+    if _sw_raw is None:
+        return Response(content='Service Worker not found', status_code=404, media_type='text/plain')
+
+    return Response(
+        content=_sw_content,
+        media_type='application/javascript',
+        headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Service-Worker-Allowed': '/'
+        }
+    )
+
+# ---------------------------------------------------------------------------
 # API — endpoints
 # ---------------------------------------------------------------------------
 
-async def api_status(request: web.Request) -> web.Response:
+async def api_status(request: Request):
     """GET /api/status — поточний стан генератора."""
     try:
         state = db.get_state()
@@ -122,16 +168,16 @@ async def api_status(request: web.Request) -> web.Response:
             "work_start": config.WORK_START_TIME,
             "work_end": config.WORK_END_TIME,
         }
-        return web.json_response(payload)
+        return payload
     except Exception as e:
         logger.exception("api_status error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_schedule(request: web.Request) -> web.Response:
+async def api_schedule(request: Request):
     """GET /api/schedule?date=YYYY-MM-DD — графік відключень."""
     try:
-        date_str = request.query.get("date")
+        date_str = request.query_params.get("date")
         if not date_str:
             now = datetime.now(config.KYIV)
             date_str = now.strftime("%Y-%m-%d")
@@ -142,10 +188,7 @@ async def api_schedule(request: web.Request) -> web.Response:
             if parsed.year < 2000 or parsed.year > 2100:
                 raise ValueError("Дата поза допустимим діапазоном")
         except ValueError:
-            return web.json_response(
-                {"error": "Невірний формат або нереальна дата. Використовуйте YYYY-MM-DD"},
-                status=400,
-            )
+            return JSONResponse(content={"error": "Невірний формат або нереальна дата. Використовуйте YYYY-MM-DD"}, status_code=400)
 
         schedule = db.get_schedule(date_str)
         hours = []
@@ -157,16 +200,16 @@ async def api_schedule(request: web.Request) -> web.Response:
                 "off": schedule.get(h, 0) == 1,
             })
 
-        return web.json_response({"date": date_str, "hours": hours})
+        return {"date": date_str, "hours": hours}
     except Exception as e:
         logger.exception("api_schedule error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_events(request: web.Request) -> web.Response:
+async def api_events(request: Request):
     """GET /api/events?limit=20 — останні події."""
     try:
-        limit = min(int(request.query.get("limit", "20")), MAX_EVENTS_LIMIT)
+        limit = min(int(request.query_params.get("limit", "20")), MAX_EVENTS_LIMIT)
     except (ValueError, TypeError):
         limit = 20
 
@@ -182,13 +225,13 @@ async def api_events(request: web.Request) -> web.Response:
                 "driver": row[4] if len(row) > 4 else "",
                 "receipt": row[5] if len(row) > 5 else "",
             })
-        return web.json_response({"events": events, "count": len(events)})
+        return {"events": events, "count": len(events)}
     except Exception as e:
         logger.exception("api_events error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_maintenance(request: web.Request) -> web.Response:
+async def api_maintenance(request: Request):
     """GET /api/maintenance — стан технічного обслуговування."""
     try:
         active_gen = db.get_active_generator()
@@ -210,17 +253,17 @@ async def api_maintenance(request: web.Request) -> web.Response:
         stats["spark_interval"] = config.SPARK_CHANGE_INTERVAL
         stats["maintenance_interval"] = config.MAINTENANCE_INTERVAL
 
-        return web.json_response({
+        return {
             "generator": active_gen,
             "stats": stats,
             "history": history_list,
-        })
+        }
     except Exception as e:
         logger.exception("api_maintenance error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_schedule_week(request: web.Request) -> web.Response:
+async def api_schedule_week(request: Request):
     """GET /api/schedule/week — графік на тиждень (сьогодні + 6 днів)."""
     try:
         now = datetime.now(config.KYIV)
@@ -235,10 +278,10 @@ async def api_schedule_week(request: web.Request) -> web.Response:
                 "weekday": ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][day.weekday()],
                 "off_hours": off_count,
             })
-        return web.json_response({"days": days})
+        return {"days": days}
     except Exception as e:
         logger.exception("api_schedule_week error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +296,7 @@ def _within_work_window(now_t, start_t, end_t) -> bool:
     return now_t >= start_t or now_t < end_t
 
 
-async def api_user_role(request: web.Request) -> web.Response:
+async def api_user_role(request: Request):
     """GET /api/user/role — роль поточного користувача."""
     user = _extract_user(request)
     try:
@@ -264,26 +307,26 @@ async def api_user_role(request: web.Request) -> web.Response:
     is_admin = _is_admin(user)
     personnel = db.get_personnel_for_user(user_id) if user_id else None
 
-    return web.json_response({
+    return {
         "user_id": user_id,
         "is_admin": is_admin,
         "personnel": personnel,
         "has_personnel": bool(personnel),
         "first_name": user.get("first_name", "") if user else "",
-    })
+    }
 
 
-async def api_drivers(request: web.Request) -> web.Response:
+async def api_drivers(request: Request):
     """GET /api/drivers — список водіїв."""
     try:
         drivers = db.get_drivers()
-        return web.json_response({"drivers": list(drivers) if drivers else []})
+        return {"drivers": list(drivers) if drivers else []}
     except Exception as e:
         logger.exception("api_drivers error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_generators(request: web.Request) -> web.Response:
+async def api_generators(request: Request):
     """GET /api/generators — статистика обох генераторів."""
     try:
         active_gen = db.get_active_generator()
@@ -297,54 +340,51 @@ async def api_generators(request: web.Request) -> web.Response:
                 "last_spark_change": round(float(stats.get("last_spark_change", 0)), 1),
             }
 
-        return web.json_response({
+        return {
             "active": active_gen,
             "main": {"name": db.get_generator_name("main"), **_fmt_stats(main_stats)},
             "emergency": {"name": db.get_generator_name("emergency"), **_fmt_stats(emerg_stats)},
-        })
+        }
     except Exception as e:
         logger.exception("api_generators error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_personnel_me(request: web.Request) -> web.Response:
+async def api_personnel_me(request: Request):
     """GET /api/personnel/me — персонал поточного користувача."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     all_personnel = db.get_personnel_names()
 
-    return web.json_response({
+    return {
         "personnel": personnel,
         "all_names": all_personnel,
-    })
+    }
 
 
-async def api_action_start(request: web.Request) -> web.Response:
+async def api_action_start(request: Request):
     """POST /api/action/start — старт зміни генератора."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     shift_code = (body.get("shift") or "").strip()
     if shift_code not in ("m", "d", "e", "x"):
-        return web.json_response({"error": "Невірний код зміни"}, status=400)
+        return JSONResponse(content={"error": "Невірний код зміни"}, status_code=400)
 
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return web.json_response(
-            {"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."},
-            status=400,
-        )
+        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
 
     now = datetime.now(config.KYIV)
 
@@ -353,10 +393,7 @@ async def api_action_start(request: web.Request) -> web.Response:
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         if not _within_work_window(now.time(), start_t, end_t):
-            return web.json_response(
-                {"error": f"Заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"},
-                status=400,
-            )
+            return JSONResponse(content={"error": f"Заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"}, status_code=400)
     except Exception:
         pass
 
@@ -366,39 +403,36 @@ async def api_action_start(request: web.Request) -> web.Response:
         reason = res.get("reason", "error")
         if reason == "already_on":
             active = res.get("active_shift", "none")
-            return web.json_response({"error": f"Генератор вже працює (активна зміна: {active})"}, status=400)
-        return web.json_response({"error": "Помилка старту зміни"}, status=400)
+            return JSONResponse(content={"error": f"Генератор вже працює (активна зміна: {active})"}, status_code=400)
+        return JSONResponse(content={"error": "Помилка старту зміни"}, status_code=400)
 
-    return web.json_response({
+    return {
         "ok": True,
         "message": f"Зміна запущена о {now.strftime('%H:%M')}",
         "shift": shift_code,
         "time": now.strftime("%H:%M"),
-    })
+    }
 
 
-async def api_action_stop(request: web.Request) -> web.Response:
+async def api_action_stop(request: Request):
     """POST /api/action/stop — зупинка зміни генератора."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     shift_code = (body.get("shift") or "").strip()
     if shift_code not in ("m", "d", "e", "x"):
-        return web.json_response({"error": "Невірний код зміни"}, status=400)
+        return JSONResponse(content={"error": "Невірний код зміни"}, status_code=400)
 
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return web.json_response(
-            {"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."},
-            status=400,
-        )
+        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
 
     now = datetime.now(config.KYIV)
     event_type = shift_code + "_end"
@@ -406,58 +440,55 @@ async def api_action_stop(request: web.Request) -> web.Response:
     if not res.get("ok"):
         reason = res.get("reason", "error")
         if reason == "already_off":
-            return web.json_response({"error": "Генератор вже вимкнено"}, status=400)
+            return JSONResponse(content={"error": "Генератор вже вимкнено"}, status_code=400)
         if reason == "wrong_shift":
             active = res.get("active_shift", "none")
-            return web.json_response({"error": f"Зараз активна інша зміна: {active}"}, status=400)
-        return web.json_response({"error": "Помилка зупинки зміни"}, status=400)
+            return JSONResponse(content={"error": f"Зараз активна інша зміна: {active}"}, status_code=400)
+        return JSONResponse(content={"error": "Помилка зупинки зміни"}, status_code=400)
 
     duration_hours = res.get("duration_hours", 0.0)
     fuel_consumed = res.get("fuel_consumed", 0.0)
     h = int(duration_hours)
     m = int((duration_hours - h) * 60)
 
-    return web.json_response({
+    return {
         "ok": True,
         "message": f"Зміна закрита о {now.strftime('%H:%M')}",
         "shift": shift_code,
         "duration": f"{h:02d}:{m:02d}",
         "fuel_consumed": round(fuel_consumed, 1),
-    })
+    }
 
 
-async def api_action_refill(request: web.Request) -> web.Response:
+async def api_action_refill(request: Request):
     """POST /api/action/refill — прийом палива."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     driver = (body.get("driver") or "").strip()
     receipt = (body.get("receipt") or "").strip()
     try:
         liters = float(body.get("liters", 0))
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірна кількість літрів"}, status=400)
+        return JSONResponse(content={"error": "Невірна кількість літрів"}, status_code=400)
 
     if not driver:
-        return web.json_response({"error": "Оберіть водія"}, status=400)
+        return JSONResponse(content={"error": "Оберіть водія"}, status_code=400)
     if not receipt or len(receipt) > 50:
-        return web.json_response({"error": "Введіть коректний номер чека"}, status=400)
+        return JSONResponse(content={"error": "Введіть коректний номер чека"}, status_code=400)
     if liters <= 0 or liters > 500:
-        return web.json_response({"error": "Кількість літрів має бути від 1 до 500"}, status=400)
+        return JSONResponse(content={"error": "Кількість літрів має бути від 1 до 500"}, status_code=400)
 
     user_id = int(user.get("id", 0))
     personnel = db.get_personnel_for_user(user_id)
     if not personnel:
-        return web.json_response(
-            {"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."},
-            status=400,
-        )
+        return JSONResponse(content={"error": "Нема прив'язки до персоналу. Зверніться до адміністратора."}, status_code=400)
 
     # Перевірка робочого часу
     now = datetime.now(config.KYIV)
@@ -465,10 +496,7 @@ async def api_action_refill(request: web.Request) -> web.Response:
         start_t = datetime.strptime(config.WORK_START_TIME, "%H:%M").time()
         end_t = datetime.strptime(config.WORK_END_TIME, "%H:%M").time()
         if not _within_work_window(now.time(), start_t, end_t):
-            return web.json_response(
-                {"error": f"Прийом палива заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"},
-                status=400,
-            )
+            return JSONResponse(content={"error": f"Прийом палива заборонено поза робочим часом ({config.WORK_START_TIME}–{config.WORK_END_TIME})"}, status_code=400)
     except Exception:
         pass
 
@@ -478,41 +506,41 @@ async def api_action_refill(request: web.Request) -> web.Response:
             db.update_fuel(liters, conn=conn)
     except Exception as e:
         logger.exception("api_action_refill error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-    return web.json_response({
+    return {
         "ok": True,
         "message": f"Прийнято {liters:.1f} л палива (Водій: {driver}, Чек: {receipt})",
         "liters": liters,
         "driver": driver,
         "receipt": receipt,
-    })
+    }
 
 
-async def api_schedule_toggle(request: web.Request) -> web.Response:
+async def api_schedule_toggle(request: Request):
     """POST /api/schedule/toggle — перемикання години графіка відключень."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     date_str = (body.get("date") or "").strip()
     try:
         hour = int(body.get("hour", -1))
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірна година"}, status=400)
+        return JSONResponse(content={"error": "Невірна година"}, status_code=400)
 
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
-        return web.json_response({"error": "Невірний формат дати"}, status=400)
+        return JSONResponse(content={"error": "Невірний формат дати"}, status_code=400)
 
     if not (0 <= hour <= 23):
-        return web.json_response({"error": "Година повинна бути від 0 до 23"}, status=400)
+        return JSONResponse(content={"error": "Година повинна бути від 0 до 23"}, status_code=400)
 
     try:
         db.toggle_schedule(date_str, hour)
@@ -525,32 +553,32 @@ async def api_schedule_toggle(request: web.Request) -> web.Response:
             target_entity=f"schedule:{date_str}:{hour}",
             new_value={"off": new_state},
         )
-        return web.json_response({
+        return {
             "ok": True,
             "date": date_str,
             "hour": hour,
             "off": new_state,
             "schedule": {str(h): bool(v) for h, v in schedule.items()},
-        })
+        }
     except Exception as e:
         logger.exception("api_schedule_toggle error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_generator_switch(request: web.Request) -> web.Response:
+async def api_generator_switch(request: Request):
     """POST /api/generator/switch — перемикання активного генератора."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     target = (body.get("target") or "").strip()
     if target not in ("main", "emergency"):
-        return web.json_response({"error": "Невірний генератор (main або emergency)"}, status=400)
+        return JSONResponse(content={"error": "Невірний генератор (main або emergency)"}, status_code=400)
 
     user_id = int(user.get("id", 0))
     user_info = db.get_user(user_id)
@@ -568,31 +596,31 @@ async def api_generator_switch(request: web.Request) -> web.Response:
             success=success,
         )
         if success:
-            return web.json_response({"ok": True, "message": message, "active": target})
-        return web.json_response({"error": message}, status=400)
+            return {"ok": True, "message": message, "active": target}
+        return JSONResponse(content={"error": message}, status_code=400)
     except Exception as e:
         logger.exception("api_generator_switch error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_maintenance_perform(request: web.Request) -> web.Response:
+async def api_maintenance_perform(request: Request):
     """POST /api/maintenance/perform — виконання технічного обслуговування."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     action = (body.get("action") or "").strip()
     generator_id = (body.get("generator") or "main").strip()
 
     if action not in ("oil", "spark", "maintenance"):
-        return web.json_response({"error": "Невірний тип ТО (oil, spark, maintenance)"}, status=400)
+        return JSONResponse(content={"error": "Невірний тип ТО (oil, spark, maintenance)"}, status_code=400)
     if generator_id not in ("main", "emergency"):
-        return web.json_response({"error": "Невірний генератор"}, status=400)
+        return JSONResponse(content={"error": "Невірний генератор"}, status_code=400)
 
     user_id = int(user.get("id", 0))
     user_info = db.get_user(user_id)
@@ -607,36 +635,36 @@ async def api_maintenance_perform(request: web.Request) -> web.Response:
             target_entity=f"generator:{generator_id}",
             new_value={"action": action, "generator": generator_id},
         )
-        return web.json_response({
+        return {
             "ok": True,
             "message": f"{action_names.get(action, action)} виконано",
-        })
+        }
     except Exception as e:
         logger.exception("api_maintenance_perform error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_maintenance_set_hours(request: web.Request) -> web.Response:
+async def api_maintenance_set_hours(request: Request):
     """POST /api/maintenance/set-hours — встановлення мотогодин генератора."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     generator_id = (body.get("generator") or "main").strip()
     try:
         hours = float(body.get("hours", -1))
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірне значення мотогодин"}, status=400)
+        return JSONResponse(content={"error": "Невірне значення мотогодин"}, status_code=400)
 
     if generator_id not in ("main", "emergency"):
-        return web.json_response({"error": "Невірний генератор"}, status=400)
+        return JSONResponse(content={"error": "Невірний генератор"}, status_code=400)
     if hours < 0 or hours > 100000:
-        return web.json_response({"error": "Значення мотогодин поза допустимим діапазоном (0–100000)"}, status=400)
+        return JSONResponse(content={"error": "Значення мотогодин поза допустимим діапазоном (0–100000)"}, status_code=400)
 
     try:
         old_stats = db.get_generator_stats(generator_id)
@@ -650,34 +678,34 @@ async def api_maintenance_set_hours(request: web.Request) -> web.Response:
             old_value=old_hours,
             new_value=hours,
         )
-        return web.json_response({
+        return {
             "ok": True,
             "message": f"Мотогодини встановлено: {hours:.1f} год",
             "hours": hours,
-        })
+        }
     except Exception as e:
         logger.exception("api_maintenance_set_hours error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_fuel_set(request: web.Request) -> web.Response:
+async def api_fuel_set(request: Request):
     """POST /api/fuel/set — встановлення поточного рівня палива (адмін)."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     try:
         fuel = float(body.get("fuel", -1))
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірне значення палива"}, status=400)
+        return JSONResponse(content={"error": "Невірне значення палива"}, status_code=400)
 
     if fuel < 0 or fuel > 10000:
-        return web.json_response({"error": "Значення палива поза допустимим діапазоном"}, status=400)
+        return JSONResponse(content={"error": "Значення палива поза допустимим діапазоном"}, status_code=400)
 
     try:
         old_state = db.get_state()
@@ -694,10 +722,10 @@ async def api_fuel_set(request: web.Request) -> web.Response:
             old_value=old_fuel,
             new_value=fuel,
         )
-        return web.json_response({"ok": True, "message": f"Паливо встановлено: {fuel:.1f} л"})
+        return {"ok": True, "message": f"Паливо встановлено: {fuel:.1f} л"}
     except Exception as e:
         logger.exception("api_fuel_set error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -> "Workbook":
@@ -963,7 +991,7 @@ def _build_daily_report_wb(generator_id: str, period_days: int, now: datetime) -
     return wb
 
 
-async def api_report_excel(request: web.Request) -> web.Response:
+async def api_report_excel(request: Request):
     """GET /api/report/excel?days=30&generator=main — завантаження Excel-звіту.
 
     Параметр ``generator`` може бути ``main``, ``emergency`` або ``all``
@@ -971,13 +999,13 @@ async def api_report_excel(request: web.Request) -> web.Response:
     """
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     if not EXCEL_AVAILABLE:
-        return web.json_response({"error": "Модуль openpyxl не встановлено"}, status=500)
+        return JSONResponse(content={"error": "Модуль openpyxl не встановлено"}, status_code=500)
 
     try:
-        period_days = int(request.query.get("days", "30"))
+        period_days = int(request.query_params.get("days", "30"))
         if period_days < 1:
             period_days = 30
         if period_days > 365:
@@ -985,7 +1013,7 @@ async def api_report_excel(request: web.Request) -> web.Response:
     except (ValueError, TypeError):
         period_days = 30
 
-    generator_param = (request.query.get("generator") or "").strip().lower()
+    generator_param = (request.query_params.get("generator") or "").strip().lower()
     if generator_param not in ("main", "emergency"):
         generator_param = db.get_active_generator()
 
@@ -1007,52 +1035,52 @@ async def api_report_excel(request: web.Request) -> web.Response:
             target_entity=f"generator:{generator_param}",
             new_value={"days": period_days, "generator": generator_param},
         )
-        return web.Response(
-            body=buf.read(),
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        return Response(
+            content=buf.read(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except Exception as e:
         logger.exception("api_report_excel error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Admin CRUD: drivers & personnel
 # ---------------------------------------------------------------------------
 
-async def api_admin_drivers_list(request: web.Request) -> web.Response:
+async def api_admin_drivers_list(request: Request):
     """GET /api/admin/drivers — список водіїв (лише для адмінів)."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         drivers = db.get_drivers()
-        return web.json_response({"drivers": list(drivers) if drivers else []})
+        return {"drivers": list(drivers) if drivers else []}
     except Exception as e:
         logger.exception("api_admin_drivers_list error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_drivers_add(request: web.Request) -> web.Response:
+async def api_admin_drivers_add(request: Request):
     """POST /api/admin/drivers — додати водія."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     name = (body.get("name") or "").strip()
     if not name or len(name) > MAX_NAME_LENGTH:
-        return web.json_response({"error": "Невірне ім'я водія (1–100 символів)"}, status=400)
+        return JSONResponse(content={"error": "Невірне ім'я водія (1–100 символів)"}, status_code=400)
 
     try:
         ok = db.add_driver(name)
         if not ok:
-            return web.json_response({"error": f"Водій «{name}» вже існує"}, status=409)
+            return JSONResponse(content={"error": f"Водій «{name}» вже існує"}, status_code=409)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id, admin_name, "driver_add",
@@ -1060,31 +1088,31 @@ async def api_admin_drivers_add(request: web.Request) -> web.Response:
             target_entity=f"driver:{name}",
             new_value=name,
         )
-        return web.json_response({"ok": True, "message": f"Водія «{name}» додано"})
+        return {"ok": True, "message": f"Водія «{name}» додано"}
     except Exception as e:
         logger.exception("api_admin_drivers_add error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_drivers_delete(request: web.Request) -> web.Response:
+async def api_admin_drivers_delete(request: Request):
     """DELETE /api/admin/drivers — видалити водія."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     name = (body.get("name") or "").strip()
     if not name:
-        return web.json_response({"error": "Ім'я водія обов'язкове"}, status=400)
+        return JSONResponse(content={"error": "Ім'я водія обов'язкове"}, status_code=400)
 
     try:
         ok = db.delete_driver(name)
         if not ok:
-            return web.json_response({"error": f"Водія «{name}» не знайдено"}, status=404)
+            return JSONResponse(content={"error": f"Водія «{name}» не знайдено"}, status_code=404)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id, admin_name, "driver_delete",
@@ -1092,17 +1120,17 @@ async def api_admin_drivers_delete(request: web.Request) -> web.Response:
             target_entity=f"driver:{name}",
             old_value=name,
         )
-        return web.json_response({"ok": True, "message": f"Водія «{name}» видалено"})
+        return {"ok": True, "message": f"Водія «{name}» видалено"}
     except Exception as e:
         logger.exception("api_admin_drivers_delete error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_personnel_list(request: web.Request) -> web.Response:
+async def api_admin_personnel_list(request: Request):
     """GET /api/admin/personnel — список персоналу (лише для адмінів)."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         names = db.get_personnel_names()
         users_with_p = db.get_all_users_with_personnel()
@@ -1110,31 +1138,31 @@ async def api_admin_personnel_list(request: web.Request) -> web.Response:
             {"user_id": row[0], "full_name": row[1] or "", "personnel": row[2] or ""}
             for row in users_with_p
         ]
-        return web.json_response({"personnel": names, "users": users_list})
+        return {"personnel": names, "users": users_list}
     except Exception as e:
         logger.exception("api_admin_personnel_list error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_personnel_add(request: web.Request) -> web.Response:
+async def api_admin_personnel_add(request: Request):
     """POST /api/admin/personnel — додати ПІБ персоналу."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     name = (body.get("name") or "").strip()
     if not name or len(name) > MAX_NAME_LENGTH:
-        return web.json_response({"error": "Невірне ім'я (1–100 символів)"}, status=400)
+        return JSONResponse(content={"error": "Невірне ім'я (1–100 символів)"}, status_code=400)
 
     try:
         ok = db.add_personnel_name(name)
         if not ok:
-            return web.json_response({"error": f"Персонал «{name}» вже існує"}, status=409)
+            return JSONResponse(content={"error": f"Персонал «{name}» вже існує"}, status_code=409)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id, admin_name, "personnel_add",
@@ -1142,31 +1170,31 @@ async def api_admin_personnel_add(request: web.Request) -> web.Response:
             target_entity=f"personnel:{name}",
             new_value=name,
         )
-        return web.json_response({"ok": True, "message": f"Персонал «{name}» додано"})
+        return {"ok": True, "message": f"Персонал «{name}» додано"}
     except Exception as e:
         logger.exception("api_admin_personnel_add error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_personnel_delete(request: web.Request) -> web.Response:
+async def api_admin_personnel_delete(request: Request):
     """DELETE /api/admin/personnel — видалити ПІБ персоналу."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     name = (body.get("name") or "").strip()
     if not name:
-        return web.json_response({"error": "Ім'я обов'язкове"}, status=400)
+        return JSONResponse(content={"error": "Ім'я обов'язкове"}, status_code=400)
 
     try:
         ok = db.delete_personnel_name(name)
         if not ok:
-            return web.json_response({"error": f"Персонал «{name}» не знайдено"}, status=404)
+            return JSONResponse(content={"error": f"Персонал «{name}» не знайдено"}, status_code=404)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id, admin_name, "personnel_delete",
@@ -1174,32 +1202,32 @@ async def api_admin_personnel_delete(request: web.Request) -> web.Response:
             target_entity=f"personnel:{name}",
             old_value=name,
         )
-        return web.json_response({"ok": True, "message": f"Персонал «{name}» видалено"})
+        return {"ok": True, "message": f"Персонал «{name}» видалено"}
     except Exception as e:
         logger.exception("api_admin_personnel_delete error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_personnel_assign(request: web.Request) -> web.Response:
+async def api_admin_personnel_assign(request: Request):
     """POST /api/admin/personnel/assign — прив'язати персонал до Telegram-користувача."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     try:
         target_user_id = int(body.get("user_id", 0))
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірний user_id"}, status=400)
+        return JSONResponse(content={"error": "Невірний user_id"}, status_code=400)
 
     personnel_name = (body.get("personnel") or "").strip() or None
 
     if not target_user_id:
-        return web.json_response({"error": "user_id обов'язковий"}, status=400)
+        return JSONResponse(content={"error": "user_id обов'язковий"}, status_code=400)
 
     try:
         old_personnel = db.get_personnel_for_user(target_user_id)
@@ -1216,17 +1244,17 @@ async def api_admin_personnel_assign(request: web.Request) -> web.Response:
             old_value=old_personnel,
             new_value=personnel_name,
         )
-        return web.json_response({"ok": True, "message": msg})
+        return {"ok": True, "message": msg}
     except Exception as e:
         logger.exception("api_admin_personnel_assign error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_sync(request: web.Request) -> web.Response:
+async def api_admin_sync(request: Request):
     """POST /api/admin/sync — запуск синхронізації з Google Sheets (експорт)."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         from services.sheets_export import full_export
@@ -1239,22 +1267,22 @@ async def api_admin_sync(request: web.Request) -> web.Response:
             f"Синхронізація з Google Sheets: {len(updated)} дн. оновлено",
             new_value={"updated": len(updated), "skipped": len(skipped)},
         )
-        return web.json_response({
+        return {
             "ok": True,
             "message": f"Синхронізовано: {len(updated)} дн., пропущено: {len(skipped)} дн.",
             "updated": updated,
             "skipped": skipped,
-        })
+        }
     except Exception as e:
         logger.exception("api_admin_sync error")
-        return web.json_response({"error": f"Помилка синхронізації: {e}"}, status=500)
+        return JSONResponse(content={"error": f"Помилка синхронізації: {e}"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Admin Audit Log endpoints
 # ---------------------------------------------------------------------------
 
-async def api_admin_audit(request: web.Request) -> web.Response:
+async def api_admin_audit(request: Request):
     """GET /api/admin/audit — журнал дій адміністраторів.
 
     Query params:
@@ -1267,22 +1295,22 @@ async def api_admin_audit(request: web.Request) -> web.Response:
     """
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
-        limit = min(int(request.query.get("limit", "50")), 200)
+        limit = min(int(request.query_params.get("limit", "50")), 200)
     except (TypeError, ValueError):
         limit = 50
     try:
-        offset = max(int(request.query.get("offset", "0")), 0)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
     except (TypeError, ValueError):
         offset = 0
 
-    action_type = request.query.get("action_type", "").strip()
-    date_from = request.query.get("date_from", "").strip()
-    date_to = request.query.get("date_to", "").strip()
+    action_type = request.query_params.get("action_type", "").strip()
+    date_from = request.query_params.get("date_from", "").strip()
+    date_to = request.query_params.get("date_to", "").strip()
     try:
-        admin_filter = int(request.query.get("admin_id", "0"))
+        admin_filter = int(request.query_params.get("admin_id", "0"))
     except (TypeError, ValueError):
         admin_filter = 0
 
@@ -1311,31 +1339,31 @@ async def api_admin_audit(request: web.Request) -> web.Response:
             }
             for r in rows
         ]
-        return web.json_response({
+        return {
             "entries": entries,
             "total": total,
             "limit": limit,
             "offset": offset,
-        })
+        }
     except Exception as e:
         logger.exception("api_admin_audit error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_audit_export(request: web.Request) -> web.Response:
+async def api_admin_audit_export(request: Request):
     """GET /api/admin/audit/export — експорт журналу дій у Excel."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     if not EXCEL_AVAILABLE:
-        return web.json_response({"error": "Модуль openpyxl не встановлено"}, status=500)
+        return JSONResponse(content={"error": "Модуль openpyxl не встановлено"}, status_code=500)
 
-    action_type = request.query.get("action_type", "").strip()
-    date_from = request.query.get("date_from", "").strip()
-    date_to = request.query.get("date_to", "").strip()
+    action_type = request.query_params.get("action_type", "").strip()
+    date_from = request.query_params.get("date_from", "").strip()
+    date_to = request.query_params.get("date_to", "").strip()
     try:
-        admin_filter = int(request.query.get("admin_id", "0"))
+        admin_filter = int(request.query_params.get("admin_id", "0"))
     except (TypeError, ValueError):
         admin_filter = 0
 
@@ -1385,40 +1413,40 @@ async def api_admin_audit_export(request: web.Request) -> web.Response:
 
         now = datetime.now(config.KYIV)
         filename = f"audit_log_{now.strftime('%Y%m%d_%H%M')}.xlsx"
-        return web.Response(
-            body=buf.read(),
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        return Response(
+            content=buf.read(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except Exception as e:
         logger.exception("api_admin_audit_export error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Backup endpoints
 # ---------------------------------------------------------------------------
 
-async def api_admin_backups_list(request: web.Request) -> web.Response:
+async def api_admin_backups_list(request: Request):
     """GET /api/admin/backups — список резервних копій."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         from backup import list_backups, DEFAULT_BACKUP_DIR
         backups = list_backups()
-        return web.json_response({"backups": backups, "count": len(backups)})
+        return {"backups": backups, "count": len(backups)}
     except Exception as e:
         logger.exception("api_admin_backups_list error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_backup_create(request: web.Request) -> web.Response:
+async def api_admin_backup_create(request: Request):
     """POST /api/admin/backup — створити резервну копію вручну."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
     try:
         from backup import create_backup
@@ -1431,49 +1459,49 @@ async def api_admin_backup_create(request: web.Request) -> web.Response:
             target_entity=backup_path.name,
             new_value={"filename": backup_path.name, "size_kb": size_kb},
         )
-        return web.json_response({
+        return {
             "ok": True,
             "filename": backup_path.name,
             "size_kb": size_kb,
             "message": f"Резервну копію створено: {backup_path.name}",
-        })
+        }
     except Exception as e:
         logger.exception("api_admin_backup_create error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_admin_backup_download(request: web.Request) -> web.Response:
+async def api_admin_backup_download(request: Request, filename: str):
     """GET /api/admin/backup/download/{filename} — завантажити резервну копію."""
     import re as _re
 
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
 
-    filename = request.match_info.get("filename", "")
+    filename = filename or ""
     # Security: strictly validate the expected filename pattern to prevent path traversal
     # and injection attacks. Pattern: backup_YYYY-MM-DD_HH-MM.sql.gz
     _BACKUP_FILENAME_RE = _re.compile(r'^backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}\.sql\.gz$')
     if not filename or not _BACKUP_FILENAME_RE.match(filename):
-        return web.json_response({"error": "Невірне ім'я файлу"}, status=400)
+        return JSONResponse(content={"error": "Невірне ім'я файлу"}, status_code=400)
 
     try:
         from backup import DEFAULT_BACKUP_DIR
         backup_path = DEFAULT_BACKUP_DIR / filename
         if not backup_path.exists():
-            return web.json_response({"error": "Файл не знайдено"}, status=404)
+            return JSONResponse(content={"error": "Файл не знайдено"}, status_code=404)
 
         with open(backup_path, "rb") as f:
             data = f.read()
 
-        return web.Response(
-            body=data,
-            content_type="application/gzip",
+        return Response(
+            content=data,
+            media_type="application/gzip",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except Exception as e:
         logger.exception("api_admin_backup_download error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 
@@ -1481,34 +1509,34 @@ async def api_admin_backup_download(request: web.Request) -> web.Response:
 # Task 5: Notification preferences API
 # ---------------------------------------------------------------------------
 
-async def api_notifications_get(request: web.Request) -> web.Response:
+async def api_notifications_get(request: Request):
     """GET /api/notifications/preferences — get user notification preferences."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.notifications import get_user_preferences, NOTIFICATION_TYPES
         user_id = int(user.get("id", 0))
         prefs = get_user_preferences(user_id)
-        return web.json_response({
+        return {
             "preferences": prefs,
             "types": {k: {"label": v["label"], "category": v["category"]}
                       for k, v in NOTIFICATION_TYPES.items()},
-        })
+        }
     except Exception as e:
         logger.exception("api_notifications_get error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_notifications_set(request: web.Request) -> web.Response:
+async def api_notifications_set(request: Request):
     """POST /api/notifications/preferences — update user notification preference."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     notification_type = str(body.get("notification_type", "")).strip()
     enabled = body.get("enabled")
@@ -1516,12 +1544,12 @@ async def api_notifications_set(request: web.Request) -> web.Response:
     quiet_hours_end = body.get("quiet_hours_end")
 
     if not notification_type:
-        return web.json_response({"error": "notification_type обов'язковий"}, status=400)
+        return JSONResponse(content={"error": "notification_type обов'язковий"}, status_code=400)
 
     try:
         from database.api.notifications import set_user_preference, NOTIFICATION_TYPES
         if notification_type not in NOTIFICATION_TYPES:
-            return web.json_response({"error": "Невідомий тип сповіщення"}, status=400)
+            return JSONResponse(content={"error": "Невідомий тип сповіщення"}, status_code=400)
         user_id = int(user.get("id", 0))
         set_user_preference(
             user_id,
@@ -1530,64 +1558,64 @@ async def api_notifications_set(request: web.Request) -> web.Response:
             quiet_hours_start or None,
             quiet_hours_end or None,
         )
-        return web.json_response({"ok": True, "message": "Налаштування збережено"})
+        return {"ok": True, "message": "Налаштування збережено"}
     except Exception as e:
         logger.exception("api_notifications_set error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_notifications_test(request: web.Request) -> web.Response:
+async def api_notifications_test(request: Request):
     """POST /api/notifications/test — send a test notification to the user."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     # This endpoint is informational — the actual bot send happens via the Telegram bot
-    return web.json_response({
+    return {
         "ok": True,
         "message": "🔔 Тест сповіщень. Якщо ви бачите це в webapp — система працює.",
-    })
+    }
 
 
 # ---------------------------------------------------------------------------
 # Task 6: Fuel orders API
 # ---------------------------------------------------------------------------
 
-async def api_fuel_orders_list(request: web.Request) -> web.Response:
+async def api_fuel_orders_list(request: Request):
     """GET /api/fuel/orders — list fuel orders."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.fuel_orders import get_orders, get_fuel_consumption_stats
-        status_filter = request.query.get("status") or None
+        status_filter = request.query_params.get("status") or None
         orders = get_orders(status=status_filter, limit=50)
         stats = get_fuel_consumption_stats(days=30)
-        return web.json_response({"orders": orders, "consumption_stats": stats})
+        return {"orders": orders, "consumption_stats": stats}
     except Exception as e:
         logger.exception("api_fuel_orders_list error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_fuel_orders_create(request: web.Request) -> web.Response:
+async def api_fuel_orders_create(request: Request):
     """POST /api/fuel/orders — create a new fuel order."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     amount = body.get("amount_liters")
     if amount is None:
-        return web.json_response({"error": "amount_liters обов'язковий"}, status=400)
+        return JSONResponse(content={"error": "amount_liters обов'язковий"}, status_code=400)
     try:
         amount = float(amount)
     except (TypeError, ValueError):
-        return web.json_response({"error": "Невірне значення кількості літрів"}, status=400)
+        return JSONResponse(content={"error": "Невірне значення кількості літрів"}, status_code=400)
 
     if amount <= 0 or amount > 100000:
-        return web.json_response({"error": "Кількість літрів поза допустимим діапазоном"}, status=400)
+        return JSONResponse(content={"error": "Кількість літрів поза допустимим діапазоном"}, status_code=400)
 
     try:
         from database.api.fuel_orders import create_order
@@ -1603,31 +1631,31 @@ async def api_fuel_orders_create(request: web.Request) -> web.Response:
             delivery_date=str(body.get("delivery_date", "")).strip() or None,
             notes=str(body.get("notes", "")).strip() or None,
         )
-        return web.json_response({"ok": True, "order_id": order_id, "message": "Замовлення створено"})
+        return {"ok": True, "order_id": order_id, "message": "Замовлення створено"}
     except Exception as e:
         logger.exception("api_fuel_orders_create error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_fuel_orders_update(request: web.Request) -> web.Response:
+async def api_fuel_orders_update(request: Request):
     """POST /api/fuel/orders/update — update a fuel order status."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     order_id = body.get("order_id")
     if not order_id:
-        return web.json_response({"error": "order_id обов'язковий"}, status=400)
+        return JSONResponse(content={"error": "order_id обов'язковий"}, status_code=400)
 
     try:
         from database.api.fuel_orders import update_order, update_order_status, VALID_STATUSES
         new_status = str(body.get("status", "")).strip()
         if new_status and new_status not in VALID_STATUSES:
-            return web.json_response({"error": f"Статус має бути одним із: {', '.join(VALID_STATUSES)}"}, status=400)
+            return JSONResponse(content={"error": f"Статус має бути одним із: {', '.join(VALID_STATUSES)}"}, status_code=400)
 
         updated = update_order(
             int(order_id),
@@ -1638,7 +1666,7 @@ async def api_fuel_orders_update(request: web.Request) -> web.Response:
             notes=str(body.get("notes", "")).strip() or None,
         )
         if not updated:
-            return web.json_response({"error": "Нічого не оновлено"}, status=400)
+            return JSONResponse(content={"error": "Нічого не оновлено"}, status_code=400)
 
         # If delivered, add fuel to current level
         if new_status == "delivered":
@@ -1653,34 +1681,34 @@ async def api_fuel_orders_update(request: web.Request) -> web.Response:
                 actor = user_info[1] if user_info else user.get("first_name", "Адмін")
                 db.add_log("refill", actor, str(order["amount_liters"]))
 
-        return web.json_response({"ok": True, "message": "Замовлення оновлено"})
+        return {"ok": True, "message": "Замовлення оновлено"}
     except Exception as e:
         logger.exception("api_fuel_orders_update error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Task 8: Shift schedule API
 # ---------------------------------------------------------------------------
 
-async def api_shifts_get(request: web.Request) -> web.Response:
+async def api_shifts_get(request: Request):
     """GET /api/shifts/schedule — get shift schedule for a month or date."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.shift_schedule import get_month_schedule, get_date_schedule, get_personnel_shift_counts
-        date_param = request.query.get("date")
-        month_param = request.query.get("month")  # YYYY-MM
+        date_param = request.query_params.get("date")
+        month_param = request.query_params.get("month")  # YYYY-MM
 
         if date_param:
             entries = get_date_schedule(date_param)
-            return web.json_response({"shifts": entries})
+            return {"shifts": entries}
         elif month_param:
             year, month = int(month_param[:4]), int(month_param[5:7])
             entries = get_month_schedule(year, month)
             counts = get_personnel_shift_counts(month_param)
-            return web.json_response({"shifts": entries, "personnel_counts": counts, "month": month_param})
+            return {"shifts": entries, "personnel_counts": counts, "month": month_param}
         else:
             from utils.time import now_kiev
             now = now_kiev()
@@ -1688,31 +1716,31 @@ async def api_shifts_get(request: web.Request) -> web.Response:
             year, month = now.year, now.month
             entries = get_month_schedule(year, month)
             counts = get_personnel_shift_counts(month_str)
-            return web.json_response({"shifts": entries, "personnel_counts": counts, "month": month_str})
+            return {"shifts": entries, "personnel_counts": counts, "month": month_str}
     except Exception as e:
         logger.exception("api_shifts_get error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_shifts_set(request: web.Request) -> web.Response:
+async def api_shifts_set(request: Request):
     """POST /api/shifts/schedule — create or update a shift assignment."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     date = str(body.get("date", "")).strip()
     shift_type = str(body.get("shift_type", "")).strip()
     if not date or not shift_type:
-        return web.json_response({"error": "date та shift_type обов'язкові"}, status=400)
+        return JSONResponse(content={"error": "date та shift_type обов'язкові"}, status_code=400)
 
     try:
         from database.api.shift_schedule import upsert_shift, VALID_SHIFT_TYPES
         if shift_type not in VALID_SHIFT_TYPES:
-            return web.json_response({"error": f"shift_type має бути одним із: {', '.join(VALID_SHIFT_TYPES)}"}, status=400)
+            return JSONResponse(content={"error": f"shift_type має бути одним із: {', '.join(VALID_SHIFT_TYPES)}"}, status_code=400)
 
         upsert_shift(
             date=date,
@@ -1721,27 +1749,27 @@ async def api_shifts_set(request: web.Request) -> web.Response:
             status=str(body.get("status", "planned")).strip() or "planned",
             notes=str(body.get("notes", "")).strip() or None,
         )
-        return web.json_response({"ok": True, "message": "Зміну збережено"})
+        return {"ok": True, "message": "Зміну збережено"}
     except Exception as e:
         logger.exception("api_shifts_set error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_shifts_auto(request: web.Request) -> web.Response:
+async def api_shifts_auto(request: Request):
     """POST /api/shifts/auto — generate auto schedule for a month."""
     user = _extract_user(request)
     if not _is_admin(user):
-        return web.json_response({"error": "Тільки для адміністраторів"}, status=403)
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "Невірний JSON"}, status=400)
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
 
     month_param = str(body.get("month", "")).strip()
     save = bool(body.get("save", False))
 
     if not month_param or len(month_param) < 7:
-        return web.json_response({"error": "month (YYYY-MM) обов'язковий"}, status=400)
+        return JSONResponse(content={"error": "month (YYYY-MM) обов'язковий"}, status_code=400)
 
     try:
         from database.api.shift_schedule import auto_schedule_month, upsert_shift
@@ -1749,7 +1777,7 @@ async def api_shifts_auto(request: web.Request) -> web.Response:
         # Get personnel list from DB
         personnel_list = db.get_personnel_names()
         if not personnel_list:
-            return web.json_response({"error": "Персонал не знайдено. Додайте персонал спочатку."}, status=400)
+            return JSONResponse(content={"error": "Персонал не знайдено. Додайте персонал спочатку."}, status_code=400)
 
         assignments = auto_schedule_month(year, month, personnel_list)
 
@@ -1763,27 +1791,27 @@ async def api_shifts_auto(request: web.Request) -> web.Response:
                     notes=a["notes"],
                 )
 
-        return web.json_response({
+        return {
             "ok": True,
             "assignments": assignments,
             "saved": save,
             "message": f"Згенеровано {len(assignments)} змін" + (" та збережено" if save else " (попередній перегляд)"),
-        })
+        }
     except Exception as e:
         logger.exception("api_shifts_auto error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_shifts_analytics(request: web.Request) -> web.Response:
+async def api_shifts_analytics(request: Request):
     """GET /api/shifts/analytics — shift load analytics."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.shift_schedule import get_personnel_shift_counts, get_month_schedule
         from utils.time import now_kiev
         now = now_kiev()
-        month_str = request.query.get("month") or now.strftime("%Y-%m")
+        month_str = request.query_params.get("month") or now.strftime("%Y-%m")
         year, month = int(month_str[:4]), int(month_str[5:7])
 
         counts = get_personnel_shift_counts(month_str)
@@ -1795,15 +1823,15 @@ async def api_shifts_analytics(request: web.Request) -> web.Response:
             s = e.get("status", "planned")
             status_counts[s] = status_counts.get(s, 0) + 1
 
-        return web.json_response({
+        return {
             "month": month_str,
             "total_shifts": len(entries),
             "personnel_counts": counts,
             "status_breakdown": status_counts,
-        })
+        }
     except Exception as e:
         logger.exception("api_shifts_analytics error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -1908,15 +1936,15 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
 # Task 9: Analytics API
 # ---------------------------------------------------------------------------
 
-async def api_analytics_kpi(request: web.Request) -> web.Response:
+async def api_analytics_kpi(request: Request):
     """GET /api/analytics/kpi — KPI картки для дашборду аналітики."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
-        gen_id = request.query.get("generator") or None
+        gen_id = request.query_params.get("generator") or None
 
         from utils.time import now_kiev
         now = now_kiev()
@@ -1946,7 +1974,7 @@ async def api_analytics_kpi(request: web.Request) -> web.Response:
                 return None
             return round((curr - prev) / prev * 100, 1)
 
-        return web.json_response({
+        return {
             "period_days": days,
             "total_hours": round(total_hours, 1),
             "avg_hours_per_day": round(avg_per_day, 2),
@@ -1959,21 +1987,21 @@ async def api_analytics_kpi(request: web.Request) -> web.Response:
             "prev_total_fuel": round(prev_fuel, 1),
             "hours_change_pct": _percent_change(total_hours, prev_hours),
             "fuel_change_pct": _percent_change(total_fuel, prev_fuel),
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_kpi error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_analytics_fuel_timeline(request: web.Request) -> web.Response:
+async def api_analytics_fuel_timeline(request: Request):
     """GET /api/analytics/fuel-timeline — дані для графіка витрати палива."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
-        gen_id = request.query.get("generator") or None
+        gen_id = request.query_params.get("generator") or None
 
         from utils.time import now_kiev
         now = now_kiev()
@@ -1988,7 +2016,7 @@ async def api_analytics_fuel_timeline(request: web.Request) -> web.Response:
         avg_outage = sum(d["outage_hours"] for d in daily) / len(daily) if daily else 4.0
         forecast = forecast_obj.predict(7, avg_outage)
 
-        return web.json_response({
+        return {
             "actual": [
                 {
                     "date": d["date"],
@@ -2000,19 +2028,19 @@ async def api_analytics_fuel_timeline(request: web.Request) -> web.Response:
                 for d in daily
             ],
             "forecast": forecast,
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_fuel_timeline error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_analytics_motor_hours(request: web.Request) -> web.Response:
+async def api_analytics_motor_hours(request: Request):
     """GET /api/analytics/motor-hours — мотогодини генераторів."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
 
         from utils.time import now_kiev
@@ -2038,7 +2066,7 @@ async def api_analytics_motor_hours(request: web.Request) -> web.Response:
         main_stats      = get_generator_stats("main")
         emergency_stats = get_generator_stats("emergency")
 
-        return web.json_response({
+        return {
             "daily": combined,
             "totals": {
                 "main": {
@@ -2050,19 +2078,19 @@ async def api_analytics_motor_hours(request: web.Request) -> web.Response:
                     "period_hours": round(sum(d["emergency"] for d in combined), 1),
                 },
             },
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_motor_hours error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_analytics_efficiency(request: web.Request) -> web.Response:
+async def api_analytics_efficiency(request: Request):
     """GET /api/analytics/efficiency — ефективність роботи."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
 
         from utils.time import now_kiev
@@ -2112,7 +2140,7 @@ async def api_analytics_efficiency(request: web.Request) -> web.Response:
                         shift_hours[shift_key] = shift_hours.get(shift_key, 0.0) + h
                         shift_fuel[shift_key]  = shift_fuel.get(shift_key, 0.0) + h * fuel_rate
 
-        return web.json_response({
+        return {
             "pie": {
                 "work_hours":        _safe_round(work_hours),
                 "idle_hours":        _safe_round(idle_hours),
@@ -2126,23 +2154,23 @@ async def api_analytics_efficiency(request: web.Request) -> web.Response:
                 }
                 for shift in ("m", "d", "e", "x")
             },
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_efficiency error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-async def api_analytics_calendar(request: web.Request) -> web.Response:
+async def api_analytics_calendar(request: Request):
     """GET /api/analytics/calendar — календар відключень (місяць)."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from utils.time import now_kiev
         from database.api.schedule import get_schedule
         import calendar
         now = now_kiev()
-        month_str = request.query.get("month") or now.strftime("%Y-%m")
+        month_str = request.query_params.get("month") or now.strftime("%Y-%m")
         year, month = int(month_str[:4]), int(month_str[5:7])
         _, num_days = calendar.monthrange(year, month)
 
@@ -2153,23 +2181,23 @@ async def api_analytics_calendar(request: web.Request) -> web.Response:
             outage_h = sum(1 for v in sched.values() if v == 1)
             result.append({"date": date_str, "outage_hours": outage_h, "schedule": sched})
 
-        return web.json_response({"month": month_str, "days": result})
+        return {"month": month_str, "days": result}
     except Exception as e:
         logger.exception("api_analytics_calendar error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Task 10: Trends API
 # ---------------------------------------------------------------------------
 
-async def api_analytics_trends(request: web.Request) -> web.Response:
+async def api_analytics_trends(request: Request):
     """GET /api/analytics/trends — тренди та автоматичні інсайти."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(7, min(days, 365))
 
         from utils.time import now_kiev
@@ -2249,24 +2277,24 @@ async def api_analytics_trends(request: web.Request) -> web.Response:
                 "severity": "critical",
             })
 
-        return web.json_response({
+        return {
             "period_days": days,
             "insights": insights,
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_trends error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Task 11: Forecast API
 # ---------------------------------------------------------------------------
 
-async def api_analytics_forecast(request: web.Request) -> web.Response:
+async def api_analytics_forecast(request: Request):
     """GET /api/analytics/forecast — ML-прогноз витрати палива."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from utils.time import now_kiev
         from database.api.generator import get_generator_stats
@@ -2296,7 +2324,7 @@ async def api_analytics_forecast(request: web.Request) -> web.Response:
         days_to_oil   = round(oil_remaining   / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
         days_to_spark = round(spark_remaining / avg_daily_hours, 0) if avg_daily_hours > 0 else 0
 
-        return web.json_response({
+        return {
             "model_trained": ok,
             "forecast_days": 7,
             "daily_forecast": forecast,
@@ -2307,33 +2335,33 @@ async def api_analytics_forecast(request: web.Request) -> web.Response:
                 "days_to_oil_change":   int(days_to_oil),
                 "days_to_spark_change": int(days_to_spark),
             },
-        })
+        }
     except Exception as e:
         logger.exception("api_analytics_forecast error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
 # Enhanced Excel Report API (replaces PDF endpoint)
 # ---------------------------------------------------------------------------
 
-async def api_report_excel_v2(request: web.Request) -> web.Response:
+async def api_report_excel_v2(request: Request):
     """GET /api/report/excel/v2?type=quick&days=30&generator=main — enhanced Excel report."""
     user = _extract_user(request)
     if not user:
-        return web.json_response({"error": "Не авторизовано"}, status=401)
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     if not _EXCEL_RPT_AVAILABLE:
-        return web.json_response({"error": "Модуль openpyxl не встановлено"}, status=500)
+        return JSONResponse(content={"error": "Модуль openpyxl не встановлено"}, status_code=500)
 
     try:
-        report_type = request.query.get("type", "quick")
+        report_type = request.query_params.get("type", "quick")
         valid_types = ("quick", "detailed", "personnel", "technical", "financial")
         if report_type not in valid_types:
-            return web.json_response({"error": "Невірний тип звіту"}, status=400)
+            return JSONResponse(content={"error": "Невірний тип звіту"}, status_code=400)
 
-        days = int(request.query.get("days", "30"))
+        days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
-        gen_id = (request.query.get("generator") or "").strip().lower() or None
+        gen_id = (request.query_params.get("generator") or "").strip().lower() or None
         if gen_id not in ("main", "emergency"):
             gen_id = None
 
@@ -2341,136 +2369,116 @@ async def api_report_excel_v2(request: web.Request) -> web.Response:
         excel_bytes = generate_excel_report(report_type, days, gen_id)
 
         filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.xlsx"
-        return web.Response(
-            body=excel_bytes,
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
     except ValueError as e:
-        return web.json_response({"error": str(e)}, status=400)
+        return JSONResponse(content={"error": str(e)}, status_code=400)
     except Exception as e:
         logger.exception("api_report_excel_v2 error")
-        return web.json_response({"error": str(e)}, status=500)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-def create_app() -> web.Application:
-    """Створює aiohttp-додаток з API та статичними файлами."""
-    app = web.Application(middlewares=[rate_limit_middleware, cors_middleware])
+def create_app() -> FastAPI:
+    """Створює FastAPI-додаток з API та статичними файлами."""
+    from webapp.middleware.rate_limit import RateLimitMiddleware
+
+    app = FastAPI(
+        title="Generator Bot WebApp",
+        version=BUILD_VERSION,
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.add_middleware(RateLimitMiddleware)
 
     # API маршрути (читання)
-    app.router.add_get("/api/status", api_status)
-    app.router.add_get("/api/schedule", api_schedule)
-    app.router.add_get("/api/schedule/week", api_schedule_week)
-    app.router.add_get("/api/events", api_events)
-    app.router.add_get("/api/maintenance", api_maintenance)
-    # Нові GET-ендпоінти
-    app.router.add_get("/api/user/role", api_user_role)
-    app.router.add_get("/api/drivers", api_drivers)
-    app.router.add_get("/api/generators", api_generators)
-    app.router.add_get("/api/personnel/me", api_personnel_me)
-    app.router.add_get("/api/report/excel", api_report_excel)
-    # POST-ендпоінти для дій
-    app.router.add_post("/api/action/start", api_action_start)
-    app.router.add_post("/api/action/stop", api_action_stop)
-    app.router.add_post("/api/action/refill", api_action_refill)
-    app.router.add_post("/api/schedule/toggle", api_schedule_toggle)
-    app.router.add_post("/api/generator/switch", api_generator_switch)
-    app.router.add_post("/api/maintenance/perform", api_maintenance_perform)
-    app.router.add_post("/api/maintenance/set-hours", api_maintenance_set_hours)
-    app.router.add_post("/api/fuel/set", api_fuel_set)
-    # Admin management endpoints
-    app.router.add_get("/api/admin/drivers", api_admin_drivers_list)
-    app.router.add_post("/api/admin/drivers", api_admin_drivers_add)
-    app.router.add_delete("/api/admin/drivers", api_admin_drivers_delete)
-    app.router.add_get("/api/admin/personnel", api_admin_personnel_list)
-    app.router.add_post("/api/admin/personnel", api_admin_personnel_add)
-    app.router.add_delete("/api/admin/personnel", api_admin_personnel_delete)
-    app.router.add_post("/api/admin/personnel/assign", api_admin_personnel_assign)
-    app.router.add_post("/api/admin/sync", api_admin_sync)
-    # Audit log endpoints
-    app.router.add_get("/api/admin/audit", api_admin_audit)
-    app.router.add_get("/api/admin/audit/export", api_admin_audit_export)
-    # Backup endpoints
-    app.router.add_get("/api/admin/backups", api_admin_backups_list)
-    app.router.add_post("/api/admin/backup", api_admin_backup_create)
-    app.router.add_get("/api/admin/backup/download/{filename}", api_admin_backup_download)
-    # Task 5: Notification preferences endpoints
-    app.router.add_get("/api/notifications/preferences", api_notifications_get)
-    app.router.add_post("/api/notifications/preferences", api_notifications_set)
-    app.router.add_post("/api/notifications/test", api_notifications_test)
+    app.add_api_route("/api/status", api_status, methods=["GET"])
+    app.add_api_route("/api/schedule", api_schedule, methods=["GET"])
+    app.add_api_route("/api/schedule/week", api_schedule_week, methods=["GET"])
+    app.add_api_route("/api/events", api_events, methods=["GET"])
+    app.add_api_route("/api/maintenance", api_maintenance, methods=["GET"])
+
+    app.add_api_route("/api/user/role", api_user_role, methods=["GET"])
+    app.add_api_route("/api/drivers", api_drivers, methods=["GET"])
+    app.add_api_route("/api/generators", api_generators, methods=["GET"])
+    app.add_api_route("/api/personnel/me", api_personnel_me, methods=["GET"])
+    app.add_api_route("/api/report/excel", api_report_excel, methods=["GET"])
+
+    app.add_api_route("/api/action/start", api_action_start, methods=["POST"])
+    app.add_api_route("/api/action/stop", api_action_stop, methods=["POST"])
+    app.add_api_route("/api/action/refill", api_action_refill, methods=["POST"])
+    app.add_api_route("/api/schedule/toggle", api_schedule_toggle, methods=["POST"])
+    app.add_api_route("/api/generator/switch", api_generator_switch, methods=["POST"])
+    app.add_api_route("/api/maintenance/perform", api_maintenance_perform, methods=["POST"])
+    app.add_api_route("/api/maintenance/set-hours", api_maintenance_set_hours, methods=["POST"])
+    app.add_api_route("/api/fuel/set", api_fuel_set, methods=["POST"])
+
+    app.add_api_route("/api/admin/drivers", api_admin_drivers_list, methods=["GET"])
+    app.add_api_route("/api/admin/drivers", api_admin_drivers_add, methods=["POST"])
+    app.add_api_route("/api/admin/drivers", api_admin_drivers_delete, methods=["DELETE"])
+    app.add_api_route("/api/admin/personnel", api_admin_personnel_list, methods=["GET"])
+    app.add_api_route("/api/admin/personnel", api_admin_personnel_add, methods=["POST"])
+    app.add_api_route("/api/admin/personnel", api_admin_personnel_delete, methods=["DELETE"])
+    app.add_api_route("/api/admin/personnel/assign", api_admin_personnel_assign, methods=["POST"])
+    app.add_api_route("/api/admin/sync", api_admin_sync, methods=["POST"])
+
+    app.add_api_route("/api/admin/audit", api_admin_audit, methods=["GET"])
+    app.add_api_route("/api/admin/audit/export", api_admin_audit_export, methods=["GET"])
+
+    app.add_api_route("/api/admin/backups", api_admin_backups_list, methods=["GET"])
+    app.add_api_route("/api/admin/backup", api_admin_backup_create, methods=["POST"])
+    app.add_api_route("/api/admin/backup/download/{filename}", api_admin_backup_download, methods=["GET"])
+
+    # Task 5: Notification endpoints
+    app.add_api_route("/api/notifications/preferences", api_notifications_get, methods=["GET"])
+    app.add_api_route("/api/notifications/preferences", api_notifications_set, methods=["POST"])
+    app.add_api_route("/api/notifications/test", api_notifications_test, methods=["POST"])
+
     # Task 6: Fuel orders endpoints
-    app.router.add_get("/api/fuel/orders", api_fuel_orders_list)
-    app.router.add_post("/api/fuel/orders", api_fuel_orders_create)
-    app.router.add_post("/api/fuel/orders/update", api_fuel_orders_update)
+    app.add_api_route("/api/fuel/orders", api_fuel_orders_list, methods=["GET"])
+    app.add_api_route("/api/fuel/orders", api_fuel_orders_create, methods=["POST"])
+    app.add_api_route("/api/fuel/orders/update", api_fuel_orders_update, methods=["POST"])
+
     # Task 8: Shift schedule endpoints
-    app.router.add_get("/api/shifts/schedule", api_shifts_get)
-    app.router.add_post("/api/shifts/schedule", api_shifts_set)
-    app.router.add_post("/api/shifts/auto", api_shifts_auto)
-    app.router.add_get("/api/shifts/analytics", api_shifts_analytics)
+    app.add_api_route("/api/shifts/schedule", api_shifts_get, methods=["GET"])
+    app.add_api_route("/api/shifts/schedule", api_shifts_set, methods=["POST"])
+    app.add_api_route("/api/shifts/auto", api_shifts_auto, methods=["POST"])
+    app.add_api_route("/api/shifts/analytics", api_shifts_analytics, methods=["GET"])
+
     # Tasks 9-12: Analytics, Trends, Forecast, Enhanced Excel report endpoints
-    app.router.add_get("/api/analytics/kpi", api_analytics_kpi)
-    app.router.add_get("/api/analytics/fuel-timeline", api_analytics_fuel_timeline)
-    app.router.add_get("/api/analytics/motor-hours", api_analytics_motor_hours)
-    app.router.add_get("/api/analytics/efficiency", api_analytics_efficiency)
-    app.router.add_get("/api/analytics/calendar", api_analytics_calendar)
-    app.router.add_get("/api/analytics/trends", api_analytics_trends)
-    app.router.add_get("/api/analytics/forecast", api_analytics_forecast)
-    app.router.add_get("/api/report/excel/v2", api_report_excel_v2)
+    app.add_api_route("/api/analytics/kpi", api_analytics_kpi, methods=["GET"])
+    app.add_api_route("/api/analytics/fuel-timeline", api_analytics_fuel_timeline, methods=["GET"])
+    app.add_api_route("/api/analytics/motor-hours", api_analytics_motor_hours, methods=["GET"])
+    app.add_api_route("/api/analytics/efficiency", api_analytics_efficiency, methods=["GET"])
+    app.add_api_route("/api/analytics/calendar", api_analytics_calendar, methods=["GET"])
+    app.add_api_route("/api/analytics/trends", api_analytics_trends, methods=["GET"])
+    app.add_api_route("/api/analytics/forecast", api_analytics_forecast, methods=["GET"])
+    app.add_api_route("/api/report/excel/v2", api_report_excel_v2, methods=["GET"])
 
-    # Статичні файли (CSS, JS)
-    webapp_dir = _PROJECT_ROOT / "webapp"
-    if webapp_dir.is_dir():
-        app.router.add_static("/css/", webapp_dir / "css", name="css")
-        app.router.add_static("/js/", webapp_dir / "js", name="js")
+    # Static files (CSS, JS) and app routes
+    if _webapp_dir.is_dir():
+        # Named routes first (before mounts)
+        app.add_api_route("/service-worker.js", sw_handler, methods=["GET"])
+        app.add_api_route("/", index_handler, methods=["GET"])
+        app.add_api_route("/block.html", block_handler, methods=["GET"])
 
-        # index.html — кореневий маршрут
-        async def index_handler(request: web.Request) -> web.FileResponse:
-            return web.FileResponse(webapp_dir / "index.html")
-
-        async def block_handler(request: web.Request) -> web.FileResponse:
-            return web.FileResponse(webapp_dir / "block.html")
-
-        # Read service worker content once at startup and inject build version
-        sw_path = webapp_dir / "service-worker.js"
-        try:
-            with open(sw_path, 'r', encoding='utf-8') as f:
-                _sw_raw = f.read()
-        except FileNotFoundError:
-            _sw_raw = None
-
-        # Replace CACHE_VERSION value using regex to be robust against version changes
-        _sw_content = re.sub(
-            r"(const CACHE_VERSION\s*=\s*')[^']*(')",
-            rf"\g<1>{BUILD_VERSION}\2",
-            _sw_raw or "",
-        )
-
-        async def sw_handler(request: web.Request) -> web.Response:
-            """
-            Serve service-worker.js with dynamic cache version injected.
-
-            Returns content pre-processed at startup with the build version
-            (git commit hash or timestamp) replacing the CACHE_VERSION constant.
-
-            Cache-Control headers ensure browser always fetches fresh SW code.
-            """
-            if _sw_raw is None:
-                return web.Response(text='Service Worker not found', status=404)
-
-            return web.Response(
-                text=_sw_content,
-                content_type='application/javascript',
-                headers={
-                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                    'Pragma': 'no-cache',
-                    'Expires': '0',
-                    'Service-Worker-Allowed': '/'
-                }
-            )
-
-        app.router.add_get("/", index_handler)
-        app.router.add_get("/block.html", block_handler)
-        app.router.add_get("/service-worker.js", sw_handler)
+        # Static directories
+        css_dir = _webapp_dir / "css"
+        js_dir = _webapp_dir / "js"
+        if css_dir.is_dir():
+            app.mount("/css", StaticFiles(directory=str(css_dir)), name="css")
+        if js_dir.is_dir():
+            app.mount("/js", StaticFiles(directory=str(js_dir)), name="js")
 
     return app
 
@@ -2492,8 +2500,9 @@ def main():
 
     app = create_app()
 
+    import uvicorn
     logger.info(f"🌐 Mini App сервер запускається на http://{host}:{port}")
-    web.run_app(app, host=host, port=port, print=None)
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
