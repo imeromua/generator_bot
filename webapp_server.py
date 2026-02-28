@@ -2107,7 +2107,7 @@ async def api_analytics_kpi(request: web.Request) -> web.Response:
         prev_hours = sum(d["work_hours"] for d in prev_daily)
         prev_fuel  = sum(d["fuel_consumed"] for d in prev_daily)
 
-        def _pct_change(curr, prev):
+        def _percent_change(curr, prev):
             if prev == 0:
                 return None
             return round((curr - prev) / prev * 100, 1)
@@ -2123,8 +2123,8 @@ async def api_analytics_kpi(request: web.Request) -> web.Response:
             "total_outage_hours": total_outage,
             "prev_total_hours": round(prev_hours, 1),
             "prev_total_fuel": round(prev_fuel, 1),
-            "hours_change_pct": _pct_change(total_hours, prev_hours),
-            "fuel_change_pct": _pct_change(total_fuel, prev_fuel),
+            "hours_change_pct": _percent_change(total_hours, prev_hours),
+            "fuel_change_pct": _percent_change(total_fuel, prev_fuel),
         })
     except Exception as e:
         logger.exception("api_analytics_kpi error")

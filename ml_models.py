@@ -11,6 +11,9 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# Поріг витрати палива для ідентифікації аномалій (л/год)
+_HIGH_FUEL_RATE_THRESHOLD = 8.0
+
 # ---------------------------------------------------------------------------
 # Спроба імпорту sklearn/numpy — graceful fallback якщо недоступні
 # ---------------------------------------------------------------------------
@@ -224,7 +227,7 @@ class AnomalyDetector:
             reason = ""
             if is_anomaly:
                 fuel_rate = record.get("fuel_rate", 0)
-                if fuel_rate and float(fuel_rate) > 8.0:
+                if fuel_rate and float(fuel_rate) > _HIGH_FUEL_RATE_THRESHOLD:
                     reason = "Підвищена витрата палива"
                 elif record.get("work_hours", 0) and float(record.get("work_hours", 0)) > 18:
                     reason = "Нетипово довга робота"

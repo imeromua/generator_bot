@@ -19,6 +19,9 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# Формат дати/часу для шапки звіту
+_PDF_DATETIME_FORMAT = "%d.%m.%Y %H:%M"
+
 # ---------------------------------------------------------------------------
 # Перевірка доступності ReportLab
 # ---------------------------------------------------------------------------
@@ -257,7 +260,7 @@ def generate_pdf_report(
     # ------------------------------------------------------------------
     story.append(Spacer(1, 20))
     story.append(_divider())
-    generated_at = datetime.now(config.KYIV).strftime("%d.%m.%Y %H:%M")
+    generated_at = datetime.now(config.KYIV).strftime(_PDF_DATETIME_FORMAT)
     story.append(Paragraph(
         f"Сформовано: {generated_at}   |   Генератор-Бот",
         styles["small"],
