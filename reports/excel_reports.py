@@ -666,6 +666,8 @@ class ExcelReportGenerator:
                     'fuel_consumed': fuel_consumed,
                     'morning_fuel': morning_fuel,
                     'evening_fuel': evening_fuel,
+                    'morning_balance': morning_fuel,
+                    'evening_balance': evening_fuel,
                     'refill_total': refill_total if refill_total > 0 else None,
                     # outage_hours = work_hours because the generator runs during power outages
                     'outage_hours': work_hours,
