@@ -563,6 +563,7 @@ class TestApiAnalytics:
         resp = await (await client).get("/api/report/excel/v2?type=quick&days=7")
         assert resp.status == 200
         assert resp.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment" in resp.headers.get("Content-Disposition", "")
         body = await resp.read()
         # xlsx files start with PK (ZIP magic bytes)
         assert body[:2] == b"PK"
@@ -577,8 +578,22 @@ class TestApiAnalytics:
         resp = await (await client).get("/api/report/excel/v2?type=detailed&days=14")
         assert resp.status == 200
         assert resp.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment" in resp.headers.get("Content-Disposition", "")
         body = await resp.read()
         assert body[:2] == b"PK"
+
+    @pytest.mark.asyncio
+    async def test_excel_v1_report_attachment_header(self, client, monkeypatch):
+        """v1 Excel report should include Content-Disposition: attachment header."""
+        monkeypatch.setattr(
+            "webapp_server._extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        resp = await (await client).get("/api/report/excel?days=7")
+        assert resp.status == 200
+        assert resp.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment" in resp.headers.get("Content-Disposition", "")
 
 
 class TestMiniAppUi:
