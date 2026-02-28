@@ -768,12 +768,46 @@
             const days = $("report-days-select").value || "30";
             const reportType = document.getElementById('report-type')?.value || 'quick';
             const url = API.getExcelReportUrl(reportType, days, generator || "");
-            const a = document.createElement('a');
-            a.href = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
-            a.download = `generator_report_${reportType}_${new Date().toISOString().slice(0,10)}.xlsx`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            const fullUrl  = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
+            const filename = `generator_report_${reportType}_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+            fetch(fullUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+                    if (window.Telegram?.WebApp?.showPopup) {
+                        window.Telegram.WebApp.showPopup({
+                            title: '✅ Готово',
+                            message: 'Звіт завантажено',
+                            buttons: [{type: 'close'}]
+                        });
+                    }
+                })
+                .catch(err => {
+                    console.error('Download failed:', err);
+                    if (window.Telegram?.WebApp?.showPopup) {
+                        window.Telegram.WebApp.showPopup({
+                            title: '❌ Помилка',
+                            message: `Не вдалося завантажити звіт: ${err.message}`,
+                            buttons: [{type: 'close'}]
+                        });
+                    } else {
+                        alert(`Помилка завантаження: ${err.message}`);
+                    }
+                });
         },
 
         // --- Sync Google Sheets ---
@@ -2158,12 +2192,59 @@
         const typeEl = document.getElementById("report-type-select");
         const type   = typeEl ? typeEl.value : "quick";
         const url    = API.getExcelReportUrl(type, analyticsPeriod);
-        const a = document.createElement('a');
-        a.href = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
-        a.download = `generator_report_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const fullUrl  = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
+        const filename = `generator_report_${type}_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+        const downloadBtn = document.getElementById('analytics-download-btn');
+        const originalText = downloadBtn?.textContent;
+        if (downloadBtn) {
+            downloadBtn.textContent = '⏳ Завантаження...';
+            downloadBtn.disabled = true;
+        }
+
+        fetch(fullUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+                if (window.Telegram?.WebApp?.showPopup) {
+                    window.Telegram.WebApp.showPopup({
+                        title: '✅ Готово',
+                        message: 'Звіт завантажено',
+                        buttons: [{type: 'close'}]
+                    });
+                }
+            })
+            .catch(err => {
+                console.error('Download failed:', err);
+                if (window.Telegram?.WebApp?.showPopup) {
+                    window.Telegram.WebApp.showPopup({
+                        title: '❌ Помилка',
+                        message: `Не вдалося завантажити звіт: ${err.message}`,
+                        buttons: [{type: 'close'}]
+                    });
+                } else {
+                    alert(`Помилка завантаження: ${err.message}`);
+                }
+            })
+            .finally(() => {
+                if (downloadBtn) {
+                    downloadBtn.textContent = originalText || '📊 Завантажити Excel (.xlsx)';
+                    downloadBtn.disabled = false;
+                }
+            });
     }
 
     // Публічний API для зовнішнього виклику
