@@ -113,7 +113,7 @@ const API = (() => {
         getGenerators: () => get("/api/generators"),
         /** Персонал поточного користувача */
         getPersonnelMe: () => get("/api/personnel/me"),
-        /** Завантаження Excel-звіту (повертає URL) */
+        /** @deprecated Use getExcelReportUrl instead */
         getReportUrl: (days, generator) => {
             let url = BASE + "/api/report/excel?days=" + (days || "30");
             if (generator) url += "&generator=" + encodeURIComponent(generator);
