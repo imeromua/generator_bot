@@ -432,7 +432,7 @@ class TestApiAnalytics:
     def test_kpi_returns_fields(self, client, monkeypatch):
         """KPI endpoint returns expected fields for authenticated user."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/kpi?days=7")
@@ -444,7 +444,7 @@ class TestApiAnalytics:
     def test_fuel_timeline_returns_actual_forecast(self, client, monkeypatch):
         """Fuel timeline returns actual data and forecast."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/fuel-timeline?days=7")
@@ -458,7 +458,7 @@ class TestApiAnalytics:
     def test_motor_hours_returns_daily_totals(self, client, monkeypatch):
         """Motor hours endpoint returns daily data and totals."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/motor-hours?days=7")
@@ -472,7 +472,7 @@ class TestApiAnalytics:
     def test_efficiency_returns_pie_and_shifts(self, client, monkeypatch):
         """Efficiency endpoint returns pie chart data and shift breakdown."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/efficiency?days=7")
@@ -485,7 +485,7 @@ class TestApiAnalytics:
     def test_calendar_returns_days(self, client, monkeypatch):
         """Calendar endpoint returns days array for the month."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/calendar?month=2025-01")
@@ -498,7 +498,7 @@ class TestApiAnalytics:
     def test_trends_returns_insights(self, client, monkeypatch):
         """Trends endpoint returns insights list."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/trends?days=14")
@@ -510,7 +510,7 @@ class TestApiAnalytics:
     def test_forecast_returns_daily_forecast(self, client, monkeypatch):
         """Forecast endpoint returns 7-day prediction and maintenance info."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/forecast")
@@ -523,7 +523,7 @@ class TestApiAnalytics:
     def test_excel_v2_report_invalid_type(self, client, monkeypatch):
         """Invalid report type should return 400."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.reports._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/report/excel/v2?type=invalid")
@@ -532,7 +532,7 @@ class TestApiAnalytics:
     def test_excel_v2_report_quick(self, client, monkeypatch):
         """Quick Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.reports._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/report/excel/v2?type=quick&days=7")
@@ -547,7 +547,7 @@ class TestApiAnalytics:
     def test_excel_v2_report_detailed(self, client, monkeypatch):
         """Detailed Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.reports._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/report/excel/v2?type=detailed&days=14")
@@ -561,7 +561,7 @@ class TestApiAnalytics:
     def test_fuel_timeline_includes_balance_fields(self, client, monkeypatch):
         """Fuel timeline response must include morning_balance and evening_balance for each day."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.analytics._extract_user",
             lambda req: {"id": 1, "first_name": "Test"},
         )
         resp = client.get("/api/analytics/fuel-timeline?days=3")
@@ -588,10 +588,10 @@ class TestApiAnalytics:
     def test_excel_v1_report_attachment_header(self, client, monkeypatch):
         """v1 Excel report should include Content-Disposition: attachment header."""
         monkeypatch.setattr(
-            "webapp_server._extract_user",
+            "webapp.api.reports._extract_user",
             lambda req: {"id": 1, "first_name": "Admin"},
         )
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.api.reports._is_admin", lambda user: True)
         resp = client.get("/api/report/excel?days=7")
         assert resp.status_code == 200
         assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
