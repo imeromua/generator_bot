@@ -1,0 +1,1 @@
+"""Generator Bot application package."""
