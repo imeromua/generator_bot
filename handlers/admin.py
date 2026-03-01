@@ -1,36 +1,7 @@
+"""Admin handlers - empty, all admin functions now in WebApp."""
 from aiogram import Router
 
-# DEPRECATED: Correction functionality moved to other menus
-# from handlers.admin_parts.correction import router as correction_router
-from handlers.admin_parts.db_cleanup import router as db_cleanup_router
-from handlers.admin_parts.drivers import router as drivers_router
-from handlers.admin_parts.fuel import router as fuel_router
-from handlers.admin_parts.generator_switch import router as generator_switch_router
-from handlers.admin_parts.home import router as home_router
-from handlers.admin_parts.maintenance import router as maintenance_router
-from handlers.admin_parts.personnel import router as personnel_router
-from handlers.admin_parts.reports import router as reports_router
-from handlers.admin_parts.schedule import router as schedule_router
-from handlers.admin_parts.settings import router as settings_router
-from handlers.admin_parts.sync import router as sync_router
-from handlers.admin_parts.users import router as users_router
+router = Router(name="admin")
 
-router = Router()
-
-# Підключаємо роутери частин адмінки
-router.include_router(home_router)
-router.include_router(settings_router)
-router.include_router(personnel_router)
-router.include_router(schedule_router)
-router.include_router(maintenance_router)
-router.include_router(generator_switch_router)
-router.include_router(reports_router)
-router.include_router(drivers_router)
-router.include_router(fuel_router)
-router.include_router(users_router)
-# DEPRECATED: Correction menu removed - functionality moved to:
-#   - Hours: Maintenance menu (mnt_set_hours)
-#   - Fuel/Consumption: Generator-specific settings
-# router.include_router(correction_router)
-router.include_router(sync_router)
-router.include_router(db_cleanup_router)
+# All admin functionality moved to Mini App
+# This router is kept for potential future bot-only admin commands
