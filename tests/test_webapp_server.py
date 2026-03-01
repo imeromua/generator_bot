@@ -340,6 +340,72 @@ class TestApiNotifications:
         resp = client.post("/api/notifications/test", json={})
         assert resp.status_code == 401
 
+    def test_test_notification_sends_telegram_message(self, client, monkeypatch):
+        """Authenticated admin should trigger a real Telegram send and get ok=True."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 123, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+
+        sent_messages = []
+
+        class _FakeSession:
+            async def close(self):
+                pass
+
+        class _FakeBot:
+            session = _FakeSession()
+
+            async def send_message(self, chat_id, text, parse_mode=None):
+                sent_messages.append({"chat_id": chat_id, "text": text})
+
+        import config as cfg
+        import sys
+        import types
+
+        monkeypatch.setattr(cfg, "BOT_TOKEN", "fake_token")
+
+        fake_aiogram = types.ModuleType("aiogram")
+        fake_aiogram.Bot = lambda token: _FakeBot()
+        monkeypatch.setitem(sys.modules, "aiogram", fake_aiogram)
+
+        resp = client.post("/api/notifications/test", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True
+        assert "Telegram" in data.get("message", "")
+        assert len(sent_messages) == 1
+        assert sent_messages[0]["chat_id"] == 123
+
+    def test_test_notification_returns_500_on_bot_error(self, client, monkeypatch):
+        """If the Telegram send fails, the endpoint should return 500."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 456, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+
+        import sys
+        import types
+
+        class _ErrorBot:
+            async def send_message(self, **kwargs):
+                raise RuntimeError("network error")
+
+            class session:
+                @staticmethod
+                async def close():
+                    pass
+
+        fake_aiogram = types.ModuleType("aiogram")
+        fake_aiogram.Bot = lambda token: _ErrorBot()
+        monkeypatch.setitem(sys.modules, "aiogram", fake_aiogram)
+
+        resp = client.post("/api/notifications/test", json={})
+        assert resp.status_code == 500
+        assert "error" in resp.json()
+
 
 # ---------------------------------------------------------------------------
 # Task 6: API /api/fuel/orders

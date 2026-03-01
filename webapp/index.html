@@ -617,32 +617,41 @@
 
         <!-- Task 5: Вкладка: Сповіщення -->
         <section class="page" id="page-notifications">
-            <!-- Критичні -->
-            <div class="card">
+            <h2 class="section-title">🔔 Сповіщення</h2>
+
+            <!-- Тихий час -->
+            <div class="card" id="notif-quiet-card">
                 <div class="card-header">
-                    <h2>🔔 Сповіщення</h2>
-                    <button class="btn-sm" onclick="App.testNotification()">🧪 Тест</button>
+                    <h2>🌙 Тихий час</h2>
                 </div>
                 <div class="card-body">
-                    <p class="hint-text" style="margin-bottom:12px">Критичні сповіщення завжди активні і не залежать від налаштувань.</p>
-                    <div id="notifications-list">
-                        <!-- Заповнюється JS -->
+                    <div class="quiet-hours-row">
+                        <label>З:</label>
+                        <input type="time" id="notif-quiet-start" value="22:00">
+                        <label>До:</label>
+                        <input type="time" id="notif-quiet-end" value="08:00">
                     </div>
-
-                    <!-- Тихі години -->
-                    <div style="margin-top:16px;border-top:1px solid var(--color-border,#e0e0e8);padding-top:12px">
-                        <div style="font-weight:600;margin-bottom:8px">🌙 Тихі години (не турбувати)</div>
-                        <div class="quiet-hours-row">
-                            <label>З:</label>
-                            <input type="time" id="quiet-start" value="22:00">
-                            <label>До:</label>
-                            <input type="time" id="quiet-end" value="08:00">
-                        </div>
-                        <button class="btn btn-secondary btn-full" style="margin-top:10px" onclick="App.saveQuietHours()">
-                            💾 Зберегти тихі години
-                        </button>
-                    </div>
+                    <button class="btn btn-secondary btn-full" style="margin-top:10px"
+                        onclick="Notifications.saveQuietHours()">💾 Зберегти</button>
                 </div>
+            </div>
+
+            <!-- Кнопка тесту -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>🧪 Тест</h2>
+                </div>
+                <div class="card-body">
+                    <p class="hint-text">Надіслати тестове повідомлення в Telegram</p>
+                    <button class="btn btn-primary btn-full" onclick="Notifications.testNotification()">
+                        Надіслати тест
+                    </button>
+                </div>
+            </div>
+
+            <!-- Список типів сповіщень (рендериться динамічно) -->
+            <div id="notif-types-list">
+                <div class="loading">Завантаження...</div>
             </div>
         </section>
 
@@ -919,6 +928,7 @@
 
     <script src="/js/api.js"></script>
     <script src="/js/users.js"></script>
+    <script src="/js/notifications.js"></script>
     <script src="/js/app.js"></script>
     <script>
         // Якщо через 5 секунд Telegram SDK не завантажився — редирект на заглушку
