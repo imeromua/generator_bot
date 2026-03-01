@@ -3,9 +3,11 @@
 import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse
+import config
 import database.db_api as db
 from webapp.utils import validation as _validation_mod
 from webapp.utils import permissions as _permissions_mod
+from webapp.utils.db_helpers import atomic_transaction, get_admin_info as _get_admin_info
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,8 @@ async def api_fuel_orders_list(request: Request):
 async def api_fuel_orders_create(request: Request):
     """POST /api/fuel/orders — create a new fuel order."""
     user = _validation_mod.extract_user(request)
+    if not user:
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
@@ -45,15 +49,18 @@ async def api_fuel_orders_create(request: Request):
     except (TypeError, ValueError):
         return JSONResponse(content={"error": "Невірне значення кількості літрів"}, status_code=400)
 
-    if amount <= 0 or amount > 80:
-        return JSONResponse(content={"error": "Кількість літрів має бути від 1 до 80"}, status_code=400)
+    if amount <= 0 or amount > config.FUEL_ORDER_MAX_LITERS:
+        return JSONResponse(
+            content={"error": f"Кількість літрів має бути від 1 до {config.FUEL_ORDER_MAX_LITERS}"},
+            status_code=400,
+        )
 
     try:
         from database.api.fuel_orders import create_order
         from utils.time import now_kiev
 
         now = now_kiev()
-        user_id = int(user.get("id", 0))
+        user_id, admin_name = _get_admin_info(user)
         order_id = create_order(
             created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
             amount_liters=amount,
@@ -62,6 +69,14 @@ async def api_fuel_orders_create(request: Request):
             price=float(body["price"]) if body.get("price") else None,
             delivery_date=str(body.get("delivery_date", "")).strip() or None,
             notes=str(body.get("notes", "")).strip() or None,
+        )
+        db.log_admin_action(
+            user_id,
+            admin_name,
+            "fuel_order_create",
+            f"Створено замовлення палива #{order_id}: {amount} л",
+            target_entity=f"fuel_order:{order_id}",
+            new_value={"order_id": order_id, "amount_liters": amount},
         )
         return {"ok": True, "order_id": order_id, "message": "Замовлення створено"}
     except Exception as e:
@@ -72,6 +87,8 @@ async def api_fuel_orders_create(request: Request):
 async def api_fuel_orders_update(request: Request):
     """POST /api/fuel/orders/update — update a fuel order status."""
     user = _validation_mod.extract_user(request)
+    if not user:
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
@@ -84,7 +101,7 @@ async def api_fuel_orders_update(request: Request):
         return JSONResponse(content={"error": "order_id обов'язковий"}, status_code=400)
 
     try:
-        from database.api.fuel_orders import update_order, update_order_status, VALID_STATUSES
+        from database.api.fuel_orders import update_order, update_order_status, VALID_STATUSES, get_order
 
         new_status = str(body.get("status", "")).strip()
         if new_status and new_status not in VALID_STATUSES:
@@ -103,17 +120,23 @@ async def api_fuel_orders_update(request: Request):
         if not updated:
             return JSONResponse(content={"error": "Нічого не оновлено"}, status_code=400)
 
+        user_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            user_id,
+            admin_name,
+            "fuel_order_update",
+            f"Оновлено замовлення палива #{order_id}" + (f": статус → {new_status}" if new_status else ""),
+            target_entity=f"fuel_order:{order_id}",
+            new_value={"order_id": order_id, "status": new_status or None},
+        )
+
         # If delivered, add fuel to current level atomically
         if new_status == "delivered":
-            from database.api.fuel_orders import get_order
-
             order = get_order(int(order_id))
             if order:
-                db.update_fuel(order["amount_liters"])
-                user_id = int(user.get("id", 0))
-                user_info = db.get_user(user_id)
-                actor = user_info[1] if user_info else user.get("first_name", "Адмін")
-                db.add_log("refill", actor, str(order["amount_liters"]))
+                with atomic_transaction() as conn:
+                    db.update_fuel(order["amount_liters"], conn=conn)
+                    db.add_log("refill", admin_name, str(order["amount_liters"]), conn=conn)
 
         return {"ok": True, "message": "Замовлення оновлено"}
     except Exception as e:

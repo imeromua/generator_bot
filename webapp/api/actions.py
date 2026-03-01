@@ -47,7 +47,7 @@ async def api_action_start(request: Request):
                 status_code=400,
             )
     except Exception:
-        pass
+        logger.warning("Не вдалося перевірити робочий час (конфіг?): пропускаємо перевірку")
 
     event_type = shift_code + "_start"
     res = db.try_start_shift(event_type, personnel, now)
@@ -159,7 +159,7 @@ async def api_action_refill(request: Request):
                 status_code=400,
             )
     except Exception:
-        pass
+        logger.warning("Не вдалося перевірити робочий час (конфіг?): пропускаємо перевірку")
 
     try:
         with atomic_transaction() as conn:
