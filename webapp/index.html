@@ -210,6 +210,11 @@
             <div class="card">
                 <div class="card-header">
                     <h2>🔧 Технічне обслуговування</h2>
+                    <select id="mnt-gen-select" class="mnt-gen-select" onchange="App.onMntGenChange(this.value)" style="margin-left:auto;padding:4px 8px;border-radius:6px;border:1px solid var(--border,#ddd);background:var(--card-bg,#fff);color:inherit;font-size:14px;">
+                        <option value="active">🔌 Активний</option>
+                        <option value="main">🔋 Основний</option>
+                        <option value="emergency">⚠️ Аварійний</option>
+                    </select>
                 </div>
                 <div class="card-body">
                     <div class="mnt-stats" id="mnt-stats">
@@ -218,30 +223,13 @@
                 </div>
             </div>
 
-            <div class="card" id="card-mnt-actions-main" style="display:none">
+            <div class="card" id="card-mnt-actions" style="display:none">
                 <div class="card-header">
-                    <h2>🔋 ТО: Основний</h2>
+                    <h2 id="card-mnt-actions-title">🔧 ТО: Генератор</h2>
                 </div>
                 <div class="card-body">
-                    <div class="action-grid">
-                        <button class="btn btn-warning" onclick="App.mntPerform('oil','main')">🛢 Мастило</button>
-                        <button class="btn btn-warning" onclick="App.mntPerform('spark','main')">🕯 Свічки</button>
-                        <button class="btn btn-primary" onclick="App.mntPerform('maintenance','main')">🔧 Планове ТО</button>
-                        <button class="btn btn-secondary" onclick="App.mntSetHoursDialog('main')">⏱ Мотогодини</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card" id="card-mnt-actions-emerg" style="display:none">
-                <div class="card-header">
-                    <h2>⚠️ ТО: Аварійний</h2>
-                </div>
-                <div class="card-body">
-                    <div class="action-grid">
-                        <button class="btn btn-warning" onclick="App.mntPerform('oil','emergency')">🛢 Мастило</button>
-                        <button class="btn btn-warning" onclick="App.mntPerform('spark','emergency')">🕯 Свічки</button>
-                        <button class="btn btn-primary" onclick="App.mntPerform('maintenance','emergency')">🔧 Планове ТО</button>
-                        <button class="btn btn-secondary" onclick="App.mntSetHoursDialog('emergency')">⏱ Мотогодини</button>
+                    <div class="action-grid" id="mnt-actions-grid">
+                        <!-- Заповнюється JS залежно від обраного генератора -->
                     </div>
                 </div>
             </div>

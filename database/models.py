@@ -715,9 +715,11 @@ def init_db():
         ('sync_in_progress', '0'),
         # ПІДТРИМКА ДВОХ ГЕНЕРАТОРІВ: основний та аварійний
         ('active_generator', 'main'),
+        ('last_maintenance', '0.0'),
         ('emergency_total_hours', '0.0'),
         ('emergency_last_oil_change', '0.0'),
         ('emergency_last_spark_change', '0.0'),
+        ('emergency_last_maintenance', '0.0'),
     ]
 
     # Backend-specific INSERT syntax (no fallback needed with direct syntax)

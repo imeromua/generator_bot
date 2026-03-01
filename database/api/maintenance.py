@@ -80,9 +80,8 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
                 elif action == "spark":
                     _conn_set_state_value(conn, "emergency_last_spark_change", str(cur))
                 elif action == "maintenance":
-                    # Планове ТО - скидаємо все
-                    _conn_set_state_value(conn, "emergency_last_oil_change", str(cur))
-                    _conn_set_state_value(conn, "emergency_last_spark_change", str(cur))
+                    # Планове ТО - скидаємо тільки лічильник планового ТО
+                    # Мастило та свічки мають власні незалежні лічильники
                     _conn_set_state_value(conn, "emergency_last_maintenance", str(cur))
             else:
                 if action == "oil":
@@ -90,9 +89,8 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
                 elif action == "spark":
                     _conn_set_state_value(conn, "last_spark_change", str(cur))
                 elif action == "maintenance":
-                    # Планове ТО - скидаємо все
-                    _conn_set_state_value(conn, "last_oil_change", str(cur))
-                    _conn_set_state_value(conn, "last_spark_change", str(cur))
+                    # Планове ТО - скидаємо тільки лічильник планового ТО
+                    # Мастило та свічки мають власні незалежні лічильники
                     _conn_set_state_value(conn, "last_maintenance", str(cur))
 
             conn.commit()

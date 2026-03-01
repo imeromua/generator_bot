@@ -12,9 +12,18 @@ logger = logging.getLogger(__name__)
 
 
 async def api_maintenance(request: Request):
-    """GET /api/maintenance — стан технічного обслуговування."""
+    """GET /api/maintenance — стан технічного обслуговування.
+
+    Query params:
+        generator: 'main' | 'emergency' — який генератор показувати.
+                   Якщо не вказано — використовується активний.
+    """
     try:
-        active_gen = db.get_active_generator()
+        gen_param = (request.query_params.get("generator") or "").strip()
+        if gen_param in ("main", "emergency"):
+            active_gen = gen_param
+        else:
+            active_gen = db.get_active_generator()
         stats = db.get_maintenance_stats(active_gen)
         history = db.get_maintenance_history(active_gen, 10)
 

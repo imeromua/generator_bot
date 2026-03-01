@@ -128,7 +128,7 @@ const API = (() => {
         /** Останні події */
         getEvents: (limit) => get("/api/events", limit ? { limit } : undefined),
         /** Стан ТО */
-        getMaintenance: () => get("/api/maintenance"),
+        getMaintenance: (generator) => get("/api/maintenance", generator ? { generator } : undefined),
         /** Роль поточного користувача */
         getUserRole: () => get("/api/user/role"),
         /** Список водіїв */

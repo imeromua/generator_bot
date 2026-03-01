@@ -64,8 +64,8 @@
     // -------------------------------------------------------------------
     const FUEL_CRITICAL = 15;   // поріг критичного рівня палива (л)
     const FUEL_WARNING  = 40;   // поріг попереджувального рівня палива (л)
-    const OIL_INTERVAL = 100;   // інтервал заміни мастила (години)
-    const SPARK_INTERVAL = 300; // інтервал заміни свічок (години)
+    const OIL_INTERVAL   = 100; // інтервал заміни мастила (години)
+    const SPARK_INTERVAL = 100; // інтервал заміни свічок (години)
 
     // -------------------------------------------------------------------
     // Допоміжні функції
@@ -675,16 +675,35 @@
     $("events-refresh").addEventListener("click", loadEvents);
 
     // --- Maintenance ---
+    // Поточний обраний генератор для вкладки ТО ('active' = активний)
+    let mntSelectedGen = "active";
+
     async function loadMaintenance() {
         try {
-            const data = await API.getMaintenance();
+            const genParam = mntSelectedGen === "active" ? undefined : mntSelectedGen;
+            const data = await API.getMaintenance(genParam);
             renderMaintenance(data);
-            // Показуємо кнопки ТО тільки для адмінів
-            $("card-mnt-actions-main").style.display  = userRole.is_admin ? "" : "none";
-            $("card-mnt-actions-emerg").style.display = userRole.is_admin ? "" : "none";
+            // Показуємо блок дій ТО тільки для адмінів
+            const actionsCard = $("card-mnt-actions");
+            if (actionsCard) actionsCard.style.display = userRole.is_admin ? "" : "none";
+            if (userRole.is_admin) _renderMntActions(data ? data.generator : "main");
         } catch (e) {
             showError("Помилка: " + e.message);
         }
+    }
+
+    function _renderMntActions(generator) {
+        const titleEl = $("card-mnt-actions-title");
+        const gridEl  = $("mnt-actions-grid");
+        if (!titleEl || !gridEl) return;
+        const genNames = { main: "🔋 Основний", emergency: "⚠️ Аварійний" };
+        titleEl.textContent = `🔧 ТО: ${genNames[generator] || generator}`;
+        gridEl.innerHTML = `
+            <button class="btn btn-warning" onclick="App.mntPerform('oil','${generator}')">🛢 Мастило</button>
+            <button class="btn btn-warning" onclick="App.mntPerform('spark','${generator}')">🕯 Свічки</button>
+            <button class="btn btn-primary" onclick="App.mntPerform('maintenance','${generator}')">🔧 Планове ТО</button>
+            <button class="btn btn-secondary" onclick="App.mntSetHoursDialog('${generator}')">⏱ Мотогодини</button>
+        `;
     }
 
     function renderMaintenance(data) {
@@ -772,11 +791,15 @@
 
         const active = data.active;
         
-        // Розраховуємо залишок до ТО: інтервал - поточні мотогодини
-        const mainRemOil = OIL_INTERVAL - (data.main.total_hours || 0);
-        const mainRemSpark = SPARK_INTERVAL - (data.main.total_hours || 0);
-        const emergRemOil = OIL_INTERVAL - (data.emergency.total_hours || 0);
-        const emergRemSpark = SPARK_INTERVAL - (data.emergency.total_hours || 0);
+        // Розраховуємо залишок до ТО: інтервал - (загальні години - годин при останньому ТО)
+        const mainOilSince  = (data.main.total_hours || 0) - (data.main.last_oil_change || 0);
+        const mainSparkSince = (data.main.total_hours || 0) - (data.main.last_spark_change || 0);
+        const emergOilSince  = (data.emergency.total_hours || 0) - (data.emergency.last_oil_change || 0);
+        const emergSparkSince = (data.emergency.total_hours || 0) - (data.emergency.last_spark_change || 0);
+        const mainRemOil   = Math.max(0, OIL_INTERVAL   - mainOilSince);
+        const mainRemSpark = Math.max(0, SPARK_INTERVAL - mainSparkSince);
+        const emergRemOil  = Math.max(0, OIL_INTERVAL   - emergOilSince);
+        const emergRemSpark = Math.max(0, SPARK_INTERVAL - emergSparkSince);
 
         el.innerHTML = `
             <div class="gen-card ${active === 'main' ? 'active' : ''}">
@@ -822,6 +845,11 @@
         },
 
         // --- ТО ---
+        async onMntGenChange(value) {
+            mntSelectedGen = value;
+            await loadMaintenance();
+        },
+
         mntPerform(action, generator) {
             pendingMnt = { action, generator };
             const actionNames = { oil: "Заміну мастила", spark: "Заміну свічок", maintenance: "Планове ТО" };
