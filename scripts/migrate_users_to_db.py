@@ -8,6 +8,7 @@ creates admin-role users in the database, and prints a summary.
 
 After running this script you can remove the USERS variable from your .env file.
 """
+
 import os
 import sys
 from datetime import datetime

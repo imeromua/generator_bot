@@ -1,4 +1,5 @@
 """Analytics business logic services."""
+
 import math
 import logging
 from datetime import datetime, timedelta
@@ -108,9 +109,7 @@ def _build_daily_stats(start_dt: datetime, end_dt: datetime, generator_id: str |
     for d in sorted_days:
         morning_balance = prev_balance
         if morning_balance is not None:
-            evening_balance = round(
-                float(morning_balance) + d["refill_liters"] - d["fuel_consumed"], 1
-            )
+            evening_balance = round(float(morning_balance) + d["refill_liters"] - d["fuel_consumed"], 1)
         else:
             evening_balance = None
         d["morning_balance"] = morning_balance

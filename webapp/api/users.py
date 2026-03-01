@@ -1,4 +1,5 @@
 """User management API endpoints."""
+
 import logging
 from typing import Optional
 
@@ -71,7 +72,8 @@ async def api_admin_users_update_role(request: Request, user_id: int):
         db.update_user_role(user_id, role)
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
-            admin_id, admin_name,
+            admin_id,
+            admin_name,
             "user_role_change",
             f"Змінено роль user {user_id}: {old_role} → {role}",
             target_entity=f"user:{user_id}",
@@ -104,7 +106,8 @@ async def api_admin_users_block(request: Request, user_id: int):
         admin_id, admin_name = _get_admin_info(user)
         db.block_user(user_id, blocked_by=admin_id, reason=reason)
         db.log_admin_action(
-            admin_id, admin_name,
+            admin_id,
+            admin_name,
             "user_block",
             f"Заблоковано user {user_id}" + (f": {reason}" if reason else ""),
             target_entity=f"user:{user_id}",
@@ -129,7 +132,8 @@ async def api_admin_users_unblock(request: Request, user_id: int):
         admin_id, admin_name = _get_admin_info(user)
         db.unblock_user(user_id)
         db.log_admin_action(
-            admin_id, admin_name,
+            admin_id,
+            admin_name,
             "user_unblock",
             f"Розблоковано user {user_id}",
             target_entity=f"user:{user_id}",
@@ -153,7 +157,8 @@ async def api_admin_users_delete(request: Request, user_id: int):
         admin_id, admin_name = _get_admin_info(user)
         db.soft_delete_user(user_id)
         db.log_admin_action(
-            admin_id, admin_name,
+            admin_id,
+            admin_name,
             "user_delete",
             f"Видалено (soft) user {user_id}",
             target_entity=f"user:{user_id}",

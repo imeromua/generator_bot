@@ -209,8 +209,8 @@ class TestApiAdminConfig:
 
     def test_set_generator_with_mock_admin(self, client, monkeypatch):
         """Test that set_generator endpoint works for admin user."""
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 123, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 123, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
         resp = client.post(
             "/api/admin/config/generator",
@@ -223,8 +223,8 @@ class TestApiAdminConfig:
 
     def test_set_generator_invalid_value(self, client, monkeypatch):
         """Test validation rejects out-of-range values."""
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 123, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 123, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
         resp = client.post(
             "/api/admin/config/generator",
@@ -234,8 +234,8 @@ class TestApiAdminConfig:
 
     def test_set_global_fuel_price(self, client, monkeypatch):
         """Test setting global fuel price works."""
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 123, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 123, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
         resp = client.post(
             "/api/admin/config/global",
@@ -247,8 +247,8 @@ class TestApiAdminConfig:
 
     def test_get_config_returns_structure(self, client, monkeypatch):
         """Test GET /api/admin/config returns expected structure."""
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 123, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 123, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
         resp = client.get("/api/admin/config")
         assert resp.status_code == 200
@@ -261,8 +261,8 @@ class TestApiAdminConfig:
 
     def test_config_history_pagination(self, client, monkeypatch):
         """Test history returns paginated results."""
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 123, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 123, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
         resp = client.get("/api/admin/config/history?limit=5")
         assert resp.status_code == 200
@@ -275,8 +275,8 @@ class TestApiAdminConfigValidation:
     """Additional validation tests for config API."""
 
     def _mock_admin(self, monkeypatch):
-        monkeypatch.setattr("webapp_server._extract_user", lambda req: {"id": 1, "first_name": "Admin"})
-        monkeypatch.setattr("webapp_server._is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.validation.extract_user", lambda req: {"id": 1, "first_name": "Admin"})
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
 
     def test_invalid_generator_id(self, client, monkeypatch):
         self._mock_admin(monkeypatch)

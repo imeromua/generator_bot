@@ -1,4 +1,5 @@
 """Application factory for the Telegram Mini App web server."""
+
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -16,32 +17,57 @@ from webapp.middleware.rate_limit import RateLimitMiddleware
 from get_build_version import BUILD_VERSION
 
 from webapp.api.status import (
-    api_status, api_schedule, api_schedule_week, api_user_role,
-    api_drivers, api_generators, api_personnel_me,
-    api_schedule_toggle, api_generator_switch,
+    api_status,
+    api_schedule,
+    api_schedule_week,
+    api_user_role,
+    api_drivers,
+    api_generators,
+    api_personnel_me,
+    api_schedule_toggle,
+    api_generator_switch,
 )
 from webapp.api.events import api_events
 from webapp.api.actions import api_action_start, api_action_stop, api_action_refill
 from webapp.api.maintenance import api_maintenance, api_maintenance_perform, api_maintenance_set_hours, api_fuel_set
 from webapp.api.admin import (
-    api_admin_drivers_list, api_admin_drivers_add, api_admin_drivers_delete,
-    api_admin_personnel_list, api_admin_personnel_add, api_admin_personnel_delete,
-    api_admin_personnel_assign, api_admin_sync,
-    api_admin_audit, api_admin_audit_export,
-    api_admin_config_get, api_admin_config_set_generator, api_admin_config_set_global, api_admin_config_history,
-    api_admin_backups_list, api_admin_backup_create, api_admin_backup_download,
+    api_admin_drivers_list,
+    api_admin_drivers_add,
+    api_admin_drivers_delete,
+    api_admin_personnel_list,
+    api_admin_personnel_add,
+    api_admin_personnel_delete,
+    api_admin_personnel_assign,
+    api_admin_sync,
+    api_admin_audit,
+    api_admin_audit_export,
+    api_admin_config_get,
+    api_admin_config_set_generator,
+    api_admin_config_set_global,
+    api_admin_config_history,
+    api_admin_backups_list,
+    api_admin_backup_create,
+    api_admin_backup_download,
 )
 from webapp.api.notifications import api_notifications_get, api_notifications_set, api_notifications_test
 from webapp.api.fuel_orders import api_fuel_orders_list, api_fuel_orders_create, api_fuel_orders_update
 from webapp.api.shifts import api_shifts_get, api_shifts_set, api_shifts_auto, api_shifts_analytics
 from webapp.api.analytics import (
-    api_analytics_kpi, api_analytics_fuel_timeline, api_analytics_motor_hours,
-    api_analytics_efficiency, api_analytics_calendar, api_analytics_trends, api_analytics_forecast,
+    api_analytics_kpi,
+    api_analytics_fuel_timeline,
+    api_analytics_motor_hours,
+    api_analytics_efficiency,
+    api_analytics_calendar,
+    api_analytics_trends,
+    api_analytics_forecast,
 )
 from webapp.api.reports import api_report_excel, api_report_excel_v2
 from webapp.api.users import (
-    api_admin_users_list, api_admin_users_update_role,
-    api_admin_users_block, api_admin_users_unblock, api_admin_users_delete,
+    api_admin_users_list,
+    api_admin_users_update_role,
+    api_admin_users_block,
+    api_admin_users_unblock,
+    api_admin_users_delete,
 )
 
 logger = logging.getLogger(__name__)

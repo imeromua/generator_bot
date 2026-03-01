@@ -1,4 +1,5 @@
 """Analytics API endpoints."""
+
 import logging
 import math
 from datetime import datetime, timedelta

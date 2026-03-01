@@ -1,4 +1,5 @@
 """Action API endpoints (start, stop, refill)."""
+
 import logging
 from datetime import datetime
 from fastapi import Request

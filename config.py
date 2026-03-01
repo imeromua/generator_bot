@@ -216,6 +216,7 @@ def has_permission(user_role: str, permission: str) -> bool:
     role_perms = ROLES.get(user_role, {}).get("permissions", [])
     return permission in role_perms
 
+
 # --- ПАЛИВО (ОСНОВНИЙ ГЕНЕРАТОР) ---
 FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")
 

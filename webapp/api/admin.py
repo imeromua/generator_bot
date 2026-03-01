@@ -1,4 +1,5 @@
 """Admin management API endpoints."""
+
 import io
 import re
 import logging
@@ -10,10 +11,12 @@ import database.db_api as db
 from webapp.utils import validation as _validation_mod
 from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
+
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
+
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False

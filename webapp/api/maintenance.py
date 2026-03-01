@@ -1,4 +1,5 @@
 """Maintenance and fuel management API endpoints."""
+
 import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse

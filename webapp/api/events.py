@@ -1,4 +1,5 @@
 """Events API endpoint."""
+
 import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse
