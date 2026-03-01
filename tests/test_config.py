@@ -94,7 +94,7 @@ class TestMaintenanceSettings:
         maint = MaintenanceSettings()
         assert maint.oil_change_interval == 100
         assert maint.spark_change_interval == 100
-        assert maint.maintenance_interval == 300
+        assert maint.maintenance_interval == 200
         assert maint.oil_limit == 100
 
 
