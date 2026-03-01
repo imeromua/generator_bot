@@ -1,4 +1,5 @@
 """Status, schedule, user, generator, and driver API endpoints."""
+
 import logging
 from datetime import datetime, timedelta
 from fastapi import Request

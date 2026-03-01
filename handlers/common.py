@@ -1,4 +1,5 @@
 """Common handlers - minimal bot with only /start command."""
+
 import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart
@@ -31,7 +32,7 @@ async def cmd_start(message: Message):
 
     # Перевірка прав доступу
     is_admin = user_id in config.ADMIN_IDS
-    
+
     try:
         has_personnel = bool(db_models.get_user_personnel(user_id))
     except Exception:
@@ -39,7 +40,7 @@ async def cmd_start(message: Message):
 
     # Формування привітального повідомлення
     greeting = f"👋 Вітаю, {hbold(full_name)}!\n\n"
-    
+
     if is_admin:
         greeting += f"🔑 {hbold('Адміністратор')}\n\n"
     elif not has_personnel:
@@ -62,19 +63,12 @@ async def cmd_start(message: Message):
     if config.WEBAPP_URL:
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📱 Відкрити Mini App",
-                        web_app=WebAppInfo(url=config.WEBAPP_URL)
-                    )
-                ]
+                [InlineKeyboardButton(text="📱 Відкрити Mini App", web_app=WebAppInfo(url=config.WEBAPP_URL))]
             ]
         )
         await message.answer(greeting, reply_markup=keyboard)
     else:
-        await message.answer(
-            greeting + f"\n\n❌ {hbold('Mini App недоступний')} (WEBAPP_URL не налаштовано)"
-        )
+        await message.answer(greeting + f"\n\n❌ {hbold('Mini App недоступний')} (WEBAPP_URL не налаштовано)")
 
 
 @router.message(F.text)

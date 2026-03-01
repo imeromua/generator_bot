@@ -1,15 +1,18 @@
 """Report generation business logic services."""
+
 import io
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 import database.db_api as db
 import config
+
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.cell.cell import MergedCell
     from openpyxl.utils import get_column_letter
+
     EXCEL_AVAILABLE = True
 except ImportError:
     EXCEL_AVAILABLE = False

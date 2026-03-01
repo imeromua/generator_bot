@@ -8,10 +8,17 @@ Implementation is split into `database.api.*` modules.
 """
 
 from database.api.users import (
-    register_user, get_user, get_all_users,
-    create_user, update_last_activity,
-    get_users, count_users,
-    update_user_role, block_user, unblock_user, soft_delete_user,
+    register_user,
+    get_user,
+    get_all_users,
+    create_user,
+    update_last_activity,
+    get_users,
+    count_users,
+    update_user_role,
+    block_user,
+    unblock_user,
+    soft_delete_user,
 )
 from database.api.ui import set_ui_message, get_ui_message, clear_ui_message
 from database.api.personnel import (

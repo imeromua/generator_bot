@@ -1,4 +1,5 @@
 """Report generation API endpoints."""
+
 import io
 import logging
 from datetime import datetime

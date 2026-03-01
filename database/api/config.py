@@ -116,8 +116,7 @@ def get_generator_param(generator_id: str, param_name: str) -> float | None:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT param_value FROM generator_config "
-                "WHERE generator_id = ? AND param_name = ?",
+                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -186,8 +185,7 @@ def set_generator_param(
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT param_value FROM generator_config "
-                "WHERE generator_id = ? AND param_name = ?",
+                "SELECT param_value FROM generator_config " "WHERE generator_id = ? AND param_name = ?",
                 (generator_id, param_name),
             )
             row = cursor.fetchone()
@@ -257,9 +255,7 @@ def get_global_config() -> dict:
         conn = db_models.get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT param_name, param_value, updated_at, updated_by_name FROM global_config"
-            )
+            cursor.execute("SELECT param_name, param_value, updated_at, updated_by_name FROM global_config")
             rows = cursor.fetchall()
             return {
                 r[0]: {

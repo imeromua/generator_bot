@@ -24,7 +24,9 @@ def get_all_users():
         return conn.execute("SELECT user_id, full_name FROM users").fetchall()
 
 
-def create_user(user_id, username=None, first_name=None, last_name=None, role="user", is_active=True, registered_at=None):
+def create_user(
+    user_id, username=None, first_name=None, last_name=None, role="user", is_active=True, registered_at=None
+):
     """Create or update a user with full profile information."""
     if registered_at is None:
         registered_at = datetime.now().isoformat()
@@ -137,8 +139,20 @@ def _row_to_dict(row):
     """Convert a database row to a user dict."""
     if row is None:
         return None
-    keys = ["user_id", "full_name", "username", "first_name", "last_name", "role",
-            "is_active", "registered_at", "last_activity", "blocked_at", "blocked_by", "block_reason"]
+    keys = [
+        "user_id",
+        "full_name",
+        "username",
+        "first_name",
+        "last_name",
+        "role",
+        "is_active",
+        "registered_at",
+        "last_activity",
+        "blocked_at",
+        "blocked_by",
+        "block_reason",
+    ]
     d = {}
     for i, k in enumerate(keys):
         if i < len(row):
