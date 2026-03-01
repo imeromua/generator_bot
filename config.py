@@ -161,9 +161,60 @@ MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", str(OIL_CHANGE_INTERVAL)))
 
 # --- ДОСТУП ---
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMINS", "").split(",") if x.strip()]
-BOT_STATUS = os.getenv("BOT_STATUS", "ON")
+BOT_STATUS = os.getenv("BOT_STATUS", "ON").strip().upper()
 REGISTRATION_OPEN = BOT_STATUS == "ON"
 WHITELIST = [int(x.strip()) for x in os.getenv("USERS", "").split(",") if x.strip()]
+
+# --- РОЛІ ТА ПРАВА ДОСТУПУ ---
+ROLES = {
+    "superadmin": {
+        "label": "🔑 Супер-адмін",
+        "permissions": ["*"],
+    },
+    "admin": {
+        "label": "👨‍💼 Адміністратор",
+        "permissions": [
+            "manage_users",
+            "manage_generators",
+            "manage_maintenance",
+            "manage_schedule",
+            "manage_fuel",
+            "view_reports",
+            "manage_analytics",
+        ],
+    },
+    "operator": {
+        "label": "⚙️ Оператор",
+        "permissions": [
+            "start_stop_shift",
+            "refuel",
+            "create_fuel_order",
+            "log_maintenance",
+            "view_status",
+            "view_schedule",
+        ],
+    },
+    "viewer": {
+        "label": "👁️ Спостерігач",
+        "permissions": [
+            "view_status",
+            "view_schedule",
+            "view_reports",
+        ],
+    },
+    "user": {
+        "label": "👤 Користувач",
+        "permissions": ["view_status"],
+    },
+}
+
+
+def has_permission(user_role: str, permission: str) -> bool:
+    """Check if a role has a specific permission."""
+    if user_role == "superadmin":
+        return True
+    role_perms = ROLES.get(user_role, {}).get("permissions", [])
+    return permission in role_perms
 
 # --- ПАЛИВО (ОСНОВНИЙ ГЕНЕРАТОР) ---
 FUEL_RATE_STR = os.getenv("FUEL_RATE") or os.getenv("FUEL_CONSUMPTION")

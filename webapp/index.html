@@ -35,6 +35,7 @@
             <button class="tab" data-tab="maintenance">🔧<span class="tab-lbl">ТО</span></button>
             <button class="tab" data-tab="notifications">🔔<span class="tab-lbl">Сповіщ.</span></button>
             <button class="tab" data-tab="trends">📈<span class="tab-lbl">Тренди</span></button>
+            <button class="tab tab-admin hidden" data-tab="users" id="tab-users">👥<span class="tab-lbl">Юзери</span></button>
         </nav>
 
         <!-- Статус-панель -->
@@ -421,6 +422,43 @@
                     <p class="hint-text" style="margin-bottom:8px">Призначте персонал конкретному Telegram-користувачу</p>
                     <div id="admin-users-list" class="manage-list">
                         <!-- Заповнюється JS -->
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Вкладка: Управління користувачами (тільки адміни) -->
+        <section class="page" id="page-users">
+            <div class="card">
+                <div class="card-header">
+                    <h2>👥 Управління користувачами</h2>
+                    <button class="btn-sm" onclick="UsersManager.load()">🔄</button>
+                </div>
+                <div class="card-body">
+                    <div class="form-row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                        <select id="filter-role" class="form-input" style="flex:1;min-width:120px" onchange="UsersManager.load()">
+                            <option value="">Усі ролі</option>
+                            <option value="superadmin">🔑 Супер-адмін</option>
+                            <option value="admin">👨‍💼 Адміністратор</option>
+                            <option value="operator">⚙️ Оператор</option>
+                            <option value="viewer">👁️ Спостерігач</option>
+                            <option value="user">👤 Користувач</option>
+                        </select>
+                        <select id="filter-status" class="form-input" style="flex:1;min-width:120px" onchange="UsersManager.load()">
+                            <option value="">Усі статуси</option>
+                            <option value="true">✅ Активні</option>
+                            <option value="false">🚫 Заблоковані</option>
+                        </select>
+                        <input type="text" id="search-users" class="form-input" style="flex:2;min-width:140px"
+                            placeholder="🔍 Пошук..." oninput="UsersManager.load()">
+                    </div>
+                    <div id="users-list">
+                        <!-- Заповнюється JS -->
+                    </div>
+                    <div id="users-pagination" style="text-align:center;margin-top:10px;display:none">
+                        <button class="btn btn-secondary" id="btn-users-prev" onclick="UsersManager.prevPage()">← Попередня</button>
+                        <span id="users-page-info" style="margin:0 12px;font-size:13px"></span>
+                        <button class="btn btn-secondary" id="btn-users-next" onclick="UsersManager.nextPage()">Наступна →</button>
                     </div>
                 </div>
             </div>
@@ -892,6 +930,7 @@
     </div>
 
     <script src="/js/api.js"></script>
+    <script src="/js/users.js"></script>
     <script src="/js/app.js"></script>
     <script>
         // Якщо через 5 секунд Telegram SDK не завантажився — редирект на заглушку
