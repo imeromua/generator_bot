@@ -19,6 +19,11 @@ async def api_maintenance(request: Request):
         generator: 'main' | 'emergency' — який генератор показувати.
                    Якщо не вказано — використовується активний.
     """
+    user = _validation_mod.extract_user(request)
+    if not user:
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         gen_param = (request.query_params.get("generator") or "").strip()
         if gen_param in ("main", "emergency"):

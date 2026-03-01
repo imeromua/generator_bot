@@ -146,10 +146,12 @@ async def api_user_role(request: Request):
         user_id = None
 
     is_admin = _permissions_mod.is_admin(user)
+    role = _permissions_mod.get_user_role(user)
     personnel = db.get_personnel_for_user(user_id) if user_id else None
 
     return {
         "user_id": user_id,
+        "role": role,
         "is_admin": is_admin,
         "personnel": personnel,
         "has_personnel": bool(personnel),

@@ -1967,12 +1967,29 @@
                 userRole = { is_admin: false, personnel: null, has_personnel: false };
             }
 
-            // Показуємо вкладку Адмін тільки для адмінів
+            // Показуємо admin-only вкладки для адмінів; ховаємо їх для інших
             if (userRole.is_admin) {
-                const tabAdmin = $("tab-admin");
-                if (tabAdmin) tabAdmin.classList.remove("hidden");
-                const tabUsers = $("tab-users");
-                if (tabUsers) tabUsers.classList.remove("hidden");
+                document.querySelectorAll(".tab[data-role='admin']").forEach((btn) => {
+                    btn.classList.remove("hidden");
+                });
+            } else {
+                // Приховуємо всі вкладки з data-role="admin"
+                document.querySelectorAll(".tab[data-role='admin']").forEach((btn) => {
+                    btn.classList.add("hidden");
+                });
+                // Якщо поточна вкладка є адмінською — перенаправляємо на першу дозволену
+                const adminTabIds = new Set(
+                    Array.from(document.querySelectorAll(".tab[data-role='admin']")).map((btn) => btn.dataset.tab)
+                );
+                if (adminTabIds.has(currentTab)) {
+                    currentTab = "dashboard";
+                    document.querySelectorAll(".tab[data-tab]").forEach((btn) => {
+                        btn.classList.toggle("active", btn.dataset.tab === "dashboard");
+                    });
+                    document.querySelectorAll(".page").forEach((page) => {
+                        page.classList.toggle("active", page.id === "page-dashboard");
+                    });
+                }
             }
 
             await loadDashboard();
