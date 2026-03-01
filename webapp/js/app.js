@@ -250,7 +250,7 @@
             page.classList.toggle("active", page.id === "page-" + tab);
         });
         // Якщо вкладка з другого ряду — показати другий ряд
-        const secondaryTabs = ["fuel-orders","shifts","analytics","forecast","maintenance","notifications","trends"];
+        const secondaryTabs = ["fuel-orders","shifts","analytics","forecast","maintenance","notifications","trends","users"];
         if (secondaryTabs.includes(tab)) {
             const sec = document.getElementById("tabs-secondary");
             if (sec) sec.classList.remove("hidden");
@@ -297,6 +297,7 @@
             case "analytics":     return loadAnalytics();
             case "trends":        return loadTrends();
             case "forecast":      return loadForecast();
+            case "users":         return typeof UsersManager !== "undefined" ? UsersManager.load(true) : Promise.resolve();
             default:              return Promise.resolve();
         }
     }
@@ -1932,6 +1933,8 @@
             if (userRole.is_admin) {
                 const tabAdmin = $("tab-admin");
                 if (tabAdmin) tabAdmin.classList.remove("hidden");
+                const tabUsers = $("tab-users");
+                if (tabUsers) tabUsers.classList.remove("hidden");
             }
 
             await loadDashboard();

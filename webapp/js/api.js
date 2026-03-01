@@ -93,6 +93,30 @@ const API = (() => {
         return resp.json();
     }
 
+    /**
+     * PUT-запит до API.
+     */
+    async function _put(path, data) {
+        let resp;
+        try {
+            resp = await fetch(BASE + path, {
+                method: "PUT",
+                headers: _headers(),
+                body: JSON.stringify(data || {}),
+            });
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error("Немає з'єднання з сервером. Перевірте інтернет.");
+            }
+            throw e;
+        }
+        if (!resp.ok) {
+            const body = await resp.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        return resp.json();
+    }
+
     return {
         // --- GET ---
         /** Стан генератора */
@@ -217,6 +241,18 @@ const API = (() => {
             if (generator) url += "&generator=" + encodeURIComponent(generator);
             return url;
         },
+
+        // User management (admin)
+        /** Список користувачів */
+        adminGetUsers: (params) => get("/api/admin/users", params),
+        /** Змінити роль користувача */
+        adminUpdateUserRole: (userId, role) => _put(`/api/admin/users/${userId}/role`, { role }),
+        /** Заблокувати користувача */
+        adminBlockUser: (userId, reason) => _put(`/api/admin/users/${userId}/block`, { reason }),
+        /** Розблокувати користувача */
+        adminUnblockUser: (userId) => _put(`/api/admin/users/${userId}/unblock`, {}),
+        /** Видалити користувача (soft delete) */
+        adminDeleteUser: (userId) => _delete(`/api/admin/users/${userId}`, {}),
     };
 })();
 

@@ -361,7 +361,21 @@ def init_db():
     c = conn.cursor()
 
     if not _is_postgres():
-        c.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, full_name TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            full_name TEXT,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            registered_at TEXT,
+            last_activity TEXT,
+            blocked_at TEXT,
+            blocked_by INTEGER,
+            block_reason TEXT,
+            deleted_at TEXT
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id INTEGER PRIMARY KEY, name TEXT UNIQUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY,
@@ -447,7 +461,21 @@ def init_db():
         )''')
 
     else:
-        c.execute('''CREATE TABLE IF NOT EXISTS users (user_id BIGINT PRIMARY KEY, full_name TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            full_name TEXT,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            registered_at TEXT,
+            last_activity TEXT,
+            blocked_at TEXT,
+            blocked_by BIGINT,
+            block_reason TEXT,
+            deleted_at TEXT
+        )''')
         c.execute('''CREATE TABLE IF NOT EXISTS drivers (id BIGSERIAL PRIMARY KEY, name TEXT UNIQUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS logs (
             id BIGSERIAL PRIMARY KEY,
@@ -603,6 +631,34 @@ def init_db():
             else:
                 logging.warning(f"⚠️ Не вдалося додати generator_id в maintenance: {e}")
 
+    # Міграція: додавання нових колонок в users (для управління ролями)
+    _blocked_by_type = "BIGINT" if _is_postgres() else "INTEGER"
+    _users_new_columns = [
+        ("username", "TEXT"),
+        ("first_name", "TEXT"),
+        ("last_name", "TEXT"),
+        ("role", "TEXT NOT NULL DEFAULT 'user'"),
+        ("is_active", "INTEGER NOT NULL DEFAULT 1"),
+        ("registered_at", "TEXT"),
+        ("last_activity", "TEXT"),
+        ("blocked_at", "TEXT"),
+        ("blocked_by", _blocked_by_type),
+        ("block_reason", "TEXT"),
+        ("deleted_at", "TEXT"),
+    ]
+    for col_name, col_def in _users_new_columns:
+        try:
+            c.execute(f"SELECT {col_name} FROM users LIMIT 1")
+        except Exception:
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                logging.info(f"✅ Колонка users.{col_name} додана")
+            except Exception as e:
+                if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                    logging.info(f"✅ Колонка users.{col_name} вже існує")
+                else:
+                    logging.warning(f"⚠️ Не вдалося додати users.{col_name}: {e}")
+
     # Індекси для оптимізації пошуку (створюються ПІСЛЯ міграцій!)
     index_statements = [
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
@@ -619,6 +675,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_fuel_orders_created ON fuel_orders(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_shift_schedule_date ON shift_schedule(date)",
         "CREATE INDEX IF NOT EXISTS idx_shift_schedule_personnel ON shift_schedule(assigned_personnel_id)",
+        "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)",
+        "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)",
     ]
 
     # PostgreSQL-specific optimized indexes
