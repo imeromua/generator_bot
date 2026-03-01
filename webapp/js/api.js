@@ -199,6 +199,9 @@ const API = (() => {
             post("/api/notifications/preferences", { notification_type, enabled, quiet_hours_start, quiet_hours_end }),
         /** Тест сповіщення */
         testNotification: () => post("/api/notifications/test", {}),
+        /** Встановити тихий час для всіх сповіщень */
+        setQuietHours: (quiet_hours_start, quiet_hours_end) =>
+            post("/api/notifications/quiet-hours", { quiet_hours_start, quiet_hours_end }),
 
         // Task 6: Fuel orders
         /** Список замовлень палива */
@@ -255,4 +258,3 @@ const API = (() => {
         adminDeleteUser: (userId) => _delete(`/api/admin/users/${userId}`, {}),
     };
 })();
-

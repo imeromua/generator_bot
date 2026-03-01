@@ -49,7 +49,12 @@ from webapp.api.admin import (
     api_admin_backup_create,
     api_admin_backup_download,
 )
-from webapp.api.notifications import api_notifications_get, api_notifications_set, api_notifications_test
+from webapp.api.notifications import (
+    api_notifications_get,
+    api_notifications_set,
+    api_notifications_test,
+    api_notifications_quiet_hours,
+)
 from webapp.api.fuel_orders import api_fuel_orders_list, api_fuel_orders_create, api_fuel_orders_update
 from webapp.api.shifts import api_shifts_get, api_shifts_set, api_shifts_auto, api_shifts_analytics
 from webapp.api.analytics import (
@@ -201,6 +206,7 @@ def create_app() -> FastAPI:
     app.add_api_route("/api/notifications/preferences", api_notifications_get, methods=["GET"])
     app.add_api_route("/api/notifications/preferences", api_notifications_set, methods=["POST"])
     app.add_api_route("/api/notifications/test", api_notifications_test, methods=["POST"])
+    app.add_api_route("/api/notifications/quiet-hours", api_notifications_quiet_hours, methods=["POST"])
 
     app.add_api_route("/api/fuel/orders", api_fuel_orders_list, methods=["GET"])
     app.add_api_route("/api/fuel/orders", api_fuel_orders_create, methods=["POST"])

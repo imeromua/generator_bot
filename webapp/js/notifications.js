@@ -107,14 +107,14 @@ const Notifications = (() => {
     }
 
     // -----------------------------------------------------------------------
-    // Save quiet hours
+    // Save quiet hours via dedicated endpoint
     // -----------------------------------------------------------------------
 
     async function saveQuietHours() {
         const start = (_el("notif-quiet-start") || {}).value || "";
         const end = (_el("notif-quiet-end") || {}).value || "";
         try {
-            const res = await API.setNotificationPreference("fuel_warning", true, start || null, end || null);
+            const res = await API.setQuietHours(start || null, end || null);
             _showToast(res.message || "Тихий час збережено", "success");
         } catch (e) {
             _showToast("❌ " + e.message, "error");

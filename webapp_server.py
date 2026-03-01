@@ -61,16 +61,17 @@ from webapp.api.admin import (  # noqa: E402, F401
     api_admin_backup_create,
     api_admin_backup_download,
 )
-from webapp.api.notifications import (
+from webapp.api.notifications import (  # noqa: E402, F401
     api_notifications_get,
     api_notifications_set,
     api_notifications_test,
-)  # noqa: E402, F401
-from webapp.api.fuel_orders import (
+    api_notifications_quiet_hours,
+)
+from webapp.api.fuel_orders import (  # noqa: E402, F401
     api_fuel_orders_list,
     api_fuel_orders_create,
     api_fuel_orders_update,
-)  # noqa: E402, F401
+)
 from webapp.api.shifts import api_shifts_get, api_shifts_set, api_shifts_auto, api_shifts_analytics  # noqa: E402, F401
 from webapp.api.analytics import (  # noqa: E402, F401
     api_analytics_kpi,

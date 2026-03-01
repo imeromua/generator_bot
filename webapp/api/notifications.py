@@ -98,3 +98,29 @@ async def api_notifications_test(request: Request):
     except Exception as e:
         logger.exception("api_notifications_test send error")
         return JSONResponse(content={"error": f"Не вдалося надіслати: {e}"}, status_code=500)
+
+
+async def api_notifications_quiet_hours(request: Request):
+    """POST /api/notifications/quiet-hours — set quiet hours for all notification types."""
+    user = _validation_mod.extract_user(request)
+    if not user:
+        return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
+
+    start = body.get("quiet_hours_start") or None
+    end = body.get("quiet_hours_end") or None
+
+    try:
+        from database.api.notifications import set_quiet_hours
+
+        user_id = int(user.get("id", 0))
+        set_quiet_hours(user_id, start, end)
+        return {"ok": True, "message": "Тихий час збережено"}
+    except Exception as e:
+        logger.exception("api_notifications_quiet_hours error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
