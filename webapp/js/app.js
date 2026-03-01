@@ -1246,6 +1246,7 @@
         async createFuelOrder() {
             const amount = parseFloat($("order-amount").value);
             if (!amount || amount <= 0) { showError("Введіть кількість літрів"); return; }
+            if (amount > 80) { showError("Ліміт замовлення: 80 літрів"); return; }
             const supplier = ($("order-supplier").value || "").trim();
             const price = parseFloat($("order-price").value) || null;
             const delivery_date = ($("order-delivery-date").value || "").trim() || null;
