@@ -4,6 +4,7 @@ import logging
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,8 @@ async def api_notifications_get(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from database.api.notifications import get_user_preferences, NOTIFICATION_TYPES
 
@@ -32,6 +35,8 @@ async def api_notifications_set(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         body = await request.json()
     except Exception:
@@ -69,6 +74,8 @@ async def api_notifications_test(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     # This endpoint is informational — the actual bot send happens via the Telegram bot
     return {
         "ok": True,

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 import config
 import database.db_api as db
 from webapp.utils import validation as _validation_mod
+from webapp.utils import permissions as _permissions_mod
 from webapp.services.analytics_service import _safe_round, _build_daily_stats
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ async def api_analytics_kpi(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
@@ -79,6 +82,8 @@ async def api_analytics_fuel_timeline(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
@@ -124,6 +129,8 @@ async def api_analytics_motor_hours(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
@@ -176,6 +183,8 @@ async def api_analytics_efficiency(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         days = int(request.query_params.get("days", "30"))
         days = max(1, min(days, 365))
@@ -254,6 +263,8 @@ async def api_analytics_calendar(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from utils.time import now_kiev
         from database.api.schedule import get_schedule
@@ -282,6 +293,8 @@ async def api_analytics_trends(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         days = int(request.query_params.get("days", "30"))
         days = max(7, min(days, 365))
@@ -387,6 +400,8 @@ async def api_analytics_forecast(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from utils.time import now_kiev
         from database.api.generator import get_generator_stats

@@ -23,19 +23,19 @@
             <button class="tab active" data-tab="dashboard">🏠<span class="tab-lbl">Головна</span></button>
             <button class="tab" data-tab="schedule">📅<span class="tab-lbl">Графік</span></button>
             <button class="tab" data-tab="events">📋<span class="tab-lbl">Події</span></button>
-            <button class="tab tab-admin hidden" data-tab="admin" id="tab-admin">⚙️<span class="tab-lbl">Адмін</span></button>
+            <button class="tab tab-admin hidden" data-tab="admin" data-role="admin" id="tab-admin">⚙️<span class="tab-lbl">Адмін</span></button>
             <button class="tab tab-more" id="tab-more" onclick="toggleSecondaryNav()">&#xB7;&#xB7;&#xB7;<span class="tab-lbl">Ще</span></button>
         </nav>
         <!-- Навігація — рядок 2: додаткові вкладки (показується при кліку на «Ще») -->
         <nav class="tabs tabs-secondary hidden" id="tabs-secondary">
             <button class="tab" data-tab="fuel-orders">⛽<span class="tab-lbl">Паливо</span></button>
-            <button class="tab" data-tab="shifts">👥<span class="tab-lbl">Зміни</span></button>
-            <button class="tab" data-tab="analytics">📊<span class="tab-lbl">Аналітика</span></button>
-            <button class="tab" data-tab="forecast">🔮<span class="tab-lbl">Прогнози</span></button>
-            <button class="tab" data-tab="maintenance">🔧<span class="tab-lbl">ТО</span></button>
-            <button class="tab" data-tab="notifications">🔔<span class="tab-lbl">Сповіщ.</span></button>
-            <button class="tab" data-tab="trends">📈<span class="tab-lbl">Тренди</span></button>
-            <button class="tab tab-admin hidden" data-tab="users" id="tab-users">👥<span class="tab-lbl">Юзери</span></button>
+            <button class="tab" data-tab="shifts" data-role="admin">👥<span class="tab-lbl">Зміни</span></button>
+            <button class="tab" data-tab="analytics" data-role="admin">📊<span class="tab-lbl">Аналітика</span></button>
+            <button class="tab" data-tab="forecast" data-role="admin">🔮<span class="tab-lbl">Прогнози</span></button>
+            <button class="tab" data-tab="maintenance" data-role="admin">🔧<span class="tab-lbl">ТО</span></button>
+            <button class="tab" data-tab="notifications" data-role="admin">🔔<span class="tab-lbl">Сповіщ.</span></button>
+            <button class="tab" data-tab="trends" data-role="admin">📈<span class="tab-lbl">Тренди</span></button>
+            <button class="tab hidden" data-tab="users" data-role="admin" id="tab-users">👥<span class="tab-lbl">Юзери</span></button>
         </nav>
 
         <!-- Статус-панель -->

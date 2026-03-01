@@ -244,8 +244,28 @@ class TestApiEvents:
 class TestApiMaintenance:
     """Tests for GET /api/maintenance endpoint."""
 
-    def test_maintenance_returns_ok(self, client):
-        """Maintenance endpoint should return 200."""
+    def test_maintenance_no_auth(self, client):
+        """Unauthenticated request should return 401."""
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 401
+
+    def test_maintenance_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin authenticated request should return 403."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 403
+
+    def test_maintenance_returns_ok(self, client, monkeypatch):
+        """Maintenance endpoint should return 200 for admin users."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/maintenance")
         assert resp.status_code == 200
         data = resp.json()
@@ -253,8 +273,13 @@ class TestApiMaintenance:
         assert "stats" in data
         assert "history" in data
 
-    def test_maintenance_stats_fields(self, client):
+    def test_maintenance_stats_fields(self, client, monkeypatch):
         """Maintenance stats should contain expected fields."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/maintenance")
         data = resp.json()
         stats = data["stats"]
@@ -466,11 +491,12 @@ class TestApiAnalytics:
         assert resp.status_code == 401
 
     def test_kpi_returns_fields(self, client, monkeypatch):
-        """KPI endpoint returns expected fields for authenticated user."""
+        """KPI endpoint returns expected fields for admin user."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/kpi?days=7")
         assert resp.status_code == 200
         data = resp.json()
@@ -481,8 +507,9 @@ class TestApiAnalytics:
         """Fuel timeline returns actual data and forecast."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/fuel-timeline?days=7")
         assert resp.status_code == 200
         data = resp.json()
@@ -495,8 +522,9 @@ class TestApiAnalytics:
         """Motor hours endpoint returns daily data and totals."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/motor-hours?days=7")
         assert resp.status_code == 200
         data = resp.json()
@@ -509,8 +537,9 @@ class TestApiAnalytics:
         """Efficiency endpoint returns pie chart data and shift breakdown."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/efficiency?days=7")
         assert resp.status_code == 200
         data = resp.json()
@@ -522,8 +551,9 @@ class TestApiAnalytics:
         """Calendar endpoint returns days array for the month."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/calendar?month=2025-01")
         assert resp.status_code == 200
         data = resp.json()
@@ -535,8 +565,9 @@ class TestApiAnalytics:
         """Trends endpoint returns insights list."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/trends?days=14")
         assert resp.status_code == 200
         data = resp.json()
@@ -547,8 +578,9 @@ class TestApiAnalytics:
         """Forecast endpoint returns 7-day prediction and maintenance info."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/forecast")
         assert resp.status_code == 200
         data = resp.json()
@@ -560,8 +592,9 @@ class TestApiAnalytics:
         """Invalid report type should return 400."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/report/excel/v2?type=invalid")
         assert resp.status_code == 400
 
@@ -569,8 +602,9 @@ class TestApiAnalytics:
         """Quick Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/report/excel/v2?type=quick&days=7")
         assert resp.status_code == 200
         assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
@@ -584,8 +618,9 @@ class TestApiAnalytics:
         """Detailed Excel report should return valid xlsx bytes."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/report/excel/v2?type=detailed&days=14")
         assert resp.status_code == 200
         assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers.get(
@@ -598,8 +633,9 @@ class TestApiAnalytics:
         """Fuel timeline response must include morning_balance and evening_balance for each day."""
         monkeypatch.setattr(
             "webapp.utils.validation.extract_user",
-            lambda req: {"id": 1, "first_name": "Test"},
+            lambda req: {"id": 1, "first_name": "Admin"},
         )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
         resp = client.get("/api/analytics/fuel-timeline?days=3")
         assert resp.status_code == 200
         data = resp.json()
@@ -607,6 +643,16 @@ class TestApiAnalytics:
         for day in data["actual"]:
             assert "morning_balance" in day, "morning_balance missing from fuel-timeline response"
             assert "evening_balance" in day, "evening_balance missing from fuel-timeline response"
+
+    def test_kpi_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin authenticated user should get 403 on analytics endpoints."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.get("/api/analytics/kpi?days=7")
+        assert resp.status_code == 403
 
     def test_build_daily_stats_includes_balance_fields(self, monkeypatch):
         """_build_daily_stats must include morning_balance and evening_balance in each day dict."""
@@ -750,3 +796,106 @@ class TestMlModels:
         ad = AnomalyDetector()
         result = ad.detect({"fuel_consumed": 40, "work_hours": 8, "fuel_rate": 5})
         assert result["is_anomaly"] is False
+
+
+# ---------------------------------------------------------------------------
+# Role-based access control
+# ---------------------------------------------------------------------------
+
+
+class TestRoleBasedAccess:
+    """Tests for role-based access on admin-only endpoints."""
+
+    def test_user_role_endpoint_returns_role_field(self, client, monkeypatch):
+        """GET /api/user/role should return a 'role' field."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: "admin")
+        resp = client.get("/api/user/role")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "role" in data
+        assert data["role"] == "admin"
+        assert data["is_admin"] is True
+
+    def test_user_role_endpoint_non_admin(self, client, monkeypatch):
+        """GET /api/user/role returns 'user' role for non-admin."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: "user")
+        resp = client.get("/api/user/role")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "role" in data
+        assert data["role"] == "user"
+        assert data["is_admin"] is False
+
+    def test_shifts_get_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin should get 403 on GET /api/shifts/schedule."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.get("/api/shifts/schedule")
+        assert resp.status_code == 403
+
+    def test_shifts_analytics_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin should get 403 on GET /api/shifts/analytics."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.get("/api/shifts/analytics")
+        assert resp.status_code == 403
+
+    def test_notifications_get_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin should get 403 on GET /api/notifications/preferences."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.get("/api/notifications/preferences")
+        assert resp.status_code == 403
+
+    def test_notifications_set_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin should get 403 on POST /api/notifications/preferences."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.post(
+            "/api/notifications/preferences",
+            json={"notification_type": "fuel_warning", "enabled": True},
+        )
+        assert resp.status_code == 403
+
+    def test_notifications_test_non_admin_forbidden(self, client, monkeypatch):
+        """Non-admin should get 403 on POST /api/notifications/test."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.post("/api/notifications/test", json={})
+        assert resp.status_code == 403
+
+    def test_index_html_admin_tabs_have_data_role(self, client):
+        """Admin-only tabs should have data-role='admin' attribute in index.html."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        html = resp.text
+        admin_tabs = ["admin", "shifts", "analytics", "forecast", "maintenance", "notifications", "trends", "users"]
+        for tab in admin_tabs:
+            assert f'data-tab="{tab}" data-role="admin"' in html, (
+                f"Tab '{tab}' is missing data-role='admin'"
+            )

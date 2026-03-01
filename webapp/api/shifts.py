@@ -15,6 +15,8 @@ async def api_shifts_get(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from database.api.shift_schedule import get_month_schedule, get_date_schedule, get_personnel_shift_counts
 
@@ -132,6 +134,8 @@ async def api_shifts_analytics(request: Request):
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from database.api.shift_schedule import get_personnel_shift_counts, get_month_schedule
         from utils.time import now_kiev
