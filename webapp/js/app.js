@@ -64,6 +64,8 @@
     // -------------------------------------------------------------------
     const FUEL_CRITICAL = 15;   // поріг критичного рівня палива (л)
     const FUEL_WARNING  = 40;   // поріг попереджувального рівня палива (л)
+    const OIL_INTERVAL = 100;   // інтервал заміни мастила (години)
+    const SPARK_INTERVAL = 300; // інтервал заміни свічок (години)
 
     // -------------------------------------------------------------------
     // Допоміжні функції
@@ -769,21 +771,28 @@
         if (!data) { el.innerHTML = ""; return; }
 
         const active = data.active;
+        
+        // Розраховуємо залишок до ТО: інтервал - поточні мотогодини
+        const mainRemOil = OIL_INTERVAL - (data.main.total_hours || 0);
+        const mainRemSpark = SPARK_INTERVAL - (data.main.total_hours || 0);
+        const emergRemOil = OIL_INTERVAL - (data.emergency.total_hours || 0);
+        const emergRemSpark = SPARK_INTERVAL - (data.emergency.total_hours || 0);
+
         el.innerHTML = `
             <div class="gen-card ${active === 'main' ? 'active' : ''}">
                 <div class="gen-card-header">🔋 Основний${active === 'main' ? ' <span class="badge on">АКТИВНИЙ</span>' : ''}</div>
                 <div class="gen-card-body">
                     <div>⏱ Мотогодини: <b>${formatHoursMinutes(data.main.total_hours)}</b></div>
-                    <div>🛢 Від заміни мастила: <b>${formatHoursMinutes(data.main.last_oil_change)}</b></div>
-                    <div>🕯 Від заміни свічок: <b>${formatHoursMinutes(data.main.last_spark_change)}</b></div>
+                    <div>🛢 До заміни мастила: <b>${formatHoursMinutes(mainRemOil)}</b></div>
+                    <div>🕯 До заміни свічок: <b>${formatHoursMinutes(mainRemSpark)}</b></div>
                 </div>
             </div>
             <div class="gen-card ${active === 'emergency' ? 'active' : ''}">
                 <div class="gen-card-header">⚠️ Аварійний${active === 'emergency' ? ' <span class="badge warn">АКТИВНИЙ</span>' : ''}</div>
                 <div class="gen-card-body">
                     <div>⏱ Мотогодини: <b>${formatHoursMinutes(data.emergency.total_hours)}</b></div>
-                    <div>🛢 Від заміни мастила: <b>${formatHoursMinutes(data.emergency.last_oil_change)}</b></div>
-                    <div>🕯 Від заміни свічок: <b>${formatHoursMinutes(data.emergency.last_spark_change)}</b></div>
+                    <div>🛢 До заміни мастила: <b>${formatHoursMinutes(emergRemOil)}</b></div>
+                    <div>🕯 До заміни свічок: <b>${formatHoursMinutes(emergRemSpark)}</b></div>
                 </div>
             </div>
         `;
@@ -2334,8 +2343,8 @@
             // ТО
             if (mntEl) {
                 mntEl.innerHTML = `
-                    <div class="mnt-row"><span>🛢️ До заміни мастила</span><span><b>${mnt.oil_remaining_hours != null ? formatHoursMinutes(mnt.oil_remaining_hours) : "—"}</b> (≈${mnt.days_to_oil_change || "?"} дн)</span></div>
-                    <div class="mnt-row"><span>🔩 До заміни свічок</span><span><b>${mnt.spark_remaining_hours != null ? formatHoursMinutes(mnt.spark_remaining_hours) : "—"}</b> (≈${mnt.days_to_spark_change || "?"} дн)</span></div>
+                    <div class="mnt-row"><span>🛢️ До заміни мастила</span><span><b>${mnt.oil_remaining_hours != null ? formatHoursMinutes(mnt.oil_remaining_hours) : "—"}</b> (≈${mnt.days_to_oil_change || "?"}дн)</span></div>
+                    <div class="mnt-row"><span>🔩 До заміни свічок</span><span><b>${mnt.spark_remaining_hours != null ? formatHoursMinutes(mnt.spark_remaining_hours) : "—"}</b> (≈${mnt.days_to_spark_change || "?"}дн)</span></div>
                 `;
             }
 
