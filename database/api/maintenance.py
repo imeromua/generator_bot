@@ -76,22 +76,24 @@ def record_maintenance(action: str, admin: str, generator_id: str | None = None)
             # Оновлюємо лічильники відповідного генератора
             if generator_id == "emergency":
                 if action == "oil":
-                    _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
+                    _conn_set_state_value(conn, "emergency_last_oil_change", str(cur))
                 elif action == "spark":
-                    _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
+                    _conn_set_state_value(conn, "emergency_last_spark_change", str(cur))
                 elif action == "maintenance":
                     # Планове ТО - скидаємо все
-                    _conn_set_state_value(conn, "emergency_last_oil_change", "0.0")
-                    _conn_set_state_value(conn, "emergency_last_spark_change", "0.0")
+                    _conn_set_state_value(conn, "emergency_last_oil_change", str(cur))
+                    _conn_set_state_value(conn, "emergency_last_spark_change", str(cur))
+                    _conn_set_state_value(conn, "emergency_last_maintenance", str(cur))
             else:
                 if action == "oil":
-                    _conn_set_state_value(conn, "last_oil_change", "0.0")
+                    _conn_set_state_value(conn, "last_oil_change", str(cur))
                 elif action == "spark":
-                    _conn_set_state_value(conn, "last_spark_change", "0.0")
+                    _conn_set_state_value(conn, "last_spark_change", str(cur))
                 elif action == "maintenance":
                     # Планове ТО - скидаємо все
-                    _conn_set_state_value(conn, "last_oil_change", "0.0")
-                    _conn_set_state_value(conn, "last_spark_change", "0.0")
+                    _conn_set_state_value(conn, "last_oil_change", str(cur))
+                    _conn_set_state_value(conn, "last_spark_change", str(cur))
+                    _conn_set_state_value(conn, "last_maintenance", str(cur))
 
             conn.commit()
         except Exception as e:
@@ -148,25 +150,31 @@ def get_maintenance_stats(generator_id: str = "main"):
             total_hours = _conn_get_state_float(conn, "emergency_total_hours", 0.0)
             last_oil = _conn_get_state_float(conn, "emergency_last_oil_change", 0.0)
             last_spark = _conn_get_state_float(conn, "emergency_last_spark_change", 0.0)
+            last_maintenance = _conn_get_state_float(conn, "emergency_last_maintenance", 0.0)
         else:
             total_hours = _conn_get_state_float(conn, "total_hours", 0.0)
             last_oil = _conn_get_state_float(conn, "last_oil_change", 0.0)
             last_spark = _conn_get_state_float(conn, "last_spark_change", 0.0)
+            last_maintenance = _conn_get_state_float(conn, "last_maintenance", 0.0)
 
         # Розраховуємо скільки залишилось до кожного виду ТО
-        oil_needed = config.OIL_CHANGE_INTERVAL - last_oil
-        spark_needed = config.SPARK_CHANGE_INTERVAL - last_spark
+        hours_since_oil = total_hours - last_oil
+        oil_needed = max(0.0, config.OIL_CHANGE_INTERVAL - hours_since_oil)
 
-        # Планове ТО - рахуємо від загальних мотогодин
-        maintenance_needed = config.MAINTENANCE_INTERVAL - (total_hours % config.MAINTENANCE_INTERVAL)
+        hours_since_spark = total_hours - last_spark
+        spark_needed = max(0.0, config.SPARK_CHANGE_INTERVAL - hours_since_spark)
+
+        hours_since_maintenance = total_hours - last_maintenance
+        maintenance_needed = max(0.0, config.MAINTENANCE_INTERVAL - hours_since_maintenance)
 
         return {
-            'oil_needed': max(0.0, oil_needed),
-            'spark_needed': max(0.0, spark_needed),
-            'maintenance_needed': max(0.0, maintenance_needed),
+            'oil_needed': oil_needed,
+            'spark_needed': spark_needed,
+            'maintenance_needed': maintenance_needed,
             'total_hours': total_hours,
             'last_oil': last_oil,
             'last_spark': last_spark,
+            'last_maintenance': last_maintenance,
         }
 
 

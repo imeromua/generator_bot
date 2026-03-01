@@ -152,9 +152,9 @@ except ValueError:
     SPARK_CHANGE_INTERVAL = 100
 
 try:
-    MAINTENANCE_INTERVAL = int(os.getenv("MAINTENANCE_INTERVAL", "300"))
+    MAINTENANCE_INTERVAL = int(os.getenv("MAINTENANCE_INTERVAL", "200"))
 except ValueError:
-    MAINTENANCE_INTERVAL = 300
+    MAINTENANCE_INTERVAL = 200
 
 # Зворотна сумісність з старим OIL_LIMIT
 MAINTENANCE_LIMIT = int(os.getenv("OIL_LIMIT", str(OIL_CHANGE_INTERVAL)))
@@ -332,7 +332,7 @@ class WorkScheduleSettings:
 class MaintenanceSettings:
     """Налаштування техобслуговування."""
 
-    def __init__(self, *, oil_change_interval=100, spark_change_interval=100, maintenance_interval=300, oil_limit=100):
+    def __init__(self, *, oil_change_interval=100, spark_change_interval=100, maintenance_interval=200, oil_limit=100):
         self.oil_change_interval = oil_change_interval
         self.spark_change_interval = spark_change_interval
         self.maintenance_interval = maintenance_interval
