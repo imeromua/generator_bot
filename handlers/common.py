@@ -3,7 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.utils.markdown import hbold, hcode
+from aiogram.utils.markdown import hbold
 
 import config
 import database.models as db_models
@@ -41,15 +41,13 @@ async def cmd_start(message: Message):
     greeting = f"👋 Вітаю, {hbold(full_name)}!\n\n"
     
     if is_admin:
-        greeting += "🔑 {hbold('Адміністратор')}\n\n"
-    
-    if has_personnel:
-        greeting += "✅ Ви зареєстровані в системі\n\n"
-    else:
+        greeting += f"🔑 {hbold('Адміністратор')}\n\n"
+    elif not has_personnel:
+        # Тільки для звичайних користувачів без персоналу
         greeting += "⚠️ Ви не прив'язані до персоналу.\nЗверніться до адміністратора для доступу.\n\n"
 
     greeting += (
-        "🚀 Натисніть кнопку нижче, щоб відкрити {hbold('Mini App')}:\n\n"
+        f"🚀 Натисніть кнопку нижче, щоб відкрити {hbold('Mini App')}:\n\n"
         "📱 У Mini App ви можете:\n"
         "  • Переглядати стан генератора\n"
         "  • Керувати змінами\n"
@@ -75,7 +73,7 @@ async def cmd_start(message: Message):
         await message.answer(greeting, reply_markup=keyboard)
     else:
         await message.answer(
-            greeting + "\n\n❌ {hbold('Mini App недоступний')} (WEBAPP_URL не налаштовано)"
+            greeting + f"\n\n❌ {hbold('Mini App недоступний')} (WEBAPP_URL не налаштовано)"
         )
 
 
@@ -86,6 +84,6 @@ async def handle_any_text(message: Message):
     Нагадує користувачу використовувати Mini App.
     """
     await message.answer(
-        "ℹ️ Цей бот працює через {hbold('Mini App')}.\n\n"
+        f"ℹ️ Цей бот працює через {hbold('Mini App')}.\n\n"
         "Будь ласка, використовуйте команду /start та відкрийте Mini App."
     )
