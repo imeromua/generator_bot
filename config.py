@@ -295,6 +295,15 @@ if __name__ == "__main__":
     print("=" * 60 + "\n")
 
 
+# --- DEBUG MODE ---
+DEBUG = _env_bool("DEBUG", False)
+
+# --- FUEL ORDER LIMITS ---
+try:
+    FUEL_ORDER_MAX_LITERS = int(os.getenv("FUEL_ORDER_MAX_LITERS", "80"))
+except ValueError:
+    FUEL_ORDER_MAX_LITERS = 80
+
 # --- MINI APP (Telegram WebApp) ---
 WEBAPP_URL = (os.getenv("WEBAPP_URL", "") or "").strip()
 WEBAPP_HOST = (os.getenv("WEBAPP_HOST", "0.0.0.0") or "0.0.0.0").strip()

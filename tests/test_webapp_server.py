@@ -355,20 +355,20 @@ class TestApiFuelOrders:
         assert resp.status_code == 401
 
     def test_create_order_no_auth(self, client):
-        """Unauthenticated POST should return 403 (admin required check fires first)."""
+        """Unauthenticated POST should return 401."""
         resp = client.post(
             "/api/fuel/orders",
             json={"amount_liters": 200},
         )
-        assert resp.status_code == 403  # admin required → 403
+        assert resp.status_code == 401
 
     def test_update_order_no_auth(self, client):
-        """Unauthenticated update should return 403."""
+        """Unauthenticated update should return 401."""
         resp = client.post(
             "/api/fuel/orders/update",
             json={"order_id": 1, "status": "ordered"},
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     def test_create_order_exceeds_80L_limit(self, client, monkeypatch):
         """Creating an order over 80 liters should return 400."""
@@ -392,6 +392,45 @@ class TestApiFuelOrders:
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("ok") is True
+
+    def test_create_order_non_admin_returns_403(self, client, monkeypatch):
+        """Authenticated but non-admin user should get 403, not 401."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 2, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.post("/api/fuel/orders", json={"amount_liters": 40})
+        assert resp.status_code == 403
+
+    def test_update_order_non_admin_returns_403(self, client, monkeypatch):
+        """Authenticated but non-admin user should get 403 on update, not 401."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 2, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        resp = client.post(
+            "/api/fuel/orders/update",
+            json={"order_id": 1, "status": "ordered"},
+        )
+        assert resp.status_code == 403
+
+    def test_create_order_configurable_max_liters(self, client, monkeypatch):
+        """FUEL_ORDER_MAX_LITERS config controls the per-order limit."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        monkeypatch.setattr(config, "FUEL_ORDER_MAX_LITERS", 50)
+        # 51 L should now exceed the configured limit
+        resp = client.post("/api/fuel/orders", json={"amount_liters": 51})
+        assert resp.status_code == 400
+        assert "50" in resp.json().get("error", "")
+        # 50 L should be accepted
+        resp = client.post("/api/fuel/orders", json={"amount_liters": 50})
+        assert resp.status_code == 200
 
     def test_update_order_nonexistent_returns_400(self, client, monkeypatch):
         """Updating a non-existent order should return 400."""

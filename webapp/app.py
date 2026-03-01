@@ -70,6 +70,8 @@ from webapp.api.users import (
     api_admin_users_delete,
 )
 
+import config
+
 logger = logging.getLogger(__name__)
 
 _webapp_dir = Path(__file__).resolve().parent
@@ -135,18 +137,18 @@ async def _webapp_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     """Creates the FastAPI application with all API routes and static files."""
+    _debug = getattr(config, "DEBUG", False)
     app = FastAPI(
         title="Generator Bot WebApp",
         version=BUILD_VERSION,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
+        docs_url="/api/docs" if _debug else None,
+        redoc_url="/api/redoc" if _debug else None,
         lifespan=_webapp_lifespan,
     )
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
