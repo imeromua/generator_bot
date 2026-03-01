@@ -69,8 +69,8 @@ from database.models import close_postgres_pool
 from middlewares.auth import WhitelistMiddleware
 from middlewares.error_handler import ErrorHandlerMiddleware, global_error_handler
 
-# Імпорт хендлерів (мінімальні роутери)
-from handlers import common, user, admin
+# Імпорт хендлерів
+from handlers import common
 
 # Імпорт сервісів
 from services.scheduler import scheduler_loop
@@ -221,10 +221,8 @@ def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     dp.message.outer_middleware(WhitelistMiddleware())
     dp.callback_query.outer_middleware(WhitelistMiddleware())
 
-    logger.info("📋 Реєстрація роутерів (мінімальна версія - тільки /start)...")
+    logger.info("📋 Реєстрація роутерів (тільки /start для переходу до Mini App)...")
     dp.include_router(common.router)
-    dp.include_router(admin.router)
-    dp.include_router(user.router)
 
     # Register shutdown handler for graceful cleanup
     dp.shutdown.register(on_shutdown)
@@ -270,7 +268,7 @@ async def run_polling_once(dp: Dispatcher):
                 logger.error(f"❌ Помилка запуску Mini App веб-сервера: {e}")
 
         logger.info("=" * 50)
-        logger.info("🚀 БОТ ЗАПУЩЕНО! (Мінімальна версія - тільки /start)")
+        logger.info("🚀 БОТ ЗАПУЩЕНО! (Тільки /start — перехід до Mini App)")
         logger.info(f"📅 Режим: {'TEST' if config.IS_TEST_MODE else 'PROD'}")
         logger.info(f"📊 Таблиця: {config.SHEET_NAME}")
         logger.info(f"👥 Адмінів: {len(config.ADMIN_IDS)}")
