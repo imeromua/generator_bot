@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 async def api_fuel_orders_list(request: Request):
     """GET /api/fuel/orders — list fuel orders."""
     user = _validation_mod.extract_user(request)
-    if not user:
+    if user is None:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     try:
         from database.api.fuel_orders import get_orders, get_fuel_consumption_stats
@@ -45,8 +45,8 @@ async def api_fuel_orders_create(request: Request):
     except (TypeError, ValueError):
         return JSONResponse(content={"error": "Невірне значення кількості літрів"}, status_code=400)
 
-    if amount <= 0 or amount > 100000:
-        return JSONResponse(content={"error": "Кількість літрів поза допустимим діапазоном"}, status_code=400)
+    if amount <= 0 or amount > 80:
+        return JSONResponse(content={"error": "Кількість літрів має бути від 1 до 80"}, status_code=400)
 
     try:
         from database.api.fuel_orders import create_order

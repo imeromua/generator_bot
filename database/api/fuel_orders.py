@@ -107,11 +107,11 @@ def update_order(
         return False
     params.append(order_id)
     with get_connection() as conn:
-        conn.execute(
+        cur = conn.execute(
             f"UPDATE fuel_orders SET {', '.join(updates)} WHERE id = ?",
             tuple(params),
         )
-    return True
+    return cur.rowcount > 0
 
 
 def get_fuel_consumption_stats(days: int = 30) -> dict:

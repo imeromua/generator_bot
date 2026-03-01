@@ -345,6 +345,42 @@ class TestApiFuelOrders:
         )
         assert resp.status_code == 403
 
+    def test_create_order_exceeds_80L_limit(self, client, monkeypatch):
+        """Creating an order over 80 liters should return 400."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        resp = client.post("/api/fuel/orders", json={"amount_liters": 81})
+        assert resp.status_code == 400
+        assert "80" in resp.json().get("error", "")
+
+    def test_create_order_within_80L_limit(self, client, monkeypatch):
+        """Creating an order of 80 liters or less should succeed."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        resp = client.post("/api/fuel/orders", json={"amount_liters": 80})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True
+
+    def test_update_order_nonexistent_returns_400(self, client, monkeypatch):
+        """Updating a non-existent order should return 400."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        resp = client.post(
+            "/api/fuel/orders/update",
+            json={"order_id": 9999, "status": "ordered"},
+        )
+        assert resp.status_code == 400
+
 
 # ---------------------------------------------------------------------------
 # Task 8: API /api/shifts
