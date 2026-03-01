@@ -1,6 +1,6 @@
 """DB API for fuel_orders table (Task 6)."""
 
-from database.models import get_connection
+from database.models import get_connection, _is_postgres
 
 VALID_STATUSES = ("pending", "ordered", "confirmed", "delivered", "cancelled")
 
@@ -17,14 +17,25 @@ def create_order(
     """Create a new fuel order; return the new order id."""
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """INSERT INTO fuel_orders
-               (created_at, requested_by, amount_liters, status, supplier, price, delivery_date, notes)
-               VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
-            """,
-            (created_at, requested_by, amount_liters, supplier, price, delivery_date, notes),
-        )
-        row = cur.execute("SELECT last_insert_rowid()").fetchone()
+        if _is_postgres():
+            cur.execute(
+                """INSERT INTO fuel_orders
+                   (created_at, requested_by, amount_liters, status, supplier, price, delivery_date, notes)
+                   VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s)
+                   RETURNING id
+                """,
+                (created_at, requested_by, amount_liters, supplier, price, delivery_date, notes),
+            )
+            row = cur.fetchone()
+        else:
+            cur.execute(
+                """INSERT INTO fuel_orders
+                   (created_at, requested_by, amount_liters, status, supplier, price, delivery_date, notes)
+                   VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
+                """,
+                (created_at, requested_by, amount_liters, supplier, price, delivery_date, notes),
+            )
+            row = [cur.lastrowid]
         return row[0] if row else -1
 
 
