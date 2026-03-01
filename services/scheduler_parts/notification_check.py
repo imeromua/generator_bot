@@ -181,3 +181,28 @@ async def check_all_notifications(bot, state: dict) -> None:
                     f"Заплануйте техобслуговування.",
                 )
                 _mark_sent(uid, "maintenance_soon", now)
+
+    # --- 5. Info: daily_report at 09:00 → all registered users ---
+    if now.hour == 9 and now.minute == 0:
+        for uid in all_user_ids:
+            if _should_notify(uid, "daily_report", now):
+                await _notify_user(
+                    bot,
+                    uid,
+                    f"📊 <b>Щоденний звіт</b>\n\n"
+                    f"Стан генератора: <b>{gen_status}</b>\n"
+                    f"Рівень палива: <b>{current_fuel:.1f} л</b>",
+                )
+                _mark_sent(uid, "daily_report", now)
+
+    # --- 6. Info: weekly_report on Monday at 09:00 → all registered users ---
+    if now.weekday() == 0 and now.hour == 9 and now.minute == 0:
+        for uid in all_user_ids:
+            if _should_notify(uid, "weekly_report", now):
+                await _notify_user(
+                    bot,
+                    uid,
+                    f"📈 <b>Тижневий звіт</b>\n\n"
+                    f"Новий тиждень розпочато. Стан генератора: <b>{gen_status}</b>",
+                )
+                _mark_sent(uid, "weekly_report", now)

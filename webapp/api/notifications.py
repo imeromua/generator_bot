@@ -70,14 +70,31 @@ async def api_notifications_set(request: Request):
 
 
 async def api_notifications_test(request: Request):
-    """POST /api/notifications/test — send a test notification to the user."""
+    """POST /api/notifications/test — send a test notification to the user via Telegram."""
     user = _validation_mod.extract_user(request)
     if not user:
         return JSONResponse(content={"error": "Не авторизовано"}, status_code=401)
     if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
-    # This endpoint is informational — the actual bot send happens via the Telegram bot
-    return {
-        "ok": True,
-        "message": "🔔 Тест сповіщень. Якщо ви бачите це в webapp — система працює.",
-    }
+
+    user_id = int(user.get("id", 0))
+    try:
+        import config
+        from aiogram import Bot
+
+        bot = Bot(token=config.BOT_TOKEN)
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "🔔 <b>Тест сповіщень</b>\n\n"
+                    "Якщо ви отримали це повідомлення — система сповіщень працює коректно!"
+                ),
+                parse_mode="HTML",
+            )
+        finally:
+            await bot.session.close()
+        return {"ok": True, "message": "Тестове повідомлення надіслано в Telegram"}
+    except Exception as e:
+        logger.exception("api_notifications_test send error")
+        return JSONResponse(content={"error": f"Не вдалося надіслати: {e}"}, status_code=500)

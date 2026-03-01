@@ -295,7 +295,7 @@
             case "admin":         return loadAdmin();
             case "fuel-orders":   return loadFuelOrders();
             case "shifts":        return loadShifts();
-            case "notifications": return loadNotifications();
+            case "notifications": return typeof Notifications !== "undefined" ? Notifications.load() : loadNotifications();
             case "analytics":     return loadAnalytics();
             case "trends":        return loadTrends();
             case "forecast":      return loadForecast();
