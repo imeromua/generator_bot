@@ -37,6 +37,19 @@ async def api_status(request: Request):
         active_shift = state.get("active_shift", "none")
         if active_shift != "none":
             operator_name = db.get_state_value("active_operator") or ""
+            # Fallback: if active_operator not set (shift started before PR#70),
+            # look for operator in the most recent _start log entry
+            if not operator_name:
+                try:
+                    recent_logs = db.get_last_logs(10)
+                    for log in (recent_logs or []):
+                        event_type = log[0] if log else ""  # index 0: event_type
+                        user_name = log[2] if log else ""  # index 2: user_name
+                        if event_type and event_type.endswith("_start") and user_name:
+                            operator_name = user_name
+                            break
+                except Exception:
+                    logger.warning("Failed to get operator_name from logs fallback", exc_info=True)
 
         if status == "ON":
             start_time_str = state.get("start_time", "")
