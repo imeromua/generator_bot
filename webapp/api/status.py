@@ -85,6 +85,12 @@ async def api_status(request: Request):
         gen_stats = db.get_generator_stats(active_gen)
         total_hours = float(gen_stats.get("total_hours", 0))
 
+        # Live: якщо генератор працює — додаємо час поточної зміни
+        if status == "ON" and shift_duration_hours is not None and 0 < shift_duration_hours < 24:
+            total_hours_live = total_hours + shift_duration_hours
+        else:
+            total_hours_live = total_hours
+
         payload = {
             "status": status,
             "generator": active_gen,
@@ -92,7 +98,7 @@ async def api_status(request: Request):
             "current_fuel": round(current_fuel, 1),
             "estimated_fuel": round(estimated_fuel, 1),
             "fuel_rate": fuel_rate,
-            "total_hours": round(total_hours, 1),
+            "total_hours": round(total_hours_live, 1),
             "active_shift": state.get("active_shift", "none"),
             "completed_shifts": list(completed),
             "start_time": state.get("start_time", ""),
@@ -204,20 +210,45 @@ async def api_generators(request: Request):
     """GET /api/generators — статистика обох генераторів."""
     try:
         active_gen = db.get_active_generator()
+        state = db.get_state()
+        status = state.get("status", "OFF")
+
+        # Розраховуємо elapsed_h для live мотогодин
+        live_elapsed_h = 0.0
+        if status == "ON":
+            try:
+                start_time_str = state.get("start_time", "")
+                start_date_str = state.get("start_date", "")
+                if start_time_str and start_date_str:
+                    start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
+                    start_dt = start_dt.replace(tzinfo=config.KYIV)
+                    now = datetime.now(config.KYIV)
+                    if start_dt > now:
+                        start_dt -= timedelta(days=1)
+                    elapsed = (now - start_dt).total_seconds() / 3600
+                    if 0 < elapsed < 24:
+                        live_elapsed_h = elapsed
+            except Exception:
+                pass
+
         main_stats = db.get_generator_stats("main")
         emerg_stats = db.get_generator_stats("emergency")
 
-        def _fmt_stats(stats):
+        def _fmt_stats(stats, gen_id):
+            hours = float(stats.get("total_hours", 0))
+            # Додаємо elapsed тільки до АКТИВНОГО генератора
+            if gen_id == active_gen and live_elapsed_h > 0:
+                hours += live_elapsed_h
             return {
-                "total_hours": round(float(stats.get("total_hours", 0)), 1),
+                "total_hours": round(hours, 1),
                 "last_oil_change": round(float(stats.get("last_oil_change", 0)), 1),
                 "last_spark_change": round(float(stats.get("last_spark_change", 0)), 1),
             }
 
         return {
             "active": active_gen,
-            "main": {"name": db.get_generator_name("main"), **_fmt_stats(main_stats)},
-            "emergency": {"name": db.get_generator_name("emergency"), **_fmt_stats(emerg_stats)},
+            "main": {"name": db.get_generator_name("main"), **_fmt_stats(main_stats, "main")},
+            "emergency": {"name": db.get_generator_name("emergency"), **_fmt_stats(emerg_stats, "emergency")},
         }
     except Exception as e:
         logger.exception("api_generators error")
