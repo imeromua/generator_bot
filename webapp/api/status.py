@@ -28,10 +28,22 @@ async def api_status(request: Request):
         status = state.get("status", "OFF")
         estimated_fuel = current_fuel
 
+        # Нові поля для вкладки Зміни
+        operator_name = ""
+        shift_start_iso = ""
+        shift_duration_hours = None
+        shift_fuel = None
+
+        active_shift = state.get("active_shift", "none")
+        if active_shift != "none":
+            operator_name = db.get_state_value("active_operator") or ""
+
         if status == "ON":
             start_time_str = state.get("start_time", "")
             start_date_str = state.get("start_date", "")
             if start_time_str:
+                if start_date_str:
+                    shift_start_iso = f"{start_date_str}T{start_time_str}:00"
                 try:
                     if start_date_str:
                         start_dt = datetime.strptime(f"{start_date_str} {start_time_str}", "%Y-%m-%d %H:%M")
@@ -51,6 +63,8 @@ async def api_status(request: Request):
                     elapsed_h = (now - start_dt).total_seconds() / 3600
                     if 0 < elapsed_h < 24:
                         estimated_fuel = max(0, current_fuel - elapsed_h * fuel_rate)
+                        shift_duration_hours = round(elapsed_h, 2)
+                        shift_fuel = round(elapsed_h * fuel_rate, 2)
                 except (ValueError, TypeError):
                     pass
 
@@ -69,6 +83,10 @@ async def api_status(request: Request):
             "active_shift": state.get("active_shift", "none"),
             "completed_shifts": list(completed),
             "start_time": state.get("start_time", ""),
+            "shift_start": shift_start_iso,
+            "operator_name": operator_name,
+            "shift_duration_hours": shift_duration_hours,
+            "shift_fuel": shift_fuel,
             "work_start": config.WORK_START_TIME,
             "work_end": config.WORK_END_TIME,
         }

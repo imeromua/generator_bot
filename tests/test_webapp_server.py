@@ -69,6 +69,10 @@ class TestApiStatus:
             "active_shift",
             "completed_shifts",
             "start_time",
+            "shift_start",
+            "operator_name",
+            "shift_duration_hours",
+            "shift_fuel",
             "work_start",
             "work_end",
         ]
@@ -109,6 +113,39 @@ class TestApiStatus:
         assert data["status"] == "ON"
         # Should still compute estimate using today's date as fallback
         assert isinstance(data["estimated_fuel"], (int, float))
+
+    def test_status_active_shift_fields(self, client, monkeypatch):
+        """Active shift fields (operator_name, shift_start, shift_duration_hours, shift_fuel) should be populated when generator is ON."""
+        monkeypatch.setattr(config, "FUEL_CONSUMPTION", 2.0)
+        now = datetime.now(config.KYIV)
+        start_dt = now - timedelta(hours=3)
+
+        db.set_state("status", "ON")
+        db.set_state("last_start_time", start_dt.strftime("%H:%M"))
+        db.set_state("last_start_date", start_dt.strftime("%Y-%m-%d"))
+        db.set_state("current_fuel", "60.0")
+        db.set_state("active_shift", "m_start")
+        db.set_state("active_operator", "Іван")
+
+        resp = client.get("/api/status")
+        data = resp.json()
+
+        assert data["operator_name"] == "Іван"
+        assert data["shift_start"].startswith(start_dt.strftime("%Y-%m-%d"))
+        assert data["shift_duration_hours"] is not None
+        assert data["shift_duration_hours"] > 0
+        assert data["shift_fuel"] is not None
+        assert data["shift_fuel"] > 0
+
+    def test_status_shift_fields_empty_when_off(self, client):
+        """Shift fields should be empty/None when generator is OFF."""
+        resp = client.get("/api/status")
+        data = resp.json()
+
+        assert data["operator_name"] == ""
+        assert data["shift_start"] == ""
+        assert data["shift_duration_hours"] is None
+        assert data["shift_fuel"] is None
 
     def test_status_uses_correct_generator_hours(self, client, monkeypatch):
         """Total hours should reflect the active generator's hours."""

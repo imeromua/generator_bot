@@ -209,6 +209,7 @@ def try_start_shift(event_type: str, user_name: str, dt: datetime) -> dict:
                 return {"ok": False, "reason": "already_on", "active_shift": active, "start_time": st_time}
 
             _conn_set_state_value(conn, "active_shift", event_type)
+            _conn_set_state_value(conn, "active_operator", user_name)
             _conn_set_state_value(conn, "last_start_time", dt.strftime("%H:%M"))
             _conn_set_state_value(conn, "last_start_date", dt.strftime("%Y-%m-%d"))
 
@@ -366,6 +367,7 @@ def try_stop_shift(end_event_type: str, user_name: str, dt: datetime) -> dict:
 
             _conn_set_state_value(conn, "status", "OFF")
             _conn_set_state_value(conn, "active_shift", "none")
+            _conn_set_state_value(conn, "active_operator", "")
 
             # Записуємо лог з generator_id
             conn.execute(
