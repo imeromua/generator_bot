@@ -1,12 +1,11 @@
 """Task 6: Fuel order monitoring.
 
 Monitors fuel level and triggers an automatic fuel order suggestion when the
-level drops below the adaptive threshold.  Sends an actionable Telegram message
+level drops below the fixed threshold. Sends an actionable Telegram message
 to admins with inline buttons.
 """
 
 import logging
-from datetime import datetime
 
 import config
 import database.db_api as db
@@ -15,11 +14,8 @@ from utils.time import now_kiev
 
 logger = logging.getLogger(__name__)
 
-# Default thresholds (litres)
-THRESHOLD_DEFAULT = 50.0
-THRESHOLD_WINTER = 70.0  # October-March
-THRESHOLD_SUMMER = 50.0  # April-September
-THRESHOLD_PRE_WEEKEND_BONUS = 0.20  # +20% before weekends
+# Threshold (litres) — fixed order threshold
+THRESHOLD_ORDER = 80.0
 
 # Debounce: minimum hours between repeat order suggestions
 _SUGGESTION_COOLDOWN_H = 4
@@ -29,17 +25,8 @@ _DEBOUNCE_STATE_KEY = "fuel_order_suggestion_last_ts"
 RECOMMENDED_ORDER_L = 200.0
 
 
-def _adaptive_threshold(now) -> float:
-    """Return the adaptive fuel threshold based on season and day of week."""
-    month = now.month
-    threshold = THRESHOLD_WINTER if month in (10, 11, 12, 1, 2, 3) else THRESHOLD_SUMMER
-    # Friday = 4, Saturday = 5 (isoweekday: Mon=1)
-    if now.isoweekday() in (5, 6):  # pre-weekend
-        threshold *= 1 + THRESHOLD_PRE_WEEKEND_BONUS
-    return threshold
-
-
 def _is_debounced(now) -> bool:
+    from datetime import datetime
     ts_str = db.get_state_value(_DEBOUNCE_STATE_KEY, "") or ""
     if not ts_str:
         return False
@@ -59,12 +46,10 @@ def _estimate_days_remaining(current_fuel: float) -> float:
         stats = fo_api.get_fuel_consumption_stats(days=7)
         rate = stats.get("avg_rate_per_hour", 0.0)
         if rate and rate > 0:
-            # Assume ~8 hours of generator use per day
             daily_consumption = rate * 8
             return current_fuel / daily_consumption
     except Exception:
         pass
-    # Default: assume ~10L/day if no data
     return current_fuel / 10.0 if current_fuel > 0 else 0.0
 
 
@@ -79,9 +64,8 @@ async def check_fuel_order(bot, state: dict) -> None:
         return
 
     now = now_kiev()
-    threshold = _adaptive_threshold(now)
 
-    if current_fuel > threshold:
+    if current_fuel > THRESHOLD_ORDER:
         return
 
     # Already have a pending order? Skip.
@@ -98,14 +82,14 @@ async def check_fuel_order(bot, state: dict) -> None:
         return
 
     days_remaining = _estimate_days_remaining(current_fuel)
-    logger.info(f"⛽ Fuel order suggestion triggered: {current_fuel:.1f}L left, threshold={threshold:.0f}L")
+    logger.info(f"⛽ Fuel order suggestion triggered: {current_fuel:.1f}L left, threshold={THRESHOLD_ORDER:.0f}L")
 
     txt = (
         f"⛽ <b>Час замовити паливо!</b>\n\n"
         f"📊 Залишок: <b>{current_fuel:.1f} л</b>\n"
         f"⏳ Вистачить на: ~{days_remaining:.0f} дн.\n"
         f"📅 Рекомендація: {RECOMMENDED_ORDER_L:.0f} л\n\n"
-        f"<i>Поріг: {threshold:.0f} л</i>"
+        f"<i>Поріг: {THRESHOLD_ORDER:.0f} л</i>"
     )
 
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -113,8 +97,8 @@ async def check_fuel_order(bot, state: dict) -> None:
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Замовити 200л", callback_data="fuel_order:create:200"),
-                InlineKeyboardButton(text="❌ Пізніше", callback_data="fuel_order:skip"),
+                InlineKeyboardButton(text="✅ Замовлено", callback_data="fuel_order:create:200"),
+                InlineKeyboardButton(text="⏸ Відкласти", callback_data="fuel_order:skip"),
             ]
         ]
     )
