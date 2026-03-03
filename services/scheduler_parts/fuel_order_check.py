@@ -22,7 +22,25 @@ _SUGGESTION_COOLDOWN_H = 4
 _DEBOUNCE_STATE_KEY = "fuel_order_suggestion_last_ts"
 
 # Recommended order amount (litres)
-RECOMMENDED_ORDER_L = 200.0
+RECOMMENDED_ORDER_L = 80.0
+
+
+def _is_quiet_hour(now) -> bool:
+    """Return True if current time is within the configured quiet hours.
+
+    Reads QUIET_HOURS_START / QUIET_HOURS_END from config (defaults: 22–08).
+    Handles overnight ranges (e.g. 22 → 08).
+    """
+    start_h = int(getattr(config, "QUIET_HOURS_START", 22))
+    end_h = int(getattr(config, "QUIET_HOURS_END", 8))
+    current_h = now.hour
+
+    if start_h < end_h:
+        # Simple range, e.g. 01–06
+        return start_h <= current_h < end_h
+    else:
+        # Overnight range, e.g. 22–08
+        return current_h >= start_h or current_h < end_h
 
 
 def _is_debounced(now) -> bool:
@@ -68,6 +86,11 @@ async def check_fuel_order(bot, state: dict) -> None:
     if current_fuel > THRESHOLD_ORDER:
         return
 
+    # Тиха година — не надсилати сповіщення
+    if _is_quiet_hour(now):
+        logger.debug(f"🌙 Fuel order check skipped — quiet hour ({now.hour}:xx)")
+        return
+
     # Already have a pending order? Skip.
     try:
         pending = fo_api.get_orders(status="pending", limit=1)
@@ -97,7 +120,7 @@ async def check_fuel_order(bot, state: dict) -> None:
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Замовлено", callback_data="fuel_order:create:200"),
+                InlineKeyboardButton(text="✅ Замовлено", callback_data="fuel_order:create:80"),
                 InlineKeyboardButton(text="⏸ Відкласти", callback_data="fuel_order:skip"),
             ]
         ]
