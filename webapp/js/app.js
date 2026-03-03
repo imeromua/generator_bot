@@ -724,9 +724,11 @@
         ];
 
         const totalHours = stats.total_hours || 0;
+        const genNameMap = { main: "🔋 Основний", emergency: "⚠️ Аварійний" };
+        const genDisplayName = genNameMap[data.generator] || data.generator;
         statsEl.innerHTML = `
             <div class="mnt-item">
-                <span class="mnt-item-label">⏱ Мотогодини (${data.generator})</span>
+                <span class="mnt-item-label">⏱ Мотогодини (${genDisplayName})</span>
                 <span class="mnt-item-value">${formatHoursMinutes(totalHours)}</span>
             </div>
         ` + items.map((item) => {
@@ -921,8 +923,7 @@
         // --- Звіти ---
         downloadReport(generator) {
             const days = $("report-days-select").value || "30";
-            const reportType = document.getElementById('report-type')?.value || 'quick';
-            const url = API.getExcelReportUrl(reportType, days, generator || "");
+            const url = API.getExcelReportUrl("quick", days, generator || "");
             const fullUrl = url + '&init_data=' + encodeURIComponent(window.Telegram?.WebApp?.initData || '');
 
             try {
@@ -1342,8 +1343,8 @@
         },
 
         async saveQuietHours() {
-            const start = ($("quiet-start").value || "").trim();
-            const end = ($("quiet-end").value || "").trim();
+            const start = ($("notif-quiet-start").value || "").trim();
+            const end = ($("notif-quiet-end").value || "").trim();
             try {
                 // Save quiet hours for all types (using a dummy type to trigger update)
                 const res = await API.setNotificationPreference("fuel_warning", true, start || null, end || null);
