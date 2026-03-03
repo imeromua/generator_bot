@@ -12,7 +12,7 @@ const UsersManager = (() => {
 
     const ROLE_LABELS = {
         superadmin: "🔑 Супер-адмін",
-        admin: "👨‍💼 Адмін",
+        admin: "👨‍💼 Адміністратор",
         operator: "⚙️ Оператор",
         viewer: "👁️ Спостерігач",
         user: "👤 Користувач",
@@ -184,7 +184,7 @@ const UsersManager = (() => {
     }
 
     async function deleteUser(userId) {
-        if (!confirm("Видалити користувача? Запис буде позначено як видалений (soft delete).")) return;
+        if (!confirm("Видалити користувача? Запис буде позначено як видалений.")) return;
         try {
             await API.adminDeleteUser(userId);
             if (typeof App !== "undefined" && App.showToast) {
