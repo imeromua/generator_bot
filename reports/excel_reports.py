@@ -10,6 +10,7 @@ Features:
 
 import io
 import logging
+from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -27,6 +28,13 @@ try:
     EXCEL_AVAILABLE = True
 except ImportError:  # pragma: no cover
     EXCEL_AVAILABLE = False
+
+
+MONTH_NAMES = {
+    1: 'Січень', 2: 'Лютий', 3: 'Березень', 4: 'Квітень',
+    5: 'Травень', 6: 'Червень', 7: 'Липень', 8: 'Серпень',
+    9: 'Вересень', 10: 'Жовтень', 11: 'Листопад', 12: 'Грудень',
+}
 
 
 class ExcelReportGenerator:
@@ -65,6 +73,14 @@ class ExcelReportGenerator:
         except Exception:
             pass
 
+    def _month_range(self, year: int, month: int) -> tuple:
+        """Return (start_dt, end_dt) for a calendar month — 00:00:00 to 23:59:59."""
+        last_day = monthrange(year, month)[1]
+        tz = config.KYIV
+        start_dt = datetime(year, month, 1, 0, 0, 0, tzinfo=tz)
+        end_dt = datetime(year, month, last_day, 23, 59, 59, tzinfo=tz)
+        return start_dt, end_dt
+
     def _fill(self, color_key: str) -> "PatternFill":
         color = self.COLORS.get(color_key, color_key)
         return PatternFill(start_color=color, end_color=color, fill_type='solid')
@@ -83,7 +99,14 @@ class ExcelReportGenerator:
         if self._border:
             cell.border = self._border
 
-    def generate_report(self, report_type: str, days: int, generator_id: str = None) -> bytes:
+    def generate_report(
+        self,
+        report_type: str,
+        days: int,
+        generator_id: str = None,
+        year: int = None,
+        month: int = None,
+    ) -> bytes:
         """Generate Excel report based on type."""
         if not EXCEL_AVAILABLE:
             raise RuntimeError("openpyxl не встановлено")
@@ -91,15 +114,15 @@ class ExcelReportGenerator:
         self.wb = Workbook()
 
         if report_type == 'quick':
-            self._generate_quick_report(days, generator_id)
+            self._generate_quick_report(days, generator_id, year=year, month=month)
         elif report_type == 'detailed':
-            self._generate_detailed_report(days, generator_id)
+            self._generate_detailed_report(days, generator_id, year=year, month=month)
         elif report_type == 'technical':
-            self._generate_technical_report(days, generator_id)
+            self._generate_technical_report(days, generator_id, year=year, month=month)
         elif report_type == 'financial':
-            self._generate_financial_report(days, generator_id)
+            self._generate_financial_report(days, generator_id, year=year, month=month)
         elif report_type == 'personnel':
-            self._generate_personnel_report(days, generator_id)
+            self._generate_personnel_report(days, generator_id, year=year, month=month)
         else:
             raise ValueError(f"Невідомий тип звіту: {report_type}")
 
@@ -112,18 +135,23 @@ class ExcelReportGenerator:
     # Quick summary report
     # ------------------------------------------------------------------
 
-    def _generate_quick_report(self, days: int, gen_id: str):
+    def _generate_quick_report(self, days: int, gen_id: str, year: int = None, month: int = None):
         """Quick summary report with KPI cards and daily table."""
         ws = self.wb.active
         ws.title = "Швидкий звіт"
 
         gen_id = gen_id or db.get_active_generator()
         gen_name = db.get_generator_name(gen_id)
-        now = datetime.now(config.KYIV)
-        start_dt = now - timedelta(days=days)
+        if year and month:
+            start_dt, end_dt = self._month_range(year, month)
+            period_label = f"{MONTH_NAMES[month]} {year}"
+        else:
+            end_dt = datetime.now(config.KYIV)
+            start_dt = end_dt - timedelta(days=days)
+            period_label = f"за {days} днів"
 
         # Title
-        ws['A1'] = f"Генератор «{gen_name}» — Швидкий звіт за {days} днів"
+        ws['A1'] = f"Генератор «{gen_name}» — Швидкий звіт: {period_label}"
         ws['A1'].font = Font(bold=True, size=14, color=self.COLORS['dark_text'])
         ws.merge_cells('A1:F1')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
@@ -134,7 +162,7 @@ class ExcelReportGenerator:
         ws['A3'] = 'Ключові показники'
         ws['A3'].font = Font(bold=True, size=12)
 
-        daily = self._build_daily_stats(start_dt, now, gen_id)
+        daily = self._build_daily_stats(start_dt, end_dt, gen_id)
         total_hours = round(sum(d['work_hours'] for d in daily), 1)
         total_fuel = round(sum(d['fuel_consumed'] for d in daily), 1)
         avg_rate = round(total_fuel / total_hours, 2) if total_hours > 0 else 0.0
@@ -203,38 +231,45 @@ class ExcelReportGenerator:
     # Detailed multi-sheet report
     # ------------------------------------------------------------------
 
-    def _generate_detailed_report(self, days: int, gen_id: str):
+    def _generate_detailed_report(self, days: int, gen_id: str, year: int = None, month: int = None):
         """Detailed multi-sheet report with daily breakdown."""
         gen_id = gen_id or db.get_active_generator()
         gen_name = db.get_generator_name(gen_id)
-        now = datetime.now(config.KYIV)
-        start_dt = now - timedelta(days=days)
+        if year and month:
+            start_dt, end_dt = self._month_range(year, month)
+            period_label = f"{MONTH_NAMES[month]} {year}"
+        else:
+            end_dt = datetime.now(config.KYIV)
+            start_dt = end_dt - timedelta(days=days)
+            period_label = f"за {days} днів"
 
         # Sheet 1: Summary
         ws_summary = self.wb.active
         ws_summary.title = "Зведення"
-        self._fill_summary_sheet(ws_summary, days, gen_id, gen_name, now, start_dt)
+        self._fill_summary_sheet(ws_summary, days, gen_id, gen_name, end_dt, start_dt, period_label)
 
         # Sheet 2: Daily Stats
         ws_daily = self.wb.create_sheet("Щоденна статистика")
-        self._fill_daily_sheet(ws_daily, gen_id, gen_name, days, now, start_dt)
+        self._fill_daily_sheet(ws_daily, gen_id, gen_name, days, end_dt, start_dt)
 
         # Sheet 3: Maintenance
         ws_maint = self.wb.create_sheet("Технічне обслуговування")
         self._fill_maintenance_sheet(ws_maint, gen_id, gen_name)
 
-    def _fill_summary_sheet(self, ws, days, gen_id, gen_name, now, start_dt):
-        ws['A1'] = f"Детальний звіт: «{gen_name}» за {days} днів"
+    def _fill_summary_sheet(self, ws, days, gen_id, gen_name, end_dt, start_dt, period_label=None):
+        if period_label is None:
+            period_label = f"за {days} днів"
+        ws['A1'] = f"Детальний звіт: «{gen_name}» {period_label}"
         ws['A1'].font = Font(bold=True, size=14, color=self.COLORS['dark_text'])
         ws.merge_cells('A1:G1')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
         ws['A1'].fill = self._fill('header_bg')
         ws.row_dimensions[1].height = 28
 
-        ws['A2'] = f"Сформовано: {now.strftime('%d.%m.%Y %H:%M')}"
+        ws['A2'] = f"Сформовано: {end_dt.strftime('%d.%m.%Y %H:%M')}"
         ws['A2'].font = Font(italic=True, size=10)
 
-        daily = self._build_daily_stats(start_dt, now, gen_id)
+        daily = self._build_daily_stats(start_dt, end_dt, gen_id)
         total_hours = round(sum(d['work_hours'] for d in daily), 1)
         total_fuel = round(sum(d['fuel_consumed'] for d in daily), 1)
         avg_rate = round(total_fuel / total_hours, 2) if total_hours > 0 else 0.0
@@ -244,7 +279,7 @@ class ExcelReportGenerator:
 
         summary_data = [
             ('Генератор', gen_name),
-            ('Період', f"{start_dt.strftime('%d.%m.%Y')} — {now.strftime('%d.%m.%Y')}"),
+            ('Період', f"{start_dt.strftime('%d.%m.%Y')} — {end_dt.strftime('%d.%m.%Y')}"),
             ('Кількість днів', days),
             ('Загальні мотогодини', total_hours),
             ('Загальна витрата палива, л', total_fuel),
@@ -263,7 +298,7 @@ class ExcelReportGenerator:
         ws.column_dimensions['A'].width = 36
         ws.column_dimensions['B'].width = 28
 
-    def _fill_daily_sheet(self, ws, gen_id, gen_name, days, now, start_dt):
+    def _fill_daily_sheet(self, ws, gen_id, gen_name, days, end_dt, start_dt):
         ws['A1'] = f"Щоденна статистика — «{gen_name}»"
         ws['A1'].font = Font(bold=True, size=13)
         ws.merge_cells('A1:H1')
@@ -289,7 +324,7 @@ class ExcelReportGenerator:
         for ci, w in enumerate(col_widths, start=1):
             ws.column_dimensions[get_column_letter(ci)].width = w
 
-        daily = self._build_daily_stats(start_dt, now, gen_id)
+        daily = self._build_daily_stats(start_dt, end_dt, gen_id)
         for ri, d in enumerate(daily, start=3):
             rate = round(d['fuel_consumed'] / d['work_hours'], 2) if d['work_hours'] > 0 else ''
             shifts_str = ', '.join(d.get('shifts_active', []))
@@ -365,17 +400,22 @@ class ExcelReportGenerator:
     # Technical report
     # ------------------------------------------------------------------
 
-    def _generate_technical_report(self, days: int, gen_id: str):
+    def _generate_technical_report(self, days: int, gen_id: str, year: int = None, month: int = None):
         """Technical report focused on generator performance."""
         gen_id = gen_id or db.get_active_generator()
         gen_name = db.get_generator_name(gen_id)
-        now = datetime.now(config.KYIV)
-        start_dt = now - timedelta(days=days)
+        if year and month:
+            start_dt, end_dt = self._month_range(year, month)
+            period_label = f"{MONTH_NAMES[month]} {year}"
+        else:
+            end_dt = datetime.now(config.KYIV)
+            start_dt = end_dt - timedelta(days=days)
+            period_label = f"за {days} днів"
 
         ws = self.wb.active
         ws.title = "Технічний звіт"
 
-        ws['A1'] = f"Технічний звіт: «{gen_name}» за {days} днів"
+        ws['A1'] = f"Технічний звіт: «{gen_name}» {period_label}"
         ws['A1'].font = Font(bold=True, size=14, color=self.COLORS['dark_text'])
         ws.merge_cells('A1:E1')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
@@ -384,7 +424,7 @@ class ExcelReportGenerator:
 
         stats = db.get_maintenance_stats(gen_id)
         main_stats = db.get_generator_stats(gen_id)
-        daily = self._build_daily_stats(start_dt, now, gen_id)
+        daily = self._build_daily_stats(start_dt, end_dt, gen_id)
         total_hours = round(sum(d['work_hours'] for d in daily), 1)
         total_fuel = round(sum(d['fuel_consumed'] for d in daily), 1)
         avg_rate = round(total_fuel / total_hours, 2) if total_hours > 0 else 0.0
@@ -432,24 +472,29 @@ class ExcelReportGenerator:
     # Financial report
     # ------------------------------------------------------------------
 
-    def _generate_financial_report(self, days: int, gen_id: str):
+    def _generate_financial_report(self, days: int, gen_id: str, year: int = None, month: int = None):
         """Financial report with cost analysis."""
         gen_id = gen_id or db.get_active_generator()
         gen_name = db.get_generator_name(gen_id)
-        now = datetime.now(config.KYIV)
-        start_dt = now - timedelta(days=days)
+        if year and month:
+            start_dt, end_dt = self._month_range(year, month)
+            period_label = f"{MONTH_NAMES[month]} {year}"
+        else:
+            end_dt = datetime.now(config.KYIV)
+            start_dt = end_dt - timedelta(days=days)
+            period_label = f"за {days} днів"
 
         ws = self.wb.active
         ws.title = "Фінансовий звіт"
 
-        ws['A1'] = f"Фінансовий звіт: «{gen_name}» за {days} днів"
+        ws['A1'] = f"Фінансовий звіт: «{gen_name}» {period_label}"
         ws['A1'].font = Font(bold=True, size=14, color=self.COLORS['dark_text'])
         ws.merge_cells('A1:F1')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
         ws['A1'].fill = self._fill('header_bg')
         ws.row_dimensions[1].height = 28
 
-        daily = self._build_daily_stats(start_dt, now, gen_id)
+        daily = self._build_daily_stats(start_dt, end_dt, gen_id)
         total_hours = round(sum(d['work_hours'] for d in daily), 1)
         total_fuel = round(sum(d['fuel_consumed'] for d in daily), 1)
         avg_rate = round(total_fuel / total_hours, 2) if total_hours > 0 else 0.0
@@ -497,17 +542,22 @@ class ExcelReportGenerator:
     # Personnel report
     # ------------------------------------------------------------------
 
-    def _generate_personnel_report(self, days: int, gen_id: str):
+    def _generate_personnel_report(self, days: int, gen_id: str, year: int = None, month: int = None):
         """Personnel report with shift statistics."""
         gen_id = gen_id or db.get_active_generator()
         gen_name = db.get_generator_name(gen_id)
-        now = datetime.now(config.KYIV)
-        start_dt = now - timedelta(days=days)
+        if year and month:
+            start_dt, end_dt = self._month_range(year, month)
+            period_label = f"{MONTH_NAMES[month]} {year}"
+        else:
+            end_dt = datetime.now(config.KYIV)
+            start_dt = end_dt - timedelta(days=days)
+            period_label = f"за {days} днів"
 
         ws = self.wb.active
         ws.title = "По персоналу"
 
-        ws['A1'] = f"Звіт по персоналу: «{gen_name}» за {days} днів"
+        ws['A1'] = f"Звіт по персоналу: «{gen_name}» {period_label}"
         ws['A1'].font = Font(bold=True, size=14, color=self.COLORS['dark_text'])
         ws.merge_cells('A1:E1')
         ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
@@ -515,7 +565,7 @@ class ExcelReportGenerator:
         ws.row_dimensions[1].height = 28
 
         start_date = start_dt.strftime('%Y-%m-%d')
-        end_date = now.strftime('%Y-%m-%d')
+        end_date = end_dt.strftime('%Y-%m-%d')
         logs = db.get_logs_for_period(start_date, end_date, gen_id)
 
         pname_map: dict = {}
@@ -543,10 +593,10 @@ class ExcelReportGenerator:
     # Helper: build daily statistics
     # ------------------------------------------------------------------
 
-    def _build_daily_stats(self, start_dt: datetime, now: datetime, gen_id: str) -> list:
+    def _build_daily_stats(self, start_dt: datetime, end_dt: datetime, gen_id: str) -> list:
         """Build daily statistics list from database logs."""
         start_date = start_dt.strftime('%Y-%m-%d')
-        end_date = now.strftime('%Y-%m-%d')
+        end_date = end_dt.strftime('%Y-%m-%d')
         logs = db.get_logs_for_period(start_date, end_date, gen_id)
         fuel_rate = db.get_fuel_consumption_rate()
 
@@ -669,7 +719,13 @@ class ExcelReportGenerator:
         return result
 
 
-def generate_excel_report(report_type: str, days: int, generator_id: str = None) -> bytes:
+def generate_excel_report(
+    report_type: str,
+    days: int,
+    generator_id: str = None,
+    year: int = None,
+    month: int = None,
+) -> bytes:
     """Main entry point for Excel report generation."""
     generator = ExcelReportGenerator()
-    return generator.generate_report(report_type, days, generator_id)
+    return generator.generate_report(report_type, days, generator_id, year=year, month=month)
