@@ -71,6 +71,7 @@ from middlewares.error_handler import ErrorHandlerMiddleware, global_error_handl
 
 # Імпорт хендлерів
 from handlers import common
+from handlers.fuel_order import router as fuel_order_router
 
 # Імпорт сервісів
 from services.scheduler import scheduler_loop
@@ -221,8 +222,9 @@ def build_dispatcher() -> tuple[Dispatcher, Redis | None]:
     dp.message.outer_middleware(WhitelistMiddleware())
     dp.callback_query.outer_middleware(WhitelistMiddleware())
 
-    logger.info("📋 Реєстрація роутерів (тільки /start для переходу до Mini App)...")
+    logger.info("📋 Реєстрація роутерів...")
     dp.include_router(common.router)
+    dp.include_router(fuel_order_router)
 
     # Register shutdown handler for graceful cleanup
     dp.shutdown.register(on_shutdown)
