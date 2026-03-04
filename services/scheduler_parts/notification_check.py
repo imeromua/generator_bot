@@ -11,6 +11,7 @@ from datetime import datetime
 
 import config
 import database.db_api as db
+from database.api.maintenance import get_maintenance_stats
 from database.api.notifications import (
     NOTIFICATION_TYPES,
     get_user_preferences,
@@ -112,9 +113,12 @@ async def check_all_notifications(bot, state: dict) -> None:
         current_fuel = 0.0
 
     try:
-        total_hours = float(state.get("total_hours", 0.0) or 0.0)
-        last_oil = float(state.get("last_oil_change", 0.0) or 0.0)
-        hours_to_service = config.MAINTENANCE_LIMIT - (total_hours - last_oil)
+        stats = get_maintenance_stats()
+        hours_to_service = min(
+            float(stats['oil_needed'] or 9999.0),
+            float(stats['spark_needed'] or 9999.0),
+            float(stats['maintenance_needed'] or 9999.0),
+        )
     except Exception:
         hours_to_service = 9999.0
 
