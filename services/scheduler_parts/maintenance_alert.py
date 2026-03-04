@@ -7,6 +7,7 @@ import logging
 
 import config
 import database.db_api as db
+from database.api.maintenance import get_maintenance_stats
 from keyboards.builders import back_to_main
 from services.scheduler_parts.notify import send_single_window
 from utils.time import now_kiev, format_hours_hhmm
@@ -26,13 +27,14 @@ async def check_maintenance_alert(bot, state: dict):
     Алерти надсилаються тільки адмінам.
     """
     try:
-        total_hours = float(state.get('total_hours', 0.0) or 0.0)
-        last_oil = float(state.get('last_oil_change', 0.0) or 0.0)
+        stats = get_maintenance_stats()
+        hours_to_service = min(
+            float(stats['oil_needed'] or 9999.0),
+            float(stats['spark_needed'] or 9999.0),
+            float(stats['maintenance_needed'] or 9999.0),
+        )
     except Exception:
         return
-
-    # Обчислюємо залишок до ТО
-    hours_to_service = config.MAINTENANCE_LIMIT - (total_hours - last_oil)
 
     if hours_to_service > max(MAINTENANCE_ALERT_THRESHOLDS):
         # Ще далеко до ТО
