@@ -21,6 +21,8 @@
   - Обидва мають різні дані      → conflict (потрібне явне рішення)
 """
 
+import hashlib
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime
@@ -268,6 +270,39 @@ def aggregate_app_data(from_date: str | None = None) -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
+# Preview versioning
+# ---------------------------------------------------------------------------
+
+def build_preview_version(sheet_state: dict[str, dict], app_data: dict[str, dict]) -> str:
+    """Build a deterministic version token from sheet_state and app_data snapshots.
+
+    The token is a hex digest of the JSON-serialized, sort-key-normalized
+    combination of both inputs.  Any change to either side (new date, field
+    value update, etc.) produces a different token.
+
+    Args:
+        sheet_state: output of :func:`load_sheet_state`.
+        app_data:    output of :func:`aggregate_app_data`.
+
+    Returns:
+        A 16-character lowercase hex string that uniquely represents the
+        comparison basis used by :func:`build_sync_preview`.
+    """
+    snapshot = {
+        "sheet_state": {
+            k: {"row_index": v["row_index"], "fields": dict(sorted(v["fields"].items()))}
+            for k, v in sorted(sheet_state.items())
+        },
+        "app_data": {
+            k: {"fields": dict(sorted(v["fields"].items()))}
+            for k, v in sorted(app_data.items())
+        },
+    }
+    serialized = json.dumps(snapshot, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode()).hexdigest()[:16]
+
+
+# ---------------------------------------------------------------------------
 # Stage 3: build_sync_preview (dry-run)
 # ---------------------------------------------------------------------------
 
@@ -358,8 +393,119 @@ def build_sync_preview(
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: apply_sync_decisions
+# Stage 4 helpers: collect_batch_updates, apply_sync_decisions
 # ---------------------------------------------------------------------------
+
+# Contiguous column groups used to build efficient range updates for new rows.
+# Each entry is (start_col_letter, end_col_letter, [field_names_in_order]).
+_NEW_ROW_RANGE_GROUPS: list[tuple[str, str, list[str]]] = [
+    ("A", "I", ["date", "m_start", "m_end", "d_start", "d_end", "e_start", "e_end", "x_start", "x_end"]),
+    ("N", "N", ["fuel"]),
+    ("P", "Q", ["receipts", "drivers"]),
+]
+
+
+def collect_batch_updates(
+    preview: dict[str, list],
+    decisions: list[dict] | None = None,
+    current_row_count: int | None = None,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Collect all approved writes as batch-update entries without touching the worksheet.
+
+    This is the pure-logic core of :func:`apply_sync_decisions`.  It is kept
+    separate so callers can inspect the planned writes before committing them.
+
+    Args:
+        preview:           output of :func:`build_sync_preview`.
+        decisions:         conflict-resolution decisions (same format as
+                           :func:`apply_sync_decisions`).
+        current_row_count: total rows currently in the sheet; used to compute
+                           row indices for new rows.  Inferred from preview when
+                           omitted.
+
+    Returns:
+        A 3-tuple ``(batch_updates, applied, skipped)`` where:
+
+        - **batch_updates** — list of ``{"range": str, "values": [[str, ...]]}``
+          dicts ready to pass to ``worksheet.batch_update()``.  New rows are
+          represented as grouped range entries (A:I, N, P:Q per row) to
+          minimise the number of entries.  Individual cell updates are used for
+          safe_updates and approved conflict writes.
+        - **applied** — change records with ``status`` set to the applied action.
+        - **skipped** — change records with ``status = "skipped_keep_sheet"``.
+    """
+    decisions = decisions or []
+    applied: list[dict] = []
+    skipped: list[dict] = []
+    batch_updates: list[dict] = []
+
+    # --- Parse decisions ---
+    global_decision: str | None = None
+    per_field: dict[tuple[str, str], str] = {}  # (date_iso, field_name) -> decision
+
+    for dec in decisions:
+        dval = dec.get("decision", "")
+        if dval in ("keep_app_all", "keep_sheet_all"):
+            global_decision = dval
+        elif "date" in dec and "field" in dec:
+            per_field[(dec["date"], dec["field"])] = dval
+
+    # --- Determine starting row for new rows ---
+    if current_row_count is None:
+        existing_indices = [
+            item["row_index"]
+            for group in (preview.get("safe_updates", []), preview.get("conflicts", []))
+            for item in group
+        ]
+        current_row_count = max(existing_indices, default=2)
+
+    # --- 1. Collect new rows (grouped range writes per contiguous column block) ---
+    for new_row in preview.get("new_rows", []):
+        current_row_count += 1
+        row_idx = current_row_count
+        date_iso = new_row["date"]
+        fields = new_row["fields"]
+
+        # Batch entries: 3 grouped range writes per row (A:I, N, P:Q)
+        for col_start, col_end, field_names in _NEW_ROW_RANGE_GROUPS:
+            values = [str(fields.get(fn) or "") for fn in field_names]
+            rng = f"{col_start}{row_idx}:{col_end}{row_idx}"
+            batch_updates.append({"range": rng, "values": [values]})
+
+        # Applied records: one entry per field (for API response / audit trail)
+        # This is intentionally finer-grained than the batch entries above.
+        for field_name, _col_idx, col_letter in SYNC_FIELDS:
+            val = str(fields.get(field_name) or "")
+            applied.append({
+                "date": date_iso,
+                "row_index": row_idx,
+                "field": field_name,
+                "column": col_letter,
+                "sheet_value": "",
+                "app_value": val,
+                "status": "new_row",
+            })
+
+    # --- 2. Collect safe updates (one entry per cell) ---
+    for item in preview.get("safe_updates", []):
+        rng = f"{item['column']}{item['row_index']}:{item['column']}{item['row_index']}"
+        batch_updates.append({"range": rng, "values": [[item["app_value"]]]})
+        applied.append({**item, "status": "applied_safe_update"})
+
+    # --- 3. Collect conflict resolutions ---
+    for item in preview.get("conflicts", []):
+        key = (item["date"], item["field"])
+        decision = per_field.get(key) or global_decision
+
+        if decision in ("keep_app", "keep_app_all"):
+            rng = f"{item['column']}{item['row_index']}:{item['column']}{item['row_index']}"
+            batch_updates.append({"range": rng, "values": [[item["app_value"]]]})
+            applied.append({**item, "status": "applied_keep_app"})
+        else:
+            skipped.append({**item, "status": "skipped_keep_sheet"})
+
+    return batch_updates, applied, skipped
+
 
 def apply_sync_decisions(
     worksheet,
@@ -367,7 +513,11 @@ def apply_sync_decisions(
     decisions: list[dict] | None = None,
     current_row_count: int | None = None,
 ) -> dict[str, list]:
-    """Apply approved changes to the worksheet.
+    """Apply approved changes to the worksheet using batched range updates.
+
+    All writes are collected via :func:`collect_batch_updates` and sent to the
+    Google Sheets API in a single ``batch_update`` call, reducing the number of
+    API round-trips compared to per-cell ``update`` calls.
 
     Args:
         worksheet:         gspread Worksheet object.
@@ -391,8 +541,9 @@ def apply_sync_decisions(
 
     Processing order:
 
-    1. **new_rows** — always applied (no conflict possible).
-    2. **safe_updates** — always applied (Sheets was empty).
+    1. **new_rows** — always applied (no conflict possible); written as grouped
+       range updates (A:I, N, P:Q per row).
+    2. **safe_updates** — always applied (Sheets was empty); one entry per cell.
     3. **conflicts** — applied only when an explicit ``keep_app`` decision
        exists; otherwise the Sheets value is preserved.
 
@@ -400,71 +551,14 @@ def apply_sync_decisions(
         ``{"applied": [...], "skipped": [...]}`` where each item is a field
         change record with a ``status`` field indicating what happened.
     """
-    decisions = decisions or []
-    applied: list[dict] = []
-    skipped: list[dict] = []
+    batch_updates, applied, skipped = collect_batch_updates(
+        preview,
+        decisions=decisions,
+        current_row_count=current_row_count,
+    )
 
-    # --- Parse decisions ---
-    global_decision: str | None = None
-    per_field: dict[tuple[str, str], str] = {}  # (date_iso, field_name) -> decision
-
-    for dec in decisions:
-        dval = dec.get("decision", "")
-        if dval in ("keep_app_all", "keep_sheet_all"):
-            global_decision = dval
-        elif "date" in dec and "field" in dec:
-            per_field[(dec["date"], dec["field"])] = dval
-
-    # --- Helper: write a single cell ---
-    def _write(row_idx: int, col_letter: str, value: str) -> None:
-        rng = f"{col_letter}{row_idx}:{col_letter}{row_idx}"
-        worksheet.update(rng, [[value]], value_input_option="USER_ENTERED")
-
-    # --- Determine starting row for new rows ---
-    if current_row_count is None:
-        existing_indices = [
-            item["row_index"]
-            for group in (preview.get("safe_updates", []), preview.get("conflicts", []))
-            for item in group
-        ]
-        current_row_count = max(existing_indices, default=2)
-
-    # --- 1. Apply new rows ---
-    for new_row in preview.get("new_rows", []):
-        current_row_count += 1
-        row_idx = current_row_count
-        date_iso = new_row["date"]
-        fields = new_row["fields"]
-
-        for field_name, _col_idx, col_letter in SYNC_FIELDS:
-            val = str(fields.get(field_name) or "")
-            _write(row_idx, col_letter, val)
-            applied.append({
-                "date": date_iso,
-                "row_index": row_idx,
-                "field": field_name,
-                "column": col_letter,
-                "sheet_value": "",
-                "app_value": val,
-                "status": "new_row",
-            })
-
-    # --- 2. Apply safe updates ---
-    for item in preview.get("safe_updates", []):
-        _write(item["row_index"], item["column"], item["app_value"])
-        applied.append({**item, "status": "applied_safe_update"})
-
-    # --- 3. Resolve conflicts ---
-    for item in preview.get("conflicts", []):
-        key = (item["date"], item["field"])
-        decision = per_field.get(key) or global_decision
-
-        if decision in ("keep_app", "keep_app_all"):
-            _write(item["row_index"], item["column"], item["app_value"])
-            applied.append({**item, "status": "applied_keep_app"})
-        else:
-            # Default: keep Sheets (source of truth)
-            skipped.append({**item, "status": "skipped_keep_sheet"})
+    if batch_updates:
+        worksheet.batch_update(batch_updates, value_input_option="USER_ENTERED")
 
     return {"applied": applied, "skipped": skipped}
 

@@ -293,6 +293,7 @@ async def api_admin_sync_preview(request: Request):
             load_sheet_state,
             aggregate_app_data,
             build_sync_preview,
+            build_preview_version,
         )
         from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
 
@@ -303,9 +304,11 @@ async def api_admin_sync_preview(request: Request):
         sheet_state = load_sheet_state(main_sheet)
         app_data = aggregate_app_data(from_date=None)
         preview = build_sync_preview(sheet_state, app_data)
+        preview_version = build_preview_version(sheet_state, app_data)
 
         return {
             "ok": True,
+            "preview_version": preview_version,
             "new_rows": preview["new_rows"],
             "safe_updates": preview["safe_updates"],
             "conflicts": preview["conflicts"],
@@ -326,12 +329,19 @@ async def api_admin_sync_apply(request: Request):
     Тіло запиту (JSON)::
 
         {
+          "preview_version": "abcd1234ef567890",
           "decisions": [
             {"date": "2026-03-07", "field": "fuel", "decision": "keep_app"},
             {"date": "2026-03-07", "field": "receipts", "decision": "keep_sheet"},
             {"decision": "keep_app_all"}   // глобальне рішення для всіх конфліктів
           ]
         }
+
+    ``preview_version`` — токен, отриманий з ``GET /api/admin/sync/preview``.
+    Якщо стан таблиці або БД змінився після генерації preview, запит буде
+    відхилено з HTTP 409 ``{"error": "Preview is stale", "code": "STALE_PREVIEW",
+    "current_preview_version": "..."}``.  Це гарантує, що застосовуються лише
+    актуальні рішення.
 
     Допустимі значення ``decision``:
     - ``keep_app``       — використати значення з БД для цього поля
@@ -354,11 +364,14 @@ async def api_admin_sync_apply(request: Request):
     if not isinstance(decisions, list):
         return JSONResponse(content={"error": "decisions має бути масивом"}, status_code=400)
 
+    provided_version = body.get("preview_version")
+
     try:
         from services.sheets_export import (
             load_sheet_state,
             aggregate_app_data,
             build_sync_preview,
+            build_preview_version,
             apply_sync_decisions,
         )
         from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
@@ -369,6 +382,20 @@ async def api_admin_sync_apply(request: Request):
 
         sheet_state = load_sheet_state(main_sheet)
         app_data = aggregate_app_data(from_date=None)
+
+        # --- Stale-check: reject if comparison basis changed since preview ---
+        if provided_version is not None:
+            current_version = build_preview_version(sheet_state, app_data)
+            if current_version != provided_version:
+                return JSONResponse(
+                    content={
+                        "error": "Preview is stale",
+                        "code": "STALE_PREVIEW",
+                        "current_preview_version": current_version,
+                    },
+                    status_code=409,
+                )
+
         preview = build_sync_preview(sheet_state, app_data)
 
         current_row_count = max(
