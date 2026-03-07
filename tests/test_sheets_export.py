@@ -27,6 +27,7 @@ os.environ.setdefault("SQLITE_PATH", ":memory:")
 import config
 import database.models as db_models
 from services.sheets_export import (
+    MAIN_GENERATOR_ID,
     SYNC_FIELDS,
     _format_fuel,
     _normalize_value,
@@ -1083,3 +1084,221 @@ class TestApplySyncDecisionsBatched:
         entries = ws.batch_update.call_args[0][0]
         # 3 grouped entries (A:I, N, P:Q) — not 12 individual cell writes
         assert len(entries) == 3
+
+
+# ===========================================================================
+# 12. Emergency generator exclusion — business rule enforcement
+#
+# Google Sheets sync is for the MAIN generator only (generator_id = 'main').
+# Emergency generator records must NEVER appear in preview/apply payloads,
+# create new rows, produce safe_updates or conflicts, or affect preview_version.
+# ===========================================================================
+
+
+class TestEmergencyGeneratorExclusion:
+    """Enforce the business rule: only main-generator data reaches Google Sheets.
+
+    Emergency generator logs (generator_id != MAIN_GENERATOR_ID) are
+    completely excluded from the Sheets sync pipeline by design.
+    """
+
+    EMERGENCY_ID = "emergency"
+    DATE = "2026-03-07"
+
+    def _insert_log(
+        self,
+        event_type,
+        timestamp,
+        value=None,
+        driver=None,
+        receipt=None,
+        user="test",
+        generator_id="main",
+    ):
+        from database.models import get_connection
+
+        conn = get_connection()
+        conn.execute(
+            "INSERT INTO logs"
+            " (event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (event_type, timestamp, user, value, driver, receipt, generator_id),
+        )
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # aggregate_app_data excludes emergency logs entirely
+    # ------------------------------------------------------------------
+
+    def test_emergency_only_logs_return_empty(self):
+        """When only emergency logs exist, aggregate_app_data() returns {}."""
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=self.EMERGENCY_ID)
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="80", driver="Аварійний", receipt="E-001",
+            generator_id=self.EMERGENCY_ID,
+        )
+        result = aggregate_app_data()
+        assert result == {}, (
+            "Emergency generator data must never appear in aggregate_app_data()"
+        )
+
+    def test_emergency_logs_ignored_when_main_also_exists(self):
+        """Emergency logs for the same date as main logs are fully ignored."""
+        # Main generator: shift and refill
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=MAIN_GENERATOR_ID)
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="80", driver="Іван", receipt="001",
+            generator_id=MAIN_GENERATOR_ID,
+        )
+        # Emergency generator: different values for the same date
+        self._insert_log("m_start", f"{self.DATE} 06:00:00", generator_id=self.EMERGENCY_ID)
+        self._insert_log(
+            "refill", f"{self.DATE} 07:00:00",
+            value="999", driver="АварійнийВодій", receipt="E-999",
+            generator_id=self.EMERGENCY_ID,
+        )
+
+        result = aggregate_app_data()
+        assert self.DATE in result
+        fields = result[self.DATE]["fields"]
+
+        # Shift time comes from main only (08:00, not 06:00)
+        assert fields["m_start"] == "08:00", "Emergency shift time must not affect main shift"
+
+        # Fuel comes from main only (80, not 80+999=1079)
+        assert fields["fuel"] == "80", "Emergency refill must not be summed into main fuel"
+
+        # Receipts and drivers from main only
+        assert "E-999" not in fields["receipts"], "Emergency receipt must not appear"
+        assert "АварійнийВодій" not in fields["drivers"], "Emergency driver must not appear"
+
+    # ------------------------------------------------------------------
+    # build_sync_preview: emergency-only data creates no new rows
+    # ------------------------------------------------------------------
+
+    def test_emergency_only_data_does_not_create_new_rows(self):
+        """Emergency-only logs must not create new rows in the Sheets preview."""
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=self.EMERGENCY_ID)
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="50", driver="Аварійний", receipt="E-001",
+            generator_id=self.EMERGENCY_ID,
+        )
+
+        app_data = aggregate_app_data()
+        assert app_data == {}, "Precondition: no main data"
+
+        preview = build_sync_preview({}, app_data)
+        assert preview["new_rows"] == [], "Emergency data must not create new rows"
+        assert preview["safe_updates"] == []
+        assert preview["conflicts"] == []
+
+    # ------------------------------------------------------------------
+    # build_sync_preview: emergency-only data creates no safe_updates
+    # ------------------------------------------------------------------
+
+    def test_emergency_data_does_not_produce_safe_updates(self):
+        """An existing sheet row with emergency-only data produces no safe_updates."""
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="50", driver="Аварійний", receipt="E-001",
+            generator_id=self.EMERGENCY_ID,
+        )
+
+        app_data = aggregate_app_data()  # empty — emergency excluded
+        # Sheet has existing row, app has nothing (emergency excluded)
+        sheet = _make_sheet_state(self.DATE, fuel="")
+        preview = build_sync_preview(sheet, app_data)
+
+        assert preview["safe_updates"] == [], "Emergency data must not produce safe_updates"
+
+    # ------------------------------------------------------------------
+    # build_sync_preview: emergency-only differences do not create conflicts
+    # ------------------------------------------------------------------
+
+    def test_emergency_data_does_not_produce_conflicts(self):
+        """Emergency data that differs from Sheets must not produce conflicts."""
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="99", driver="Аварійний", receipt="E-001",
+            generator_id=self.EMERGENCY_ID,
+        )
+
+        app_data = aggregate_app_data()  # empty — emergency excluded
+        # Sheet has value; emergency data has different value but is excluded
+        sheet = _make_sheet_state(self.DATE, fuel="75")
+        preview = build_sync_preview(sheet, app_data)
+
+        assert preview["conflicts"] == [], "Emergency differences must not create conflicts"
+
+    # ------------------------------------------------------------------
+    # apply_sync_decisions: emergency data is never written to Sheets
+    # ------------------------------------------------------------------
+
+    def test_emergency_data_never_written_during_apply(self):
+        """apply_sync_decisions must not write emergency data to the worksheet."""
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=self.EMERGENCY_ID)
+        self._insert_log(
+            "refill", f"{self.DATE} 10:00:00",
+            value="80", driver="Аварійний", receipt="E-001",
+            generator_id=self.EMERGENCY_ID,
+        )
+
+        ws = _make_worksheet([["H1"] * 17, ["H2"] * 17])
+        sheet_state = load_sheet_state(ws)
+        app_data = aggregate_app_data()  # empty
+        preview = build_sync_preview(sheet_state, app_data)
+
+        ws2 = MagicMock()
+        ws2.batch_update = MagicMock()
+        apply_sync_decisions(ws2, preview, decisions=[])
+
+        ws2.batch_update.assert_not_called(), (
+            "No writes should occur when only emergency data exists"
+        )
+
+    # ------------------------------------------------------------------
+    # build_preview_version: only emergency-data change does not bump version
+    # ------------------------------------------------------------------
+
+    def test_preview_version_unchanged_when_only_emergency_data_changes(self):
+        """preview_version must not change when only emergency logs are added/modified."""
+        # Version with no logs
+        app_data_before = aggregate_app_data()
+        sheet_state = {}
+        version_before = build_preview_version(sheet_state, app_data_before)
+
+        # Add emergency-only log — main data unchanged
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=self.EMERGENCY_ID)
+
+        app_data_after = aggregate_app_data()
+        version_after = build_preview_version(sheet_state, app_data_after)
+
+        assert version_before == version_after, (
+            "preview_version must not change when only emergency-generator data changes"
+        )
+
+    # ------------------------------------------------------------------
+    # Mixed scenario: main data unchanged by presence of emergency data
+    # ------------------------------------------------------------------
+
+    def test_preview_version_changes_only_for_main_data(self):
+        """preview_version changes when main data is added, regardless of emergency data."""
+        sheet_state = {}
+
+        # Add emergency-only log — version should NOT change
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=self.EMERGENCY_ID)
+        app_data_emergency_only = aggregate_app_data()
+        v_emergency = build_preview_version(sheet_state, app_data_emergency_only)
+
+        # Add main log — version SHOULD change
+        self._insert_log("m_start", f"{self.DATE} 08:00:00", generator_id=MAIN_GENERATOR_ID)
+        app_data_with_main = aggregate_app_data()
+        v_with_main = build_preview_version(sheet_state, app_data_with_main)
+
+        assert v_emergency != v_with_main, (
+            "preview_version must change when main-generator data is added"
+        )
