@@ -97,9 +97,13 @@ async def api_report_excel_v2(request: Request):
             gen_id = None
 
         now = datetime.now(config.KYIV)
-        excel_bytes = generate_excel_report(report_type, days, gen_id)
-
-        filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.xlsx"
+        if report_type == 'detailed':
+            # Detailed report is always current-month; pass year/month explicitly
+            excel_bytes = generate_excel_report(report_type, days, gen_id, year=now.year, month=now.month)
+            filename = f"detailed_report_{now.strftime('%Y_%m')}.xlsx"
+        else:
+            excel_bytes = generate_excel_report(report_type, days, gen_id)
+            filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.xlsx"
         return Response(
             content=excel_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
