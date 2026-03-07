@@ -78,6 +78,7 @@ from webapp.api.users import (
 )
 
 from servicedesk.auth_router import router as sd_auth_router
+from servicedesk.static_router import mount_sd_static
 
 import config
 
@@ -247,6 +248,9 @@ def create_app() -> FastAPI:
             app.mount("/css", StaticFiles(directory=str(css_dir)), name="css")
         if js_dir.is_dir():
             app.mount("/js", StaticFiles(directory=str(js_dir)), name="js")
+
+    # ServiceDesk SPA static files (mounted at /sd)
+    mount_sd_static(app)
 
     return app
 

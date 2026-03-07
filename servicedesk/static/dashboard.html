@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>ServiceDesk — Dashboard</title>
+  <link rel="stylesheet" href="/sd/css/sd-main.css">
+  <link rel="manifest" href="/sd/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/sd/icons/icon.svg">
+</head>
+<body>
+
+<!-- ── App shell ──────────────────────────────────────────────── -->
+<div class="app-shell">
+
+  <!-- Mobile sidebar overlay -->
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <!-- ── Sidebar (desktop + slide-in mobile) ──────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <!-- Generator bolt icon -->
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="28" height="28" rx="6" fill="#238636"/>
+        <polygon points="17,4 10,15 14,15 11,24 18,13 14,13" fill="#ffffff"/>
+      </svg>
+      <div>
+        <div class="brand-name">ServiceDesk</div>
+        <div class="brand-sub">Генератори</div>
+      </div>
+    </div>
+
+    <nav>
+      <ul class="sidebar-nav">
+        <li>
+          <a href="#dashboard" data-route="dashboard">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 1 1 0 12A6 6 0 0 1 8 2zm0 2a4 4 0 1 0 0 8A4 4 0 0 0 8 4zm0 1a3 3 0 1 1 0 6A3 3 0 0 1 8 5zm0 2a1 1 0 1 0 0 2A1 1 0 0 0 8 7z"/>
+            </svg>
+            Dashboard
+          </a>
+        </li>
+        <li>
+          <a href="#logs" data-route="logs">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 2h12v1H2V2zm0 3h12v1H2V5zm0 3h8v1H2V8zm0 3h10v1H2v-1z"/>
+            </svg>
+            Журнал
+          </a>
+        </li>
+        <li>
+          <a href="#maintenance" data-route="maintenance">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9.83.95c-.19-.02-.38.05-.51.18L7.7 2.75l-.6-.17-.93-.93a.75.75 0 0 0-1.06 0L3.65 3.11a.75.75 0 0 0 0 1.06l.93.93.17.6-1.62 1.62a.75.75 0 0 0 .1 1.12l1.19.84-.1.67-.95 1.3a.75.75 0 0 0 .07 1.03l1.46 1.3a.75.75 0 0 0 1.04-.07l.95-1.3.67-.1.84 1.19a.75.75 0 0 0 1.12.1l1.62-1.62.6.17.93.93a.75.75 0 0 0 1.06 0l1.46-1.46a.75.75 0 0 0 0-1.06l-.93-.93-.17-.6 1.62-1.62a.75.75 0 0 0-.1-1.12l-1.19-.84.1-.67.95-1.3a.75.75 0 0 0-.07-1.03l-1.46-1.3a.75.75 0 0 0-.53-.2zM8 5.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5z"/>
+            </svg>
+            ТО
+          </a>
+        </li>
+        <li>
+          <a href="#fuel" data-route="fuel">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 2h7a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v2h5V4H4zm7 0h.5a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 11.5 12H11V4z"/>
+            </svg>
+            Паливо
+          </a>
+        </li>
+        <li>
+          <a href="#schedule" data-route="schedule">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1zm2 2h2v2H3V6zm3 0h2v2H6V6zm3 0h2v2H9V6zm-6 3h2v2H3V9zm3 0h2v2H6V9zm3 0h2v2H9V9z"/>
+            </svg>
+            Розклад
+          </a>
+        </li>
+        <li data-admin-only class="hidden">
+          <a href="#users" data-route="users">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M15 14s1 0 1-1-1-4-5-4-5 3-5 4 1 1 1 1h8zm-7.978-1A.261.261 0 0 1 7 12.996c.001-.264.167-1.03.76-1.72C8.312 10.629 9.282 10 11 10c1.717 0 2.687.63 3.24 1.276.593.69.758 1.457.76 1.72l-.008.002-.014.002H7.022zM11 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm3-2a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM6.936 9.28a5.88 5.88 0 0 0-1.23-.247A7.35 7.35 0 0 0 5 9c-4 0-5 3-5 4 0 .667.333 1 1 1h4.216A2.238 2.238 0 0 1 5 13c0-1.01.377-2.042 1.09-2.904.243-.294.526-.569.846-.816zM4.92 10A5.493 5.493 0 0 0 4 13H1c0-.26.164-1.03.76-1.724.545-.636 1.492-1.256 3.16-1.275zM1.5 5.5a3 3 0 1 1 6 0 3 3 0 0 1-6 0zm3-2a2 2 0 1 0 0 4 2 2 0 0 0 0-4z"/>
+            </svg>
+            Користувачі
+          </a>
+        </li>
+        <li>
+          <a href="#profile" data-route="profile">
+            <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 14s-1 0-1-1 1-4 6-4 6 3 6 4-1 1-1 1H3zm5-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+            </svg>
+            Профіль
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <!-- Sidebar footer: user info + logout -->
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-name" id="sidebar-user-name">…</div>
+        <div class="user-role text-muted" id="sidebar-user-role"></div>
+      </div>
+      <button id="btn-logout" class="btn btn-ghost" style="width:100%;font-size:0.8rem">
+        Вийти
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── Main area ──────────────────────────────────────────────── -->
+  <div class="main-area">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="flex items-center gap-2">
+        <!-- Hamburger for mobile -->
+        <button id="menu-toggle" class="menu-toggle" aria-label="Відкрити меню">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2 5h16v1.5H2V5zm0 4.5h16V11H2V9.5zm0 4.5h16v1.5H2V14z"/>
+          </svg>
+        </button>
+        <h1 id="topbar-title">Dashboard</h1>
+      </div>
+      <div class="topbar-right">
+        <button class="btn btn-ghost" style="font-size:0.8rem" id="topbar-logout" onclick="doLogout()">Вийти</button>
+      </div>
+    </header>
+
+    <!-- Page content: all section panels -->
+    <main class="page-content">
+
+      <!-- #dashboard -->
+      <div class="section-panel active" id="panel-dashboard">
+        <div class="loader-center"><div class="loader"></div></div>
+      </div>
+
+      <!-- #logs -->
+      <div class="section-panel" id="panel-logs"></div>
+
+      <!-- #maintenance -->
+      <div class="section-panel" id="panel-maintenance"></div>
+
+      <!-- #fuel -->
+      <div class="section-panel" id="panel-fuel">
+        <!-- Fuel order modal (hidden by default) -->
+        <div id="fuel-modal" class="modal-backdrop hidden">
+          <div class="modal">
+            <div class="modal-header">
+              <h3>Нове замовлення пального</h3>
+              <button class="modal-close" id="fuel-modal-close" aria-label="Закрити">&times;</button>
+            </div>
+            <div class="modal-body">
+              <form id="fuel-order-form" class="flex-col gap-4">
+                <div class="form-group">
+                  <label for="fuel-volume">Об'єм (літри)</label>
+                  <input id="fuel-volume" type="number" min="1" step="0.5" class="input" placeholder="0" required>
+                </div>
+                <div class="form-group">
+                  <label for="fuel-notes">Примітки</label>
+                  <textarea id="fuel-notes" class="input" rows="3" placeholder="Необов'язково"></textarea>
+                </div>
+                <div class="modal-footer" style="padding:0">
+                  <button type="button" class="btn btn-ghost" onclick="closeFuelModal()">Скасувати</button>
+                  <button type="submit" class="btn btn-primary">Замовити</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- #schedule -->
+      <div class="section-panel" id="panel-schedule"></div>
+
+      <!-- #users (admin only) -->
+      <div class="section-panel" id="panel-users"></div>
+
+      <!-- #profile -->
+      <div class="section-panel" id="panel-profile"></div>
+
+    </main>
+  </div><!-- /main-area -->
+
+</div><!-- /app-shell -->
+
+<!-- ── Bottom navigation (mobile) ─────────────────────────────── -->
+<nav class="bottom-nav" aria-label="Нижня навігація">
+  <ul>
+    <li>
+      <a href="#dashboard" data-route="dashboard">
+        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6A.5.5 0 0 0 1.5 7.5v7a.5.5 0 0 0 .5.5h4.5a.5.5 0 0 0 .5-.5v-4h2v4a.5.5 0 0 0 .5.5H14a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.146-.354L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293L8.354 1.146z"/>
+        </svg>
+        <span>Головна</span>
+      </a>
+    </li>
+    <li>
+      <a href="#logs" data-route="logs">
+        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M2 2h12v1H2V2zm0 3h12v1H2V5zm0 3h8v1H2V8zm0 3h10v1H2v-1z"/>
+        </svg>
+        <span>Журнал</span>
+      </a>
+    </li>
+    <li>
+      <a href="#fuel" data-route="fuel">
+        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M3 2h7a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm1 2v2h5V4H4zm7 0h.5a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 11.5 12H11V4z"/>
+        </svg>
+        <span>Паливо</span>
+      </a>
+    </li>
+    <li>
+      <a href="#schedule" data-route="schedule">
+        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1zm2 2h2v2H3V6zm3 0h2v2H6V6zm3 0h2v2H9V6z"/>
+        </svg>
+        <span>Розклад</span>
+      </a>
+    </li>
+    <li>
+      <a href="#profile" data-route="profile">
+        <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M3 14s-1 0-1-1 1-4 6-4 6 3 6 4-1 1-1 1H3zm5-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+        </svg>
+        <span>Профіль</span>
+      </a>
+    </li>
+  </ul>
+</nav>
+
+<!-- ── Toast container ─────────────────────────────────────────── -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<!-- ── Scripts ─────────────────────────────────────────────────── -->
+<script src="/sd/js/sd-auth.js"></script>
+<script src="/sd/js/sd-api.js"></script>
+<script src="/sd/js/sd-router.js"></script>
+<script src="/sd/js/sd-dashboard.js"></script>
+
+</body>
+</html>
