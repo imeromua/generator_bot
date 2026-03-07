@@ -26,11 +26,21 @@ from database.models import get_connection
 
 logger = logging.getLogger(__name__)
 
-# Access token lifetime
-_ACCESS_TOKEN_MINUTES = 60
-# Refresh token lifetime
-_REFRESH_TOKEN_DAYS = 30
-# Password-reset token lifetime
+# Token lifetimes — overridden by config if available
+try:
+    import config as _config
+
+    _ACCESS_TOKEN_TTL_SECONDS = int(getattr(_config, "SD_ACCESS_TOKEN_TTL", 3600) or 3600)
+    _REFRESH_TOKEN_TTL_SECONDS = int(getattr(_config, "SD_REFRESH_TOKEN_TTL", 2592000) or 2592000)
+    _ACCESS_TOKEN_MINUTES = _ACCESS_TOKEN_TTL_SECONDS // 60
+    _REFRESH_TOKEN_DAYS = _REFRESH_TOKEN_TTL_SECONDS // 86400
+except Exception:
+    _ACCESS_TOKEN_TTL_SECONDS = 3600
+    _REFRESH_TOKEN_TTL_SECONDS = 2592000
+    _ACCESS_TOKEN_MINUTES = 60
+    _REFRESH_TOKEN_DAYS = 30
+
+# Password-reset token lifetime (fixed at 30 minutes)
 _RESET_TOKEN_MINUTES = 30
 
 # Secret key for JWT signing – override via environment / config
@@ -41,9 +51,9 @@ try:
     if not _JWT_SECRET:
         _JWT_SECRET = secrets.token_hex(32)
         logger.warning(
-            "JWT_SECRET is not configured — using a random secret. "
+            "JWT_SECRET / SD_SECRET_KEY is not configured — using a random secret. "
             "All existing sessions will be invalidated on restart. "
-            "Set JWT_SECRET in your config or environment to persist sessions."
+            "Set SD_SECRET_KEY in your config or environment to persist sessions."
         )
 except Exception:
     _JWT_SECRET = secrets.token_hex(32)
@@ -185,6 +195,65 @@ def get_session_by_token(conn, token: str) -> dict | None:
         return dict(zip(keys, row))
     except Exception as e:
         logger.error(f"get_session_by_token failed: {e}")
+        return None
+
+
+def get_session_by_refresh_token(conn, refresh_token: str) -> dict | None:
+    """Return the active session row as a dict for *refresh_token*, or ``None``."""
+    try:
+        row = conn.execute(
+            """
+            SELECT id, user_id, token, refresh_token, created_at, expires_at,
+                   ip_address, user_agent, is_active
+            FROM web_sessions
+            WHERE refresh_token = ? AND is_active = 1
+            """,
+            (refresh_token,),
+        ).fetchone()
+        if row is None:
+            return None
+        keys = ["id", "user_id", "token", "refresh_token", "created_at", "expires_at",
+                "ip_address", "user_agent", "is_active"]
+        return dict(zip(keys, row))
+    except Exception as e:
+        logger.error(f"get_session_by_refresh_token failed: {e}")
+        return None
+
+
+def refresh_web_session(conn, refresh_token: str) -> dict | None:
+    """Issue a new access token for an existing session identified by *refresh_token*.
+
+    The refresh token itself remains valid until the session ``expires_at``
+    (which was set to the refresh-token lifetime when the session was created).
+    Returns a dict with keys ``token`` and ``expires_at`` on success, or
+    ``None`` on failure / invalid / expired refresh token.
+    """
+    session = get_session_by_refresh_token(conn, refresh_token)
+    if not session:
+        return None
+
+    now = datetime.now(timezone.utc)
+    # Check if the session's overall expiry (= refresh-token expiry) has passed
+    try:
+        session_expires = datetime.fromisoformat(session["expires_at"])
+        if session_expires.tzinfo is None:
+            session_expires = session_expires.replace(tzinfo=timezone.utc)
+        if now >= session_expires:
+            return None
+    except Exception:
+        return None
+
+    new_expires_at = (now + timedelta(seconds=_ACCESS_TOKEN_TTL_SECONDS)).isoformat()
+    new_token = _make_access_token(session["user_id"], new_expires_at)
+
+    try:
+        conn.execute(
+            "UPDATE web_sessions SET token = ? WHERE id = ?",
+            (new_token, session["id"]),
+        )
+        return {"token": new_token, "expires_at": new_expires_at}
+    except Exception as e:
+        logger.error(f"refresh_web_session failed: {e}")
         return None
 
 

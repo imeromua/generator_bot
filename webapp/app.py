@@ -77,6 +77,8 @@ from webapp.api.users import (
     api_admin_users_delete,
 )
 
+from servicedesk.auth_router import router as sd_auth_router
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)
+
+    # ServiceDesk auth router (SD-2)
+    app.include_router(sd_auth_router)
 
     app.add_api_route("/api/status", api_status, methods=["GET"])
     app.add_api_route("/api/schedule", api_schedule, methods=["GET"])
