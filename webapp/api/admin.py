@@ -234,7 +234,14 @@ async def api_admin_personnel_assign(request: Request):
 
 
 async def api_admin_sync(request: Request):
-    """POST /api/admin/sync — запуск синхронізації з Google Sheets (експорт)."""
+    """POST /api/admin/sync — запуск синхронізації з Google Sheets (експорт).
+
+    Використовує новий конфліктно-орієнтований pipeline:
+    - new_rows та safe_updates застосовуються автоматично.
+    - conflicts (обидві сторони мають різні значення) пропускаються і
+      повертаються в полі ``conflicts`` для ручного вирішення через
+      ``POST /api/admin/sync/apply``.
+    """
     user = _validation_mod.extract_user(request)
     if not _permissions_mod.is_admin(user):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
@@ -245,23 +252,153 @@ async def api_admin_sync(request: Request):
         result = full_export()
         updated = result.get("updated", [])
         skipped = result.get("skipped", [])
+        conflicts = result.get("conflicts", [])
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id,
             admin_name,
             "export_sheets",
-            f"Синхронізація з Google Sheets: {len(updated)} дн. оновлено",
-            new_value={"updated": len(updated), "skipped": len(skipped)},
+            f"Синхронізація з Google Sheets: {len(updated)} дн. оновлено, {len(conflicts)} конфл.",
+            new_value={"updated": len(updated), "skipped": len(skipped), "conflicts": len(conflicts)},
         )
         return {
             "ok": True,
-            "message": f"Синхронізовано: {len(updated)} дн., пропущено: {len(skipped)} дн.",
+            "message": f"Синхронізовано: {len(updated)} дн., пропущено: {len(skipped)} дн., конфліктів: {len(conflicts)}",
             "updated": updated,
             "skipped": skipped,
+            "conflicts": conflicts,
         }
     except Exception as e:
         logger.exception("api_admin_sync error")
         return JSONResponse(content={"error": f"Помилка синхронізації: {e}"}, status_code=500)
+
+
+async def api_admin_sync_preview(request: Request):
+    """GET /api/admin/sync/preview — dry-run preview порівняння Sheets з БД.
+
+    Повертає три групи без внесення змін у таблицю:
+    - ``new_rows``     — дати, яких ще немає в Sheets
+    - ``safe_updates`` — поля, де Sheets порожнє, а БД має значення
+    - ``conflicts``    — поля, де обидві сторони мають різні непорожні значення
+
+    Кожен запис містить: ``date``, ``row_index`` (або None), ``field``,
+    ``column``, ``sheet_value``, ``app_value``, ``status``.
+    """
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+
+    try:
+        from services.sheets_export import (
+            load_sheet_state,
+            aggregate_app_data,
+            build_sync_preview,
+        )
+        from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
+
+        client = make_client()
+        ss = open_spreadsheet(client)
+        main_sheet = open_main_worksheet(ss)
+
+        sheet_state = load_sheet_state(main_sheet)
+        app_data = aggregate_app_data(from_date=None)
+        preview = build_sync_preview(sheet_state, app_data)
+
+        return {
+            "ok": True,
+            "new_rows": preview["new_rows"],
+            "safe_updates": preview["safe_updates"],
+            "conflicts": preview["conflicts"],
+            "summary": {
+                "new_rows": len(preview["new_rows"]),
+                "safe_updates": len(preview["safe_updates"]),
+                "conflicts": len(preview["conflicts"]),
+            },
+        }
+    except Exception as e:
+        logger.exception("api_admin_sync_preview error")
+        return JSONResponse(content={"error": f"Помилка preview синхронізації: {e}"}, status_code=500)
+
+
+async def api_admin_sync_apply(request: Request):
+    """POST /api/admin/sync/apply — застосування рішень щодо конфліктів.
+
+    Тіло запиту (JSON)::
+
+        {
+          "decisions": [
+            {"date": "2026-03-07", "field": "fuel", "decision": "keep_app"},
+            {"date": "2026-03-07", "field": "receipts", "decision": "keep_sheet"},
+            {"decision": "keep_app_all"}   // глобальне рішення для всіх конфліктів
+          ]
+        }
+
+    Допустимі значення ``decision``:
+    - ``keep_app``       — використати значення з БД для цього поля
+    - ``keep_sheet``     — зберегти значення з Sheets для цього поля
+    - ``keep_app_all``   — використати значення з БД для всіх конфліктів
+    - ``keep_sheet_all`` — зберегти значення з Sheets для всіх конфліктів
+
+    Повертає ``{"ok": true, "applied": [...], "skipped": [...]}``.
+    """
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Невалідний JSON"}, status_code=400)
+
+    decisions = body.get("decisions", [])
+    if not isinstance(decisions, list):
+        return JSONResponse(content={"error": "decisions має бути масивом"}, status_code=400)
+
+    try:
+        from services.sheets_export import (
+            load_sheet_state,
+            aggregate_app_data,
+            build_sync_preview,
+            apply_sync_decisions,
+        )
+        from services.google_sync_parts.client import make_client, open_spreadsheet, open_main_worksheet
+
+        client = make_client()
+        ss = open_spreadsheet(client)
+        main_sheet = open_main_worksheet(ss)
+
+        sheet_state = load_sheet_state(main_sheet)
+        app_data = aggregate_app_data(from_date=None)
+        preview = build_sync_preview(sheet_state, app_data)
+
+        current_row_count = max(
+            (info["row_index"] for info in sheet_state.values()),
+            default=2,
+        )
+        result = apply_sync_decisions(
+            main_sheet,
+            preview,
+            decisions=decisions,
+            current_row_count=current_row_count,
+        )
+
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id,
+            admin_name,
+            "export_sheets_apply",
+            f"Застосування рішень: {len(result['applied'])} змін, {len(result['skipped'])} пропущено",
+            new_value={"applied": len(result["applied"]), "skipped": len(result["skipped"])},
+        )
+
+        return {
+            "ok": True,
+            "applied": result["applied"],
+            "skipped": result["skipped"],
+        }
+    except Exception as e:
+        logger.exception("api_admin_sync_apply error")
+        return JSONResponse(content={"error": f"Помилка застосування: {e}"}, status_code=500)
 
 
 async def api_admin_audit(request: Request):
