@@ -351,3 +351,146 @@ class TestDetailedReportWithData:
         assert wb is not None
         assert len(wb.sheetnames) >= 3
 
+
+@pytest.mark.skipif(not _OPENPYXL, reason="openpyxl not installed")
+class TestDetailedReportOpeningFuelSeed:
+    """Detailed report must seed day-1 fuel balance from the DB current_fuel state.
+
+    Column mapping in «Операційний журнал»:
+        L (col 12) = morning fuel  «Пал.⬆, л»
+        M (col 13) = evening fuel  «Пал.⬇, л»
+    Data starts at row 5 (DATA_START=5); day 1 is always the first row.
+    """
+
+    # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _get_fuel_cols(ws, row: int):
+        """Return (morning_fuel_value, evening_fuel_value) for the given data row."""
+        return ws.cell(row=row, column=12).value, ws.cell(row=row, column=13).value
+
+    # ------------------------------------------------------------------ tests
+
+    def test_first_day_uses_db_opening_fuel_when_no_events(self):
+        """Day 1 morning fuel must equal the DB current_fuel when no in-month events exist."""
+        import database.db_api as db
+
+        db.set_state("current_fuel", "69.0")
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, evening_fuel = self._get_fuel_cols(ws, row=5)  # row 5 = day 1
+
+        assert morning_fuel == 69.0, (
+            f"Expected day-1 morning fuel 69.0, got {morning_fuel!r}"
+        )
+        # No events → evening == morning (no consumption, no refill)
+        assert evening_fuel == 69.0, (
+            f"Expected day-1 evening fuel 69.0, got {evening_fuel!r}"
+        )
+
+    def test_first_day_evening_fuel_accounts_for_refill_and_consumption(self):
+        """Day-1 evening fuel = DB opening + refill − consumed."""
+        import database.db_api as db
+
+        db.set_state("current_fuel", "50.0")
+
+        # 4-hour morning shift + 30 L refill on day 1 of March 2026
+        fuel_rate = db.get_fuel_consumption_rate()
+        db.add_log('m_start', 'Tester', ts='2026-03-01 06:00:00', generator_id='main')
+        db.add_log('m_end',   'Tester', ts='2026-03-01 10:00:00', generator_id='main')
+        db.add_log('refill',  'Tester', val='30', driver='D1', receipt='R1',
+                   ts='2026-03-01 08:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, evening_fuel = self._get_fuel_cols(ws, row=5)
+
+        expected_morning = 50.0
+        consumed = round(4.0 * fuel_rate, 1)
+        expected_evening = round(50.0 + 30.0 - consumed, 1)
+        if expected_evening < 0:
+            expected_evening = 0.0
+
+        assert morning_fuel == expected_morning, (
+            f"Expected day-1 morning fuel {expected_morning}, got {morning_fuel!r}"
+        )
+        assert evening_fuel == expected_evening, (
+            f"Expected day-1 evening fuel {expected_evening}, got {evening_fuel!r}"
+        )
+
+    def test_manual_correction_overrides_db_seed_on_day1(self):
+        """A corr_fuel_set event on day 1 must take priority over the DB opening fuel."""
+        import database.db_api as db
+
+        db.set_state("current_fuel", "69.0")
+
+        # Manual fuel correction: authoritative evening value = 100
+        db.add_log('corr_fuel_set', 'Admin', val='100',
+                   ts='2026-03-01 20:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        _, evening_fuel = self._get_fuel_cols(ws, row=5)
+
+        assert evening_fuel == 100.0, (
+            f"Manual correction should set evening fuel to 100.0, got {evening_fuel!r}"
+        )
+
+    def test_subsequent_days_propagate_from_day1_evening(self):
+        """Day 2 morning fuel must equal day 1 evening fuel (DB seed propagates forward)."""
+        import database.db_api as db
+
+        db.set_state("current_fuel", "69.0")
+
+        # No events → day 1 evening = 69.0; day 2 morning should also be 69.0
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        _, day1_evening = self._get_fuel_cols(ws, row=5)
+        day2_morning, _ = self._get_fuel_cols(ws, row=6)
+
+        assert day1_evening == 69.0
+        assert day2_morning == 69.0, (
+            f"Day 2 morning fuel should equal day 1 evening (69.0), got {day2_morning!r}"
+        )
+
+    def test_zero_db_fuel_falls_back_to_no_balance(self):
+        """When DB current_fuel is 0 (default), day 1 should show '—' (no known balance)."""
+        import database.db_api as db
+
+        # Default DB: current_fuel = 0.0 → treated as "unknown"
+        db.set_state("current_fuel", "0.0")
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, evening_fuel = self._get_fuel_cols(ws, row=5)
+
+        assert morning_fuel == '—', (
+            f"Expected '—' when DB fuel=0 and no events, got {morning_fuel!r}"
+        )
+        assert evening_fuel == '—', (
+            f"Expected '—' when DB fuel=0 and no events, got {evening_fuel!r}"
+        )
+
+    def test_other_report_types_unaffected_by_db_fuel(self):
+        """Setting DB fuel must not break quick/technical/financial/personnel reports."""
+        import database.db_api as db
+
+        db.set_state("current_fuel", "99.9")
+
+        for rtype in ('quick', 'technical', 'financial', 'personnel'):
+            result = generate_excel_report(rtype, 30, year=2026, month=3)
+            assert isinstance(result, bytes) and len(result) > 0, (
+                f"Report type '{rtype}' failed when DB fuel is set"
+            )
+

@@ -358,8 +358,21 @@ class ExcelReportGenerator:
                 except Exception:
                     pass
 
+        # Seed the opening fuel balance from the DB state so that the first
+        # day of the report starts from the known fuel level rather than None.
+        # Individual day corrections (corr_fuel_set events) still take priority.
+        initial_fuel: float | None = None
+        try:
+            state_fuel = db.get_state().get("current_fuel")
+            if state_fuel is not None:
+                parsed = float(state_fuel)
+                if parsed > 0:
+                    initial_fuel = parsed
+        except Exception:
+            pass
+
         # Generate one record for every calendar day in the month
-        prev_evening_fuel = None
+        prev_evening_fuel: float | None = initial_fuel
         result = []
         current = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
