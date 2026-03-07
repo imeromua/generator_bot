@@ -1,22 +1,24 @@
-"""Модуль експорту з БД в Google Sheets.
+"""Модуль експорту з БД в Google Sheets — preview + conflict-aware sync.
 
-Цільова логіка (за зразком таблиці):
-- Записуємо часи початку/кінця до 4 змін.
-- Записуємо привезене паливо: літри (сума за день), чеки (через кому), хто привіз (через кому).
-- Технічні колонки (розхід, коефіцієнти тощо) не чіпаємо.
+Синхронізація розбита на явні етапи:
+  1. load_sheet_state()     — читаємо поточний стан Sheets
+  2. aggregate_app_data()   — агрегуємо дані з БД/логів
+  3. build_sync_preview()   — порівнюємо, класифікуємо зміни (dry-run)
+  4. apply_sync_decisions() — застосовуємо затверджені зміни
 
-Семантика експорту:
-- Не перезаписуємо дні, в яких у робочих колонках (B..I,N,P,Q) уже є дані в Sheets.
-- Для інших днів, які є в логах БД, дописуємо/оновлюємо рядки.
+Колонки, які синхронізуємо (інші — зокрема J:M та O — не чіпаємо):
+  A   = дата (ДД.ММ.РРРР)
+  B:I = часи старт/стоп змін 1..4 (HH:MM)
+  N   = привезено палива за день (ПРИВЕЗЕНО ПАЛИВА)
+  P   = номер(и) чека
+  Q   = хто привіз паливо (імена)
 
-Колонки, які заповнюємо (інші лишаємо порожніми/як є):
-- A = дата (ДД.ММ.РРРР)
-- B,C,D,E,F,G,H,I = часи старт/стоп змін 1..4 (HH:MM)
-- N = привезено палива за день (сума refills, як число без суфіксу .0)
-- P = номер(и) чека за день (через кому)
-- Q = хто привіз паливо (імена водіїв, через кому)
-
-Інші колонки (зокрема K,L,M,O,T,U та правіше) не змінюються цим модулем.
+Правила конфліктів (Sheets — джерело правди):
+  - Sheets порожнє, App порожнє  → пропустити (синхронізовано)
+  - Sheets порожнє, App має дані → safe_update
+  - Sheets має дані, App порожнє → пропустити (зберігаємо Sheets)
+  - Обидва мають однакові дані   → пропустити (синхронізовано)
+  - Обидва мають різні дані      → conflict (потрібне явне рішення)
 """
 
 import logging
@@ -32,6 +34,33 @@ logger = logging.getLogger(__name__)
 
 _MAX_COL = 27  # A..AA (використовуємо тільки частину колонок)
 
+# ---------------------------------------------------------------------------
+# SYNC_FIELDS: ordered list of (field_name, zero-based_col_index, col_letter)
+# J:M (9-12) and O (14) are intentionally excluded — calculated columns.
+# ---------------------------------------------------------------------------
+SYNC_FIELDS: list[tuple[str, int, str]] = [
+    ("date",     0,  "A"),
+    ("m_start",  1,  "B"),
+    ("m_end",    2,  "C"),
+    ("d_start",  3,  "D"),
+    ("d_end",    4,  "E"),
+    ("e_start",  5,  "F"),
+    ("e_end",    6,  "G"),
+    ("x_start",  7,  "H"),
+    ("x_end",    8,  "I"),
+    ("fuel",     13, "N"),
+    ("receipts", 15, "P"),
+    ("drivers",  16, "Q"),
+]
+
+# Convenience lookups derived from SYNC_FIELDS
+_FIELD_MAP: dict[str, tuple[int, str]] = {name: (idx, letter) for name, idx, letter in SYNC_FIELDS}
+_COL_TO_FIELD: dict[int, str] = {idx: name for name, idx, _letter in SYNC_FIELDS}
+
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 def _parse_ts(ts_str: str) -> datetime | None:
     """Парсить timestamp з БД (YYYY-MM-DD HH:MM:SS)."""
@@ -48,6 +77,88 @@ def _time_to_hhmm(dt: datetime | None) -> str:
         return ""
     return dt.strftime("%H:%M")
 
+
+def _unique_join(items: list[str]) -> str:
+    """Join unique non-empty strings, preserving order."""
+    out = []
+    seen = set()
+    for x in items:
+        x = (x or "").strip()
+        if not x or x in seen:
+            continue
+        out.append(x)
+        seen.add(x)
+    return ", ".join(out)
+
+
+def _format_fuel(total_refill: float) -> str:
+    """Format fuel amount as string: integer if whole, else 1 decimal place."""
+    if not total_refill:
+        return ""
+    if abs(total_refill - round(total_refill)) < 1e-6:
+        return str(int(round(total_refill)))
+    return str(round(total_refill, 1))
+
+
+def _normalize_value(field_name: str, value: str) -> str:
+    """Normalize a field value for comparison to avoid false conflicts.
+
+    For numeric fields (fuel) both '80' and '80.0' normalize to '80'.
+    """
+    val = (value or "").strip()
+    if field_name == "fuel" and val:
+        try:
+            f = float(val.replace(",", ".").replace("\u00a0", ""))
+            if abs(f - round(f)) < 1e-6:
+                return str(int(round(f)))
+            return str(round(f, 1))
+        except Exception:
+            pass
+    return val
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: load_sheet_state
+# ---------------------------------------------------------------------------
+
+def load_sheet_state(worksheet) -> dict[str, dict]:
+    """Read current state from Google Sheets worksheet.
+
+    Returns:
+        dict mapping date_iso (YYYY-MM-DD) to::
+
+            {
+                "row_index": int,          # 1-based sheet row number
+                "fields": {field_name: str_value, ...}
+            }
+
+        Only SYNC_FIELDS columns are included; J:M and O are ignored.
+    """
+    all_values = worksheet.get_all_values()
+    state: dict[str, dict] = {}
+
+    for idx, row in enumerate(all_values[2:], start=3):  # data rows start at row 3
+        if not row or not (row[0] or "").strip():
+            continue
+        date_cell = (row[0] or "").strip()
+        try:
+            dt = datetime.strptime(date_cell, "%d.%m.%Y")
+            date_iso = dt.strftime("%Y-%m-%d")
+        except Exception:
+            continue
+
+        fields: dict[str, str] = {}
+        for field_name, col_idx, _col_letter in SYNC_FIELDS:
+            fields[field_name] = (row[col_idx] or "").strip() if col_idx < len(row) else ""
+
+        state[date_iso] = {"row_index": idx, "fields": fields}
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: aggregate_app_data
+# ---------------------------------------------------------------------------
 
 def _aggregate_logs_by_date(from_date: str | None = None):
     """Групує логи по датах для експорту в основну вкладку.
@@ -103,47 +214,367 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     return days
 
 
-def _unique_join(items: list[str]) -> str:
-    """Join unique non-empty strings, preserving order."""
-    out = []
-    seen = set()
-    for x in items:
-        x = (x or "").strip()
-        if not x or x in seen:
-            continue
-        out.append(x)
-        seen.add(x)
-    return ", ".join(out)
+def aggregate_app_data(from_date: str | None = None) -> dict[str, dict]:
+    """Aggregate app/DB data into a normalized field dict per date.
 
+    Returns:
+        dict mapping date_iso (YYYY-MM-DD) to::
+
+            {"fields": {field_name: str_value, ...}}
+
+        All field values are strings; fuel is formatted as an integer string
+        when it has no fractional part (e.g. ``"80"``), otherwise 1 decimal
+        (e.g. ``"80.5"``).
+    """
+    raw = _aggregate_logs_by_date(from_date=from_date)
+    result: dict[str, dict] = {}
+
+    _col_time_map = {
+        "m": ("m_start", "m_end"),
+        "d": ("d_start", "d_end"),
+        "e": ("e_start", "e_end"),
+        "x": ("x_start", "x_end"),
+    }
+
+    for date_str in sorted(raw.keys()):
+        day = raw[date_str]
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        fields: dict[str, str] = {}
+
+        # A: date
+        fields["date"] = dt.strftime("%d.%m.%Y")
+
+        # B-I: shift times
+        for shift, (f_start, f_end) in _col_time_map.items():
+            s = day["shifts"].get(shift, {})
+            fields[f_start] = _time_to_hhmm(s.get("start"))
+            fields[f_end] = _time_to_hhmm(s.get("end"))
+
+        # N: total delivered fuel
+        total_refill = sum(r[0] for r in day["refills"]) if day["refills"] else 0.0
+        fields["fuel"] = _format_fuel(total_refill)
+
+        # P: unique receipt numbers joined by comma
+        receipts = [rec for _amt, _drv, rec in day["refills"]] if day["refills"] else []
+        fields["receipts"] = _unique_join(receipts)
+
+        # Q: unique driver/person names joined by comma
+        drivers = [drv for _amt, drv, _rec in day["refills"]] if day["refills"] else []
+        fields["drivers"] = _unique_join(drivers)
+
+        result[date_str] = {"fields": fields}
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: build_sync_preview (dry-run)
+# ---------------------------------------------------------------------------
+
+def build_sync_preview(
+    sheet_state: dict[str, dict],
+    app_data: dict[str, dict],
+) -> dict[str, list]:
+    """Compare app data with current Sheets state and classify changes.
+
+    Args:
+        sheet_state: output of :func:`load_sheet_state`.
+        app_data:    output of :func:`aggregate_app_data`.
+
+    Returns:
+        A preview dict with three groups:
+
+        - **new_rows** — dates that do not yet exist in the sheet::
+
+              [{"date": "YYYY-MM-DD", "fields": {field: value, ...}}, ...]
+
+        - **safe_updates** — fields where Sheets is empty and app has a value::
+
+              [{"date", "row_index", "field", "column",
+                "sheet_value", "app_value", "status": "safe_update"}, ...]
+
+        - **conflicts** — fields where both sides have non-empty, differing values::
+
+              [{"date", "row_index", "field", "column",
+                "sheet_value", "app_value", "status": "conflict"}, ...]
+
+    Conflict-resolution rules (Sheets = source of truth):
+
+    ============  ==========  ==============================
+    Sheets        App         Action
+    ============  ==========  ==============================
+    empty         empty       skip (in sync)
+    empty         has value   safe_update
+    has value     empty       skip (keep Sheets)
+    same value    same value  skip (in sync)
+    differs       differs     conflict (explicit decision needed)
+    ============  ==========  ==============================
+    """
+    new_rows: list[dict] = []
+    safe_updates: list[dict] = []
+    conflicts: list[dict] = []
+
+    # Fields to compare per existing row (date is the row key, not compared field-by-field)
+    compare_fields = [name for name, _idx, _letter in SYNC_FIELDS if name != "date"]
+
+    for date_iso in sorted(app_data.keys()):
+        app_fields = app_data[date_iso]["fields"]
+
+        if date_iso not in sheet_state:
+            new_rows.append({"date": date_iso, "fields": dict(app_fields)})
+            continue
+
+        row_info = sheet_state[date_iso]
+        row_index = row_info["row_index"]
+        sheet_fields = row_info["fields"]
+
+        for field_name in compare_fields:
+            _col_idx, col_letter = _FIELD_MAP[field_name]
+            sheet_val = _normalize_value(field_name, sheet_fields.get(field_name, ""))
+            app_val = _normalize_value(field_name, str(app_fields.get(field_name) or ""))
+
+            if not sheet_val and not app_val:
+                continue  # both empty → in sync
+
+            if sheet_val and not app_val:
+                continue  # Sheets has value, app empty → keep Sheets (source of truth)
+
+            entry = {
+                "date": date_iso,
+                "row_index": row_index,
+                "field": field_name,
+                "column": col_letter,
+                "sheet_value": sheet_val,
+                "app_value": app_val,
+            }
+
+            if not sheet_val and app_val:
+                safe_updates.append({**entry, "status": "safe_update"})
+            elif sheet_val != app_val:
+                conflicts.append({**entry, "status": "conflict"})
+            # else: equal → in sync, skip
+
+    return {"new_rows": new_rows, "safe_updates": safe_updates, "conflicts": conflicts}
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: apply_sync_decisions
+# ---------------------------------------------------------------------------
+
+def apply_sync_decisions(
+    worksheet,
+    preview: dict[str, list],
+    decisions: list[dict] | None = None,
+    current_row_count: int | None = None,
+) -> dict[str, list]:
+    """Apply approved changes to the worksheet.
+
+    Args:
+        worksheet:         gspread Worksheet object.
+        preview:           output of :func:`build_sync_preview`.
+        decisions:         list of conflict-resolution decisions.  Each item is
+                           either a per-field decision::
+
+                               {"date": "YYYY-MM-DD", "field": "fuel",
+                                "decision": "keep_app" | "keep_sheet"}
+
+                           or a global decision applied to *all* unresolved
+                           conflicts::
+
+                               {"decision": "keep_app_all"}
+                               {"decision": "keep_sheet_all"}
+
+                           Per-field decisions take precedence over global ones.
+        current_row_count: total number of rows currently in the sheet (used to
+                           append new rows).  If omitted it is inferred from
+                           the highest ``row_index`` found in the preview.
+
+    Processing order:
+
+    1. **new_rows** — always applied (no conflict possible).
+    2. **safe_updates** — always applied (Sheets was empty).
+    3. **conflicts** — applied only when an explicit ``keep_app`` decision
+       exists; otherwise the Sheets value is preserved.
+
+    Returns:
+        ``{"applied": [...], "skipped": [...]}`` where each item is a field
+        change record with a ``status`` field indicating what happened.
+    """
+    decisions = decisions or []
+    applied: list[dict] = []
+    skipped: list[dict] = []
+
+    # --- Parse decisions ---
+    global_decision: str | None = None
+    per_field: dict[tuple[str, str], str] = {}  # (date_iso, field_name) -> decision
+
+    for dec in decisions:
+        dval = dec.get("decision", "")
+        if dval in ("keep_app_all", "keep_sheet_all"):
+            global_decision = dval
+        elif "date" in dec and "field" in dec:
+            per_field[(dec["date"], dec["field"])] = dval
+
+    # --- Helper: write a single cell ---
+    def _write(row_idx: int, col_letter: str, value: str) -> None:
+        rng = f"{col_letter}{row_idx}:{col_letter}{row_idx}"
+        worksheet.update(rng, [[value]], value_input_option="USER_ENTERED")
+
+    # --- Determine starting row for new rows ---
+    if current_row_count is None:
+        existing_indices = [
+            item["row_index"]
+            for group in (preview.get("safe_updates", []), preview.get("conflicts", []))
+            for item in group
+        ]
+        current_row_count = max(existing_indices, default=2)
+
+    # --- 1. Apply new rows ---
+    for new_row in preview.get("new_rows", []):
+        current_row_count += 1
+        row_idx = current_row_count
+        date_iso = new_row["date"]
+        fields = new_row["fields"]
+
+        for field_name, _col_idx, col_letter in SYNC_FIELDS:
+            val = str(fields.get(field_name) or "")
+            _write(row_idx, col_letter, val)
+            applied.append({
+                "date": date_iso,
+                "row_index": row_idx,
+                "field": field_name,
+                "column": col_letter,
+                "sheet_value": "",
+                "app_value": val,
+                "status": "new_row",
+            })
+
+    # --- 2. Apply safe updates ---
+    for item in preview.get("safe_updates", []):
+        _write(item["row_index"], item["column"], item["app_value"])
+        applied.append({**item, "status": "applied_safe_update"})
+
+    # --- 3. Resolve conflicts ---
+    for item in preview.get("conflicts", []):
+        key = (item["date"], item["field"])
+        decision = per_field.get(key) or global_decision
+
+        if decision in ("keep_app", "keep_app_all"):
+            _write(item["row_index"], item["column"], item["app_value"])
+            applied.append({**item, "status": "applied_keep_app"})
+        else:
+            # Default: keep Sheets (source of truth)
+            skipped.append({**item, "status": "skipped_keep_sheet"})
+
+    return {"applied": applied, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# Public: full_export (backward-compatible, now uses the new pipeline)
+# ---------------------------------------------------------------------------
+
+def full_export():
+    """Export from DB to Google Sheets using the preview + conflict-aware pipeline.
+
+    - new_rows (dates not yet in Sheets): always applied.
+    - safe_updates (Sheets empty, app has value): always applied.
+    - conflicts (both sides differ): skipped; returned for UI review.
+
+    Returns:
+        ``{"updated": [...], "skipped": [...], "conflicts": [...]}``
+
+        ``updated``  — sorted list of date strings that were written.
+        ``skipped``  — sorted list of date strings whose conflicts were left
+                       unchanged (Sheets preserved).
+        ``conflicts``— list of conflict detail dicts for UI/manual resolution.
+    """
+    logger.info("📤 Починаємо експорт з БД в Sheets (preview + conflict-aware)...")
+
+    client = make_client()
+    ss = open_spreadsheet(client)
+    main_sheet = open_main_worksheet(ss)
+
+    # Stage 1: read current sheet state
+    sheet_state = load_sheet_state(main_sheet)
+
+    # Stage 2: aggregate app/DB data
+    app_data = aggregate_app_data(from_date=None)
+
+    if not app_data:
+        logger.info("ℹ️ Немає даних у логах для експорту")
+        return {"updated": [], "skipped": [], "conflicts": []}
+
+    # Stage 3: dry-run preview
+    preview = build_sync_preview(sheet_state, app_data)
+
+    logger.info(
+        "📊 Preview: нових рядків=%s, безпечних оновлень=%s, конфліктів=%s",
+        len(preview["new_rows"]),
+        len(preview["safe_updates"]),
+        len(preview["conflicts"]),
+    )
+    for c in preview["conflicts"]:
+        logger.warning(
+            "⚠️ Конфлікт %s [%s] поле=%s: Sheets=%r App=%r",
+            c["date"], c["column"], c["field"], c["sheet_value"], c["app_value"],
+        )
+
+    # Stage 4: apply — no decisions passed, so conflicts are left untouched
+    current_row_count = max(
+        (info["row_index"] for info in sheet_state.values()),
+        default=2,
+    )
+    result = apply_sync_decisions(
+        main_sheet,
+        preview,
+        decisions=[],
+        current_row_count=current_row_count,
+    )
+
+    updated_dates = sorted({r["date"] for r in result["applied"]})
+    skipped_dates = sorted({r["date"] for r in result["skipped"]})
+    conflict_details = [
+        {
+            "date": c["date"],
+            "row_index": c["row_index"],
+            "field": c["field"],
+            "column": c["column"],
+            "sheet_value": c["sheet_value"],
+            "app_value": c["app_value"],
+            "status": "conflict",
+        }
+        for c in preview["conflicts"]
+    ]
+
+    logger.info(
+        "✅ Експорт завершено! Оновлено: %s; конфліктів (пропущено): %s",
+        len(updated_dates),
+        len(conflict_details),
+    )
+    return {"updated": updated_dates, "skipped": skipped_dates, "conflicts": conflict_details}
+
+
+# ---------------------------------------------------------------------------
+# Legacy helper (kept for internal/backward-compat callers of _build_export_rows)
+# ---------------------------------------------------------------------------
 
 def _build_export_rows(days_data):
+    """Build flat export rows for legacy usage."""
     rows = []
 
     for date_str in sorted(days_data.keys()):
         day = days_data[date_str]
-
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        date_fmt = dt.strftime("%d.%m.%Y")
-
-        # Prepare empty row A..AA
         row = [""] * _MAX_COL
 
-        # A: дата
-        row[0] = date_fmt
+        row[0] = dt.strftime("%d.%m.%Y")
 
-        # B-I: часи змін
-        col_time = {
-            "m": (1, 2),
-            "d": (3, 4),
-            "e": (5, 6),
-            "x": (7, 8),
-        }
+        col_time = {"m": (1, 2), "d": (3, 4), "e": (5, 6), "x": (7, 8)}
         for shift, (c_start, c_end) in col_time.items():
             s = day["shifts"].get(shift, {})
             row[c_start] = _time_to_hhmm(s.get("start"))
             row[c_end] = _time_to_hhmm(s.get("end"))
 
-        # N: total refill liters (sum) — пишемо як число (int/float), без рядка "80.0"
         total_refill = sum(r[0] for r in day["refills"]) if day["refills"] else 0.0
         if total_refill:
             if abs(total_refill - round(total_refill)) < 1e-6:
@@ -153,112 +584,12 @@ def _build_export_rows(days_data):
         else:
             row[13] = ""
 
-        # P: receipts (comma separated)
         receipts = [rec for _amt, _drv, rec in day["refills"]] if day["refills"] else []
         row[15] = _unique_join(receipts)
 
-        # Q: drivers who brought fuel (comma separated)
         drivers = [drv for _amt, drv, _rec in day["refills"]] if day["refills"] else []
         row[16] = _unique_join(drivers)
 
         rows.append(row)
 
     return rows
-
-
-def full_export():
-    """Експорт з БД в Google Sheets по днях.
-
-    Для кожної дати з логів:
-    - якщо в Sheets по цій даті вже є дані в B..I,N,P,Q — день пропускається;
-    - інакше дані за день записуються (або дописуються) в основну вкладку.
-
-    Повертає словник з переліком оновлених і пропущених дат.
-    """
-    logger.info("📤 Починаємо експорт з БД в Sheets (only fill missing days)...")
-
-    client = make_client()
-    ss = open_spreadsheet(client)
-    main_sheet = open_main_worksheet(ss)
-
-    # Читаємо всі поточні значення основної вкладки
-    all_values = main_sheet.get_all_values()
-
-    # Будуємо мапу існуючих дат: YYYY-MM-DD -> (row_index, has_payload_in_BI_N_P_Q)
-    sheet_dates: dict[str, tuple[int, bool]] = {}
-
-    for idx, row in enumerate(all_values[2:], start=3):  # починаючи з рядка 3
-        if not row or not (row[0] or "").strip():
-            continue
-        date_cell = (row[0] or "").strip()
-        try:
-            dt = datetime.strptime(date_cell, "%d.%m.%Y")
-            date_iso = dt.strftime("%Y-%m-%d")
-        except Exception:
-            continue
-
-        # Перевіряємо, чи вже є наші робочі дані в B..I,N,P,Q
-        has_payload = False
-        important_cols = [1, 2, 3, 4, 5, 6, 7, 8, 13, 15, 16]
-        for col_idx in important_cols:
-            if col_idx < len(row) and (row[col_idx] or "").strip():
-                has_payload = True
-                break
-
-        sheet_dates[date_iso] = (idx, has_payload)
-
-    # Агрегуємо всі логи по датах (без обмеження по today)
-    days_data = _aggregate_logs_by_date(from_date=None)
-
-    if not days_data:
-        logger.info("ℹ️ Немає даних у логах для експорту")
-        return {"updated": [], "skipped": []}
-
-    updated_dates: list[str] = []
-    skipped_dates: list[str] = []
-
-    # Для зручності при додаванні нових рядків тримаємо довжину поточної таблиці
-    current_rows_count = len(all_values)
-
-    for date_str in sorted(days_data.keys()):
-        day = days_data[date_str]
-
-        # Готуємо дані рядка для цієї дати
-        row_data = _build_export_rows({date_str: day})[0]
-
-        if date_str in sheet_dates:
-            row_idx, has_payload = sheet_dates[date_str]
-            if has_payload:
-                skipped_dates.append(date_str)
-                logger.info("⏭ Пропускаємо дату %s — дані вже є в Sheets (рядок %s)", date_str, row_idx)
-                continue
-        else:
-            # Дня з такою датою ще немає в таблиці — додаємо в кінець
-            current_rows_count += 1
-            row_idx = current_rows_count
-            sheet_dates[date_str] = (row_idx, False)
-            logger.info("➕ Додаємо новий рядок для дати %s (рядок %s)", date_str, row_idx)
-
-        # Оновлюємо/записуємо лише дозволені колонки для цього рядка
-        dates = [[row_data[0]]]  # A
-        times = [row_data[1:9]]  # B..I
-        col_n = [[row_data[13]]]  # N
-        col_p = [[row_data[15]]]  # P
-        col_q = [[row_data[16]]]  # Q
-
-        main_sheet.update(f"A{row_idx}:A{row_idx}", dates, value_input_option="USER_ENTERED")
-        main_sheet.update(f"B{row_idx}:I{row_idx}", times, value_input_option="USER_ENTERED")
-        main_sheet.update(f"N{row_idx}:N{row_idx}", col_n, value_input_option="USER_ENTERED")
-        main_sheet.update(f"P{row_idx}:P{row_idx}", col_p, value_input_option="USER_ENTERED")
-        main_sheet.update(f"Q{row_idx}:Q{row_idx}", col_q, value_input_option="USER_ENTERED")
-
-        updated_dates.append(date_str)
-        logger.info("✅ Оновлено/записано дані для дати %s (рядок %s)", date_str, row_idx)
-
-    logger.info(
-        "✅ Експорт завершено! Оновлено днів: %s; пропущено днів (вже були в Sheets): %s",
-        len(updated_dates),
-        len(skipped_dates),
-    )
-
-    return {"updated": updated_dates, "skipped": skipped_dates}

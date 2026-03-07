@@ -39,6 +39,8 @@ from webapp.api.admin import (
     api_admin_personnel_delete,
     api_admin_personnel_assign,
     api_admin_sync,
+    api_admin_sync_preview,
+    api_admin_sync_apply,
     api_admin_audit,
     api_admin_audit_export,
     api_admin_config_get,
@@ -187,6 +189,8 @@ def create_app() -> FastAPI:
     app.add_api_route("/api/admin/personnel", api_admin_personnel_delete, methods=["DELETE"])
     app.add_api_route("/api/admin/personnel/assign", api_admin_personnel_assign, methods=["POST"])
     app.add_api_route("/api/admin/sync", api_admin_sync, methods=["POST"])
+    app.add_api_route("/api/admin/sync/preview", api_admin_sync_preview, methods=["GET"])
+    app.add_api_route("/api/admin/sync/apply", api_admin_sync_apply, methods=["POST"])
     app.add_api_route("/api/admin/audit", api_admin_audit, methods=["GET"])
     app.add_api_route("/api/admin/audit/export", api_admin_audit_export, methods=["GET"])
     app.add_api_route("/api/admin/config", api_admin_config_get, methods=["GET"])
