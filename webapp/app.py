@@ -78,7 +78,7 @@ from webapp.api.users import (
 )
 
 from servicedesk.auth_router import router as sd_auth_router
-from servicedesk.static_router import mount_sd_static
+from servicedesk.static_router import mount_sd_static, router as sd_static_router
 
 import config
 
@@ -166,6 +166,9 @@ def create_app() -> FastAPI:
 
     # ServiceDesk auth router (SD-2)
     app.include_router(sd_auth_router)
+
+    # Digital Asset Links endpoint for Android TWA (SD-4)
+    app.include_router(sd_static_router)
 
     app.add_api_route("/api/status", api_status, methods=["GET"])
     app.add_api_route("/api/schedule", api_schedule, methods=["GET"])

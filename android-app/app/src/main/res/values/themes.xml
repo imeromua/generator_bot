@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme — no ActionBar (full-screen mode) -->
+    <style name="Theme.ServiceDesk" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">#1976D2</item>
+        <item name="android:navigationBarColor">#1976D2</item>
+        <item name="colorPrimary">#1976D2</item>
+        <item name="colorPrimaryDark">#1565C0</item>
+        <item name="colorAccent">#1976D2</item>
+    </style>
+
+    <!-- Splash screen theme: shown immediately while SplashActivity loads -->
+    <style name="Theme.ServiceDesk.Splash" parent="Theme.ServiceDesk">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+</resources>

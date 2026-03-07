@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Application name displayed in the launcher -->
+    <string name="app_name">ServiceDesk</string>
+
+    <!--
+        Base URL of the ServiceDesk PWA.
+        Replace REPLACE_WITH_YOUR_DOMAIN with your actual production host
+        before building (e.g. https://example.com/sd/).
+        Must use HTTPS (cleartext traffic is disabled in the manifest).
+    -->
+    <string name="base_url">https://REPLACE_WITH_YOUR_DOMAIN/sd/</string>
+
+    <!--
+        Android Package Browser Helper / TWA configuration.
+        The value must match the host component of base_url.
+    -->
+    <string name="asset_statements">
+        [{
+            \"include\": \"https://REPLACE_WITH_YOUR_DOMAIN/.well-known/assetlinks.json\"
+        }]
+    </string>
+</resources>
