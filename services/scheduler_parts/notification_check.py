@@ -54,26 +54,57 @@ def _mark_sent(user_id: int, notification_type: str, now) -> None:
 
 
 def _is_quiet_time(user_id: int, now) -> bool:
-    """Return True if current time falls within the user's quiet hours."""
+    """Return True if current time falls within the user's quiet hours.
+
+    Correctly handles overnight ranges (e.g. 22:00-08:00) by detecting when
+    start > end and splitting the comparison accordingly.
+    """
     start_str, end_str = get_quiet_hours(user_id)
     if not start_str or not end_str:
         return False
     try:
         current_time = now.strftime("%H:%M")
-        return start_str <= current_time < end_str
+        if start_str <= end_str:
+            # Normal range: e.g. 08:00 - 20:00
+            return start_str <= current_time < end_str
+        else:
+            # Overnight range: e.g. 22:00 - 08:00
+            # Active when current >= start (evening) OR current < end (early morning)
+            return current_time >= start_str or current_time < end_str
     except Exception:
         return False
 
 
 def _should_notify(user_id: int, notification_type: str, now) -> bool:
-    """Check debounce + quiet hours + user preference."""
+    """Check debounce + quiet hours + user preference.
+
+    Logs the reason when a notification is suppressed so operators can
+    diagnose why a message was not delivered.
+    """
     if not is_notification_enabled(user_id, notification_type):
+        logger.debug(
+            "🔕 Notification suppressed: user=%s type=%s reason=preference_disabled",
+            user_id,
+            notification_type,
+        )
         return False
     # Critical notifications ignore quiet hours
     meta = NOTIFICATION_TYPES.get(notification_type, {})
     if meta.get("category") != "critical" and _is_quiet_time(user_id, now):
+        logger.debug(
+            "🌙 Notification suppressed: user=%s type=%s reason=quiet_hours",
+            user_id,
+            notification_type,
+        )
         return False
-    return not _is_debounced(user_id, notification_type, now)
+    if _is_debounced(user_id, notification_type, now):
+        logger.debug(
+            "⏱ Notification suppressed: user=%s type=%s reason=debounce",
+            user_id,
+            notification_type,
+        )
+        return False
+    return True
 
 
 async def _notify_user(bot, user_id: int, text: str, reply_markup=None) -> None:
@@ -186,8 +217,9 @@ async def check_all_notifications(bot, state: dict) -> None:
                 )
                 _mark_sent(uid, "maintenance_soon", now)
 
-    # --- 5. Info: daily_report at 09:00 → all registered users ---
-    if now.hour == 9 and now.minute == 0:
+    # --- 5. Info: daily_report at 09:xx → all registered users ---
+    # Use a full-hour window (any minute in hour 9) — debounce prevents double-sends.
+    if now.hour == 9:
         for uid in all_user_ids:
             if _should_notify(uid, "daily_report", now):
                 await _notify_user(
@@ -199,8 +231,9 @@ async def check_all_notifications(bot, state: dict) -> None:
                 )
                 _mark_sent(uid, "daily_report", now)
 
-    # --- 6. Info: weekly_report on Monday at 09:00 → all registered users ---
-    if now.weekday() == 0 and now.hour == 9 and now.minute == 0:
+    # --- 6. Info: weekly_report on Monday at 09:xx → all registered users ---
+    # Use a full-hour window (any minute in hour 9 on Monday) — debounce prevents double-sends.
+    if now.weekday() == 0 and now.hour == 9:
         for uid in all_user_ids:
             if _should_notify(uid, "weekly_report", now):
                 await _notify_user(
