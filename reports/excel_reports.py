@@ -679,7 +679,8 @@ class ExcelReportGenerator:
             _write('I', sd['e'].get('end') or '—')
 
             hrs_val = day['work_hours'] if day['work_hours'] > 0 else None
-            _write('J', hrs_val, bold=(hrs_val is not None), num_fmt='0.00')
+            hrs_excel = hrs_val / 24 if hrs_val is not None else None
+            _write('J', hrs_excel, bold=(hrs_excel is not None), num_fmt='[h]:mm')
             _write('K', ', '.join(day['operators']) if day['operators'] else '—', align='left')
 
             # Fuel columns — with conditional color coding
@@ -749,7 +750,7 @@ class ExcelReportGenerator:
         for col_l in ('D', 'E', 'F', 'G', 'H', 'I', 'K', 'P', 'Q', 'R'):
             _tot(col_l, '')
 
-        _tot('J', round(total_hours_sum, 2), '0.00')
+        _tot('J', total_hours_sum / 24, '[h]:mm')
         _tot('L', '')
         _tot('M', '')
         _tot('N', round(total_consumed_sum, 1), '0.0')
@@ -883,7 +884,8 @@ class ExcelReportGenerator:
 
             _sw(1, day['date'])
             _sw(2, day['weekday_abbrev'])
-            _sw(3, day['work_hours'] if day['work_hours'] > 0 else None, '0.00')
+            hrs_day = day['work_hours'] / 24 if day['work_hours'] > 0 else None
+            _sw(3, hrs_day, '[h]:mm')
             _sw(4, day['morning_fuel'], '0.0')
             eve_c = _sw(5, day['evening_fuel'], '0.0')
             _sw(6, day['fuel_consumed'] if day['fuel_consumed'] > 0 else None, '0.0')

@@ -353,6 +353,140 @@ class TestDetailedReportWithData:
 
 
 @pytest.mark.skipif(not _OPENPYXL, reason="openpyxl not installed")
+class TestDetailedReportDurationFormat:
+    """Duration columns in the Detailed report must use [h]:mm format, not decimal hours."""
+
+    @pytest.fixture(autouse=True)
+    def _seed_shift(self):
+        """Insert an 8-hour morning shift on 2026-03-05 so column J has a real value."""
+        import database.db_api as db
+        try:
+            db.add_log('m_start', 'Tester', ts='2026-03-05 06:00:00', generator_id='main')
+            db.add_log('m_end',   'Tester', ts='2026-03-05 14:00:00', generator_id='main')
+        except Exception:
+            pass
+
+    def _wb(self):
+        return load_workbook(io.BytesIO(generate_excel_report('detailed', 30, year=2026, month=3)))
+
+    # -- Операційний журнал --------------------------------------------------
+
+    def test_col_j_data_row_uses_duration_format(self):
+        """Column J data cell with hours must use [h]:mm number format."""
+        wb = self._wb()
+        ws = wb['Операційний журнал']
+        # Day 5 is data row 5+4 = row 9 (DATA_START=5, day-1 is row 5)
+        cell = ws.cell(row=9, column=10)  # col J = 10
+        if cell.value is not None:
+            assert cell.number_format == '[h]:mm', (
+                f"Expected [h]:mm format for col J, got {cell.number_format!r}"
+            )
+
+    def test_col_j_seeded_value_is_fraction_of_day(self):
+        """An 8-hour shift must be stored as a duration value (openpyxl returns timedelta)."""
+        from datetime import timedelta
+        wb = self._wb()
+        ws = wb['Операційний журнал']
+        cell = ws.cell(row=9, column=10)  # row 9 = day 5, col J = 10
+        if cell.value is not None:
+            # openpyxl reads [h]:mm cells back as timedelta
+            assert isinstance(cell.value, timedelta), (
+                f"Expected timedelta for 8h shift, got {type(cell.value).__name__}: {cell.value!r}"
+            )
+            assert cell.value == timedelta(hours=8), (
+                f"Expected timedelta(hours=8), got {cell.value!r}"
+            )
+
+    def test_totals_row_col_j_uses_duration_format(self):
+        """Totals row column J must use [h]:mm format."""
+        wb = self._wb()
+        ws = wb['Операційний журнал']
+        # Find the totals row by locating 'ПІДСУМОК МІСЯЦЯ'
+        totals_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=1).value == 'ПІДСУМОК МІСЯЦЯ':
+                totals_row = r
+                break
+        assert totals_row is not None, "'ПІДСУМОК МІСЯЦЯ' row not found"
+        cell = ws.cell(row=totals_row, column=10)  # col J = 10
+        assert cell.number_format == '[h]:mm', (
+            f"Expected [h]:mm format for totals row col J, got {cell.number_format!r}"
+        )
+
+    def test_totals_row_col_j_value_is_fraction_of_day(self):
+        """Totals row column J must store the sum of hours as a duration value."""
+        from datetime import timedelta
+        wb = self._wb()
+        ws = wb['Операційний журнал']
+        totals_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=1).value == 'ПІДСУМОК МІСЯЦЯ':
+                totals_row = r
+                break
+        assert totals_row is not None
+        cell = ws.cell(row=totals_row, column=10)
+        # openpyxl reads [h]:mm cells back as timedelta; seeded 8 hours → timedelta >= 8h
+        assert isinstance(cell.value, timedelta), (
+            f"Expected timedelta for totals col J, got {type(cell.value).__name__}: {cell.value!r}"
+        )
+        assert cell.value >= timedelta(hours=8)
+
+    # -- Зведення місяця -----------------------------------------------------
+
+    def test_summary_sheet_hours_col_uses_duration_format(self):
+        """The Год. column (col 3) in the daily summary table must use [h]:mm format."""
+        wb = self._wb()
+        ws = wb['Зведення місяця']
+        # Find the daily summary table header row by locating 'Год.' header
+        hours_col_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=3).value == 'Год.':
+                hours_col_row = r
+                break
+        assert hours_col_row is not None, "'Год.' header not found in Зведення місяця"
+        # Day 5 data row is hours_col_row + 5
+        cell = ws.cell(row=hours_col_row + 5, column=3)
+        if cell.value is not None:
+            assert cell.number_format == '[h]:mm', (
+                f"Expected [h]:mm in Зведення місяця Год. col, got {cell.number_format!r}"
+            )
+
+    def test_summary_sheet_hours_value_is_fraction_of_day(self):
+        """Day 5 Год. cell in Зведення місяця must store the 8h shift as a duration."""
+        from datetime import timedelta
+        wb = self._wb()
+        ws = wb['Зведення місяця']
+        hours_col_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=3).value == 'Год.':
+                hours_col_row = r
+                break
+        assert hours_col_row is not None
+        cell = ws.cell(row=hours_col_row + 5, column=3)
+        if cell.value is not None:
+            # openpyxl reads [h]:mm cells back as timedelta
+            assert isinstance(cell.value, timedelta), (
+                f"Expected timedelta in Зведення місяця, got {type(cell.value).__name__}: {cell.value!r}"
+            )
+            assert cell.value == timedelta(hours=8), (
+                f"Expected timedelta(hours=8), got {cell.value!r}"
+            )
+
+    # -- Fuel columns stay numeric -------------------------------------------
+
+    def test_fuel_columns_do_not_use_duration_format(self):
+        """Fuel columns L-P in Операційний журнал must NOT use [h]:mm format."""
+        wb = self._wb()
+        ws = wb['Операційний журнал']
+        # Check a data row that has fuel data (use day 5 = row 9)
+        for col_idx in range(12, 17):  # columns L=12, M=13, N=14, O=15, P=16
+            cell = ws.cell(row=9, column=col_idx)
+            assert cell.number_format != '[h]:mm', (
+                f"Fuel column {col_idx} must not use [h]:mm, got {cell.number_format!r}"
+            )
+
+
+@pytest.mark.skipif(not _OPENPYXL, reason="openpyxl not installed")
 class TestDetailedReportOpeningFuelSeed:
     """Detailed report must seed day-1 fuel balance from historical correction events or Sheets K2.
 
