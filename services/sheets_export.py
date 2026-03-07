@@ -19,6 +19,12 @@
   - Sheets має дані, App порожнє → пропустити (зберігаємо Sheets)
   - Обидва мають однакові дані   → пропустити (синхронізовано)
   - Обидва мають різні дані      → conflict (потрібне явне рішення)
+
+ВАЖЛИВО — бізнес-правило:
+  Google Sheets sync призначений ВИКЛЮЧНО для основного генератора
+  (generator_id = 'main').  Дані аварійного генератора ніколи не
+  потрапляють до Sheets: не створюють нових рядків, не впливають на
+  safe_updates, конфлікти, apply чи preview_version.
 """
 
 import hashlib
@@ -35,6 +41,14 @@ logger = logging.getLogger(__name__)
 
 
 _MAX_COL = 27  # A..AA (використовуємо тільки частину колонок)
+
+# ---------------------------------------------------------------------------
+# Business rule: Google Sheets sync is for the MAIN generator only.
+# Emergency generator data (generator_id != MAIN_GENERATOR_ID) is excluded
+# from all Sheets sync operations — new rows, safe_updates, conflicts, apply,
+# and preview_version — by design and must never be written to Google Sheets.
+# ---------------------------------------------------------------------------
+MAIN_GENERATOR_ID = "main"
 
 # ---------------------------------------------------------------------------
 # SYNC_FIELDS: ordered list of (field_name, zero-based_col_index, col_letter)
@@ -166,6 +180,10 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     """Групує логи по датах для експорту в основну вкладку.
 
     Якщо from_date задано, залишаються тільки дні >= from_date.
+
+    Google Sheets sync — тільки для основного генератора (generator_id =
+    MAIN_GENERATOR_ID).  Записи аварійного генератора повністю ігноруються
+    цим пайплайном: вони ніколи не потрапляють до Sheets.
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -173,8 +191,9 @@ def _aggregate_logs_by_date(from_date: str | None = None):
     cur.execute("""
         SELECT event_type, timestamp, user_name, value, driver_name, receipt_number
         FROM logs
+        WHERE generator_id = ?
         ORDER BY timestamp ASC
-    """)
+    """, (MAIN_GENERATOR_ID,))
     rows = cur.fetchall()
     conn.close()
 
