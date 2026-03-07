@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="ua.imero.servicedesk">
+
+    <!-- Internet permission is required to load the PWA -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+        Declare which browsers/apps this app may query for TWA support.
+        Only HTTPS schemes are needed; cleartext is disabled globally.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ServiceDesk"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false">
+
+        <!-- Splash screen shown while Chrome / WebView initialises -->
+        <activity
+            android:name=".SplashActivity"
+            android:theme="@style/Theme.ServiceDesk.Splash"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            MainActivity launches the TWA or falls back to a WebView.
+            screenOrientation: portrait — prevents layout issues on the SPA.
+            configChanges: keeps the activity alive on keyboard/orientation
+            changes so the WebView state is preserved.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:exported="false">
+        </activity>
+
+        <!--
+            Digital Asset Links metadata.
+            Required by androidbrowserhelper to locate the assetlinks.json
+            file for TWA origin verification.
+        -->
+        <meta-data
+            android:name="asset_statements"
+            android:value="@string/asset_statements" />
+
+    </application>
+
+</manifest>
