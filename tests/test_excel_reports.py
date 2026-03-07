@@ -354,7 +354,7 @@ class TestDetailedReportWithData:
 
 @pytest.mark.skipif(not _OPENPYXL, reason="openpyxl not installed")
 class TestDetailedReportOpeningFuelSeed:
-    """Detailed report must seed day-1 fuel balance from the DB current_fuel state.
+    """Detailed report must seed day-1 fuel balance from historical correction events or Sheets K2.
 
     Column mapping in «Операційний журнал»:
         L (col 12) = morning fuel  «Пал.⬆, л»
@@ -371,11 +371,13 @@ class TestDetailedReportOpeningFuelSeed:
 
     # ------------------------------------------------------------------ tests
 
-    def test_first_day_uses_db_opening_fuel_when_no_events(self):
-        """Day 1 morning fuel must equal the DB current_fuel when no in-month events exist."""
+    def test_first_day_uses_pre_month_correction_when_no_in_month_events(self):
+        """Day 1 morning fuel must equal the latest pre-month corr_fuel_set value."""
         import database.db_api as db
 
-        db.set_state("current_fuel", "69.0")
+        # Correction event in February — before March report month
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-02-28 20:00:00', generator_id='main')
 
         result = generate_excel_report('detailed', 30, year=2026, month=3)
         wb = load_workbook(io.BytesIO(result))
@@ -386,16 +388,18 @@ class TestDetailedReportOpeningFuelSeed:
         assert morning_fuel == 69.0, (
             f"Expected day-1 morning fuel 69.0, got {morning_fuel!r}"
         )
-        # No events → evening == morning (no consumption, no refill)
+        # No in-month events → evening == morning (no consumption, no refill)
         assert evening_fuel == 69.0, (
             f"Expected day-1 evening fuel 69.0, got {evening_fuel!r}"
         )
 
     def test_first_day_evening_fuel_accounts_for_refill_and_consumption(self):
-        """Day-1 evening fuel = DB opening + refill − consumed."""
+        """Day-1 evening fuel = historical opening + refill − consumed."""
         import database.db_api as db
 
-        db.set_state("current_fuel", "50.0")
+        # Pre-month correction seeds the opening balance
+        db.add_log('corr_fuel_set', 'Admin', val='50.0',
+                   ts='2026-02-25 18:00:00', generator_id='main')
 
         # 4-hour morning shift + 30 L refill on day 1 of March 2026
         fuel_rate = db.get_fuel_consumption_rate()
@@ -423,13 +427,15 @@ class TestDetailedReportOpeningFuelSeed:
             f"Expected day-1 evening fuel {expected_evening}, got {evening_fuel!r}"
         )
 
-    def test_manual_correction_overrides_db_seed_on_day1(self):
-        """A corr_fuel_set event on day 1 must take priority over the DB opening fuel."""
+    def test_in_month_correction_overrides_pre_month_seed(self):
+        """An in-month corr_fuel_set event on day 1 must take priority over the pre-month seed."""
         import database.db_api as db
 
-        db.set_state("current_fuel", "69.0")
+        # Pre-month seed
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-02-28 20:00:00', generator_id='main')
 
-        # Manual fuel correction: authoritative evening value = 100
+        # In-month manual fuel correction: authoritative evening value = 100
         db.add_log('corr_fuel_set', 'Admin', val='100',
                    ts='2026-03-01 20:00:00', generator_id='main')
 
@@ -440,16 +446,17 @@ class TestDetailedReportOpeningFuelSeed:
         _, evening_fuel = self._get_fuel_cols(ws, row=5)
 
         assert evening_fuel == 100.0, (
-            f"Manual correction should set evening fuel to 100.0, got {evening_fuel!r}"
+            f"In-month correction should set evening fuel to 100.0, got {evening_fuel!r}"
         )
 
     def test_subsequent_days_propagate_from_day1_evening(self):
-        """Day 2 morning fuel must equal day 1 evening fuel (DB seed propagates forward)."""
+        """Day 2 morning fuel must equal day 1 evening fuel (historical seed propagates forward)."""
         import database.db_api as db
 
-        db.set_state("current_fuel", "69.0")
+        # Pre-month seed — no in-month events
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-02-28 20:00:00', generator_id='main')
 
-        # No events → day 1 evening = 69.0; day 2 morning should also be 69.0
         result = generate_excel_report('detailed', 30, year=2026, month=3)
         wb = load_workbook(io.BytesIO(result))
         ws = wb['Операційний журнал']
@@ -462,13 +469,9 @@ class TestDetailedReportOpeningFuelSeed:
             f"Day 2 morning fuel should equal day 1 evening (69.0), got {day2_morning!r}"
         )
 
-    def test_zero_db_fuel_falls_back_to_no_balance(self):
-        """When DB current_fuel is 0 (default), day 1 should show '—' (no known balance)."""
-        import database.db_api as db
-
-        # Default DB: current_fuel = 0.0 → treated as "unknown"
-        db.set_state("current_fuel", "0.0")
-
+    def test_no_historical_source_shows_placeholder(self):
+        """When no pre-month correction event and no Sheets value exist, day 1 shows '—'."""
+        # No logs at all — nothing to seed from
         result = generate_excel_report('detailed', 30, year=2026, month=3)
         wb = load_workbook(io.BytesIO(result))
         ws = wb['Операційний журнал']
@@ -476,10 +479,98 @@ class TestDetailedReportOpeningFuelSeed:
         morning_fuel, evening_fuel = self._get_fuel_cols(ws, row=5)
 
         assert morning_fuel == '—', (
-            f"Expected '—' when DB fuel=0 and no events, got {morning_fuel!r}"
+            f"Expected '—' when no historical source exists, got {morning_fuel!r}"
         )
         assert evening_fuel == '—', (
-            f"Expected '—' when DB fuel=0 and no events, got {evening_fuel!r}"
+            f"Expected '—' when no historical source exists, got {evening_fuel!r}"
+        )
+
+    def test_latest_pre_month_correction_wins_when_multiple_exist(self):
+        """When multiple pre-month corr_fuel_set events exist, the most recent one wins."""
+        import database.db_api as db
+
+        # Older correction — should NOT be used
+        db.add_log('corr_fuel_set', 'Admin', val='30.0',
+                   ts='2026-01-15 10:00:00', generator_id='main')
+        # More recent correction — should be used
+        db.add_log('corr_fuel_set', 'Admin', val='80.0',
+                   ts='2026-02-20 18:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, _ = self._get_fuel_cols(ws, row=5)
+
+        assert morning_fuel == 80.0, (
+            f"Expected latest pre-month correction (80.0) to win, got {morning_fuel!r}"
+        )
+
+    def test_in_month_correction_not_used_as_pre_month_seed(self):
+        """An in-month corr_fuel_set event must NOT be picked up by _resolve_opening_fuel.
+
+        The opening-balance resolver only looks at events BEFORE the month start.
+        An in-month correction is handled by the per-day propagation logic instead.
+        """
+        import database.db_api as db
+
+        # Correction on day 2 of the month — this is purely in-month.
+        # Day 1 has no pre-month source and no in-day correction, so it must show '—'.
+        db.add_log('corr_fuel_set', 'Admin', val='90.0',
+                   ts='2026-03-02 20:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        day1_morning, _ = self._get_fuel_cols(ws, row=5)
+
+        # No pre-month event → day 1 morning must be '—' (in-month event on day 2 is irrelevant)
+        assert day1_morning == '—', (
+            f"In-month correction must not seed morning fuel for day 1, got {day1_morning!r}"
+        )
+
+    def test_opening_fuel_from_google_sheets_k2_fallback(self):
+        """When no pre-month correction exists, opening fuel falls back to Google Sheets K2."""
+        from unittest.mock import MagicMock, patch
+
+        mock_cell = MagicMock()
+        mock_cell.value = '75.5'
+        mock_ws = MagicMock()
+        mock_ws.cell.return_value = mock_cell
+
+        mock_sheets = MagicMock()
+        mock_sheets.is_available.return_value = True
+        mock_sheets.get_worksheet.return_value = mock_ws
+
+        with patch('app.integrations.google_sheets.GoogleSheetsClient', return_value=mock_sheets):
+            result = generate_excel_report('detailed', 30, year=2026, month=3)
+
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, _ = self._get_fuel_cols(ws, row=5)
+
+        assert morning_fuel == 75.5, (
+            f"Expected Google Sheets K2 fallback value 75.5, got {morning_fuel!r}"
+        )
+
+    def test_live_current_fuel_state_not_used_as_opening_balance(self):
+        """Setting db current_fuel state alone must NOT affect the detailed report opening balance."""
+        import database.db_api as db
+
+        # Set live state only — no historical correction, no Sheets
+        db.set_state("current_fuel", "999.0")
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        morning_fuel, _ = self._get_fuel_cols(ws, row=5)
+
+        # Without historical sources the report shows '—'
+        assert morning_fuel == '—', (
+            f"Expected '—' without historical source, got {morning_fuel!r}"
         )
 
     def test_other_report_types_unaffected_by_db_fuel(self):

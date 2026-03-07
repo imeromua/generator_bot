@@ -69,6 +69,7 @@ from database.api.logs import (
     mark_synced,
     get_logs_for_period,
     get_refills_for_date,
+    get_latest_corr_fuel_before,
 )
 from database.api.maintenance import (
     update_hours,
@@ -175,6 +176,7 @@ __all__ = [
     "mark_synced",
     "get_logs_for_period",
     "get_refills_for_date",
+    "get_latest_corr_fuel_before",
     # maintenance
     "update_hours",
     "set_total_hours",

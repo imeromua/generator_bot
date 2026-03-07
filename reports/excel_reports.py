@@ -303,6 +303,45 @@ class ExcelReportGenerator:
         self._fill_maintenance_sheet(ws_maint, gen_id, gen_name)
 
     # ------------------------------------------------------------------
+    # Detailed report: opening fuel balance resolver
+    # ------------------------------------------------------------------
+
+    def _resolve_opening_fuel(self, month_start_ts: str, gen_id: str) -> "float | None":
+        """Resolve the historical opening fuel balance for the first day of a report month.
+
+        Priority:
+        A) Latest ``corr_fuel_set`` event with timestamp **before** *month_start_ts* —
+           authoritative historical anchor stored in the system log.
+        B) Google Sheets cell K2 — monthly opening remainder as configured in the
+           source-of-truth spreadsheet.
+        C) ``None`` — balance unknown; the report will render a placeholder (``'—'``).
+
+        The live ``db.get_state()["current_fuel"]`` value is intentionally **not** used
+        because it reflects the current balance at report-generation time, not the
+        historical balance at the start of the requested month.
+        """
+        # A) Historical correction event
+        val = db.get_latest_corr_fuel_before(month_start_ts, gen_id)
+        if val is not None and val > 0:
+            return val
+
+        # B) Google Sheets K2 fallback
+        try:
+            from app.integrations.google_sheets import GoogleSheetsClient
+            sheets = GoogleSheetsClient()
+            if sheets.is_available():
+                ws = sheets.get_worksheet()
+                raw = ws.cell(2, 11).value  # Row 2, Column K (11) = opening remainder
+                if raw is not None:
+                    parsed = float(str(raw).replace(',', '.').strip())
+                    if parsed > 0:
+                        return parsed
+        except Exception:
+            logger.warning("Failed to read opening fuel from Google Sheets K2", exc_info=True)
+
+        return None
+
+    # ------------------------------------------------------------------
     # Detailed report: rich per-day data builder
     # ------------------------------------------------------------------
 
@@ -358,18 +397,10 @@ class ExcelReportGenerator:
                 except Exception:
                     pass
 
-        # Seed the opening fuel balance from the DB state so that the first
-        # day of the report starts from the known fuel level rather than None.
-        # Individual day corrections (corr_fuel_set events) still take priority.
-        initial_fuel: float | None = None
-        try:
-            state_fuel = db.get_state().get("current_fuel")
-            if state_fuel is not None:
-                parsed = float(state_fuel)
-                if parsed > 0:
-                    initial_fuel = parsed
-        except Exception:
-            pass
+        # Seed the opening fuel balance from historical sources.
+        # Priority: (A) latest corr_fuel_set event before month start → (B) Google Sheets K2 → (C) None.
+        month_start_ts = start_dt.strftime('%Y-%m-%d %H:%M:%S')
+        initial_fuel = self._resolve_opening_fuel(month_start_ts, gen_id)
 
         # Generate one record for every calendar day in the month
         prev_evening_fuel: float | None = initial_fuel

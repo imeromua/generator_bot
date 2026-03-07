@@ -478,3 +478,47 @@ def get_refills_for_date(date_str: str, generator_id: str | None = None):
                 ORDER BY timestamp ASC
             """
             return conn.execute(query, (f"{date_str}%",)).fetchall()
+
+
+def get_latest_corr_fuel_before(before_ts: str, generator_id: str | None = None):
+    """Return the fuel value of the latest ``corr_fuel_set`` event with a timestamp
+    strictly before *before_ts*, or ``None`` if no such record exists.
+
+    This is used to seed the opening fuel balance for the first day of a report
+    month from a historically accurate anchor rather than from live state.
+
+    Args:
+        before_ts: exclusive upper bound timestamp in ``'YYYY-MM-DD HH:MM:SS'`` format,
+            typically the first instant of the report month, e.g. ``'2026-03-01 00:00:00'``.
+        generator_id: filter by generator (``'main'``, ``'emergency'``, or ``None`` for all).
+
+    Returns:
+        ``float`` fuel value when a matching record is found, ``None`` otherwise.
+    """
+    with get_connection() as conn:
+        if generator_id:
+            query = """
+                SELECT value FROM logs
+                WHERE event_type = 'corr_fuel_set'
+                  AND timestamp < ?
+                  AND generator_id = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+            """
+            row = conn.execute(query, (before_ts, generator_id)).fetchone()
+        else:
+            query = """
+                SELECT value FROM logs
+                WHERE event_type = 'corr_fuel_set'
+                  AND timestamp < ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+            """
+            row = conn.execute(query, (before_ts,)).fetchone()
+    if row is None:
+        return None
+    try:
+        return float(row[0])
+    except (TypeError, ValueError):
+        return None
+
