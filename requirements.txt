@@ -24,5 +24,9 @@ redis>=5.0
 scikit-learn>=1.3
 numpy>=1.26
 
+# --- Web auth ---
+passlib[bcrypt]>=1.7.4
+PyJWT>=2.10.1
+
 # --- Testing ---
 httpx>=0.24.0
