@@ -404,7 +404,6 @@ async def api_analytics_forecast(request: Request):
         return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
     try:
         from utils.time import now_kiev
-        from database.api.generator import get_generator_stats
 
         now = now_kiev()
         # Тренуємо на останніх 60 днях
@@ -421,13 +420,10 @@ async def api_analytics_forecast(request: Request):
 
         total_forecast_fuel = sum(f["predicted_fuel"] for f in forecast)
 
-        # ТО
-        main_stats = get_generator_stats("main")
-        oil_hours = main_stats.get("last_oil_change", 0)
-        oil_interval = getattr(config, "OIL_CHANGE_INTERVAL", 250)
-        spark_interval = getattr(config, "SPARK_CHANGE_INTERVAL", 500)
-        oil_remaining = max(0, oil_interval - oil_hours)
-        spark_remaining = max(0, spark_interval - main_stats.get("last_spark_change", 0))
+        # ТО — використовуємо спільний хелпер для консистентного розрахунку залишку
+        maint_stats = db.get_maintenance_stats("main")
+        oil_remaining = maint_stats["oil_needed"]
+        spark_remaining = maint_stats["spark_needed"]
 
         avg_daily_hours = sum(d["work_hours"] for d in daily[-7:]) / 7 if len(daily) >= 7 else _DEFAULT_AVG_DAILY_HOURS
         if avg_daily_hours < _MIN_REALISTIC_AVG_DAILY_HOURS:

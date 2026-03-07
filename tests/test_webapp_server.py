@@ -328,6 +328,137 @@ class TestApiMaintenance:
         assert "spark_interval" in stats
         assert "maintenance_interval" in stats
 
+    def _setup_admin(self, monkeypatch):
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+
+    def test_oil_countdown_decreases_after_maintenance(self, client, monkeypatch):
+        """Oil remaining countdown must decrease after maintenance is performed."""
+        self._setup_admin(monkeypatch)
+        # Simulate: oil changed at 50h, current total = 75h, interval = 100h
+        # Expected remaining = 100 - (75 - 50) = 75h
+        db.set_state("last_oil_change", "50.0")
+        db.set_state("total_hours", "75.0")
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 200
+        stats = resp.json()["stats"]
+        assert stats["oil_needed"] == pytest.approx(75.0, abs=0.1)
+
+    def test_spark_countdown_decreases_after_maintenance(self, client, monkeypatch):
+        """Spark remaining countdown must decrease after maintenance is performed."""
+        self._setup_admin(monkeypatch)
+        # Simulate: spark changed at 60h, current total = 90h, interval = 100h
+        # Expected remaining = 100 - (90 - 60) = 70h
+        db.set_state("last_spark_change", "60.0")
+        db.set_state("total_hours", "90.0")
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 200
+        stats = resp.json()["stats"]
+        assert stats["spark_needed"] == pytest.approx(70.0, abs=0.1)
+
+    def test_regression_315h_maintenance_316h06_current(self, client, monkeypatch):
+        """Regression: maintenance at 315:00, current 316:06, interval 100h => ~98:54 remaining."""
+        self._setup_admin(monkeypatch)
+        # 316:06 = 316 + 6/60 hours
+        total_h = 316 + 6 / 60  # ≈ 316.1
+        db.set_state("last_oil_change", "315.0")
+        db.set_state("last_spark_change", "315.0")
+        db.set_state("last_maintenance", "315.0")
+        db.set_state("total_hours", str(total_h))
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 200
+        stats = resp.json()["stats"]
+        expected_remaining = 100.0 - (total_h - 315.0)  # ≈ 98.9
+        assert stats["oil_needed"] == pytest.approx(expected_remaining, abs=0.1)
+        assert stats["spark_needed"] == pytest.approx(expected_remaining, abs=0.1)
+        # Both should be well below 100h (not stuck at the full interval value)
+        assert stats["oil_needed"] < 99.5
+        assert stats["spark_needed"] < 99.5
+
+    def test_planned_maintenance_countdown_preserved(self, client, monkeypatch):
+        """Planned maintenance countdown is not affected by the oil/spark fix."""
+        self._setup_admin(monkeypatch)
+        db.set_state("last_maintenance", "100.0")
+        db.set_state("total_hours", "250.0")
+        resp = client.get("/api/maintenance")
+        assert resp.status_code == 200
+        stats = resp.json()["stats"]
+        # 200h interval, 150h elapsed since 100h → 50h remaining
+        assert stats["maintenance_needed"] == pytest.approx(50.0, abs=0.1)
+
+
+class TestForecastMaintenanceCountdown:
+    """Tests for oil/spark countdown values in /api/analytics/forecast."""
+
+    def _setup_admin(self, monkeypatch):
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+
+    def test_forecast_maintenance_oil_countdown_after_change(self, client, monkeypatch):
+        """Forecast oil_remaining_hours must reflect elapsed hours since last change."""
+        self._setup_admin(monkeypatch)
+        # oil changed at 50h, current = 75h → remaining = 100 - 25 = 75h
+        db.set_state("last_oil_change", "50.0")
+        db.set_state("total_hours", "75.0")
+        resp = client.get("/api/analytics/forecast")
+        assert resp.status_code == 200
+        mnt = resp.json()["maintenance"]
+        assert mnt["oil_remaining_hours"] == pytest.approx(75.0, abs=0.1)
+
+    def test_forecast_maintenance_spark_countdown_after_change(self, client, monkeypatch):
+        """Forecast spark_remaining_hours must reflect elapsed hours since last change."""
+        self._setup_admin(monkeypatch)
+        # spark changed at 60h, current = 90h → remaining = 100 - 30 = 70h
+        db.set_state("last_spark_change", "60.0")
+        db.set_state("total_hours", "90.0")
+        resp = client.get("/api/analytics/forecast")
+        assert resp.status_code == 200
+        mnt = resp.json()["maintenance"]
+        assert mnt["spark_remaining_hours"] == pytest.approx(70.0, abs=0.1)
+
+    def test_forecast_oil_spark_consistent_with_maintenance_endpoint(self, client, monkeypatch):
+        """Forecast and maintenance endpoints must return the same oil/spark remaining values."""
+        self._setup_admin(monkeypatch)
+        total_h = 316 + 6 / 60  # 316:06
+        db.set_state("last_oil_change", "315.0")
+        db.set_state("last_spark_change", "315.0")
+        db.set_state("total_hours", str(total_h))
+
+        maint_resp = client.get("/api/maintenance")
+        forecast_resp = client.get("/api/analytics/forecast")
+
+        assert maint_resp.status_code == 200
+        assert forecast_resp.status_code == 200
+
+        maint_stats = maint_resp.json()["stats"]
+        forecast_mnt = forecast_resp.json()["maintenance"]
+
+        assert maint_stats["oil_needed"] == pytest.approx(forecast_mnt["oil_remaining_hours"], abs=0.1)
+        assert maint_stats["spark_needed"] == pytest.approx(forecast_mnt["spark_remaining_hours"], abs=0.1)
+
+    def test_forecast_regression_315h_maintenance_316h06_current(self, client, monkeypatch):
+        """Regression: forecast shows ~98:54 remaining, not 100:00, after maintenance at 315h."""
+        self._setup_admin(monkeypatch)
+        total_h = 316 + 6 / 60  # ≈ 316.1
+        db.set_state("last_oil_change", "315.0")
+        db.set_state("last_spark_change", "315.0")
+        db.set_state("total_hours", str(total_h))
+        resp = client.get("/api/analytics/forecast")
+        assert resp.status_code == 200
+        mnt = resp.json()["maintenance"]
+        expected = 100.0 - (total_h - 315.0)  # ≈ 98.9
+        assert mnt["oil_remaining_hours"] == pytest.approx(expected, abs=0.1)
+        assert mnt["spark_remaining_hours"] == pytest.approx(expected, abs=0.1)
+        # Must not show the full interval (100:00) - that would be the bug
+        assert mnt["oil_remaining_hours"] < 99.5
+        assert mnt["spark_remaining_hours"] < 99.5
+
 
 # ---------------------------------------------------------------------------
 # Telegram initData validation
