@@ -719,3 +719,193 @@ class TestDetailedReportOpeningFuelSeed:
                 f"Report type '{rtype}' failed when DB fuel is set"
             )
 
+
+@pytest.mark.skipif(not _OPENPYXL, reason="openpyxl not installed")
+class TestDetailedReportFuelCorrectionNotes:
+    """Fuel correction events must appear in Примітки and propagate the corrected balance.
+
+    Column mapping in «Операційний журнал»:
+        L (col 12) = morning fuel  «Пал.⬆, л»
+        M (col 13) = evening fuel  «Пал.⬇, л»
+        R (col 18) = notes         «Примітки»
+    Data starts at row 5 (DATA_START=5).
+
+    In «Зведення місяця» the per-day summary table has:
+        col 8 = «Примітки»
+    """
+
+    # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _get_ops_row(ws, day_offset: int = 0):
+        """Return (morning_fuel, evening_fuel, notes) for data row 5 + day_offset."""
+        row = 5 + day_offset
+        morning = ws.cell(row=row, column=12).value
+        evening = ws.cell(row=row, column=13).value
+        notes = ws.cell(row=row, column=18).value
+        return morning, evening, notes
+
+    @staticmethod
+    def _find_summary_notes(ws, day_offset: int = 0):
+        """Return the notes cell value from the per-day summary table in Зведення місяця."""
+        # Locate the «Дата» header row that anchors the daily table
+        tbl_hdr_row = None
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=1).value == 'Дата':
+                tbl_hdr_row = r
+                break
+        assert tbl_hdr_row is not None, "'Дата' header not found in Зведення місяця"
+        data_row = tbl_hdr_row + 1 + day_offset
+        return ws.cell(row=data_row, column=8).value
+
+    # ------------------------------------------------------------------ tests
+
+    def test_corr_fuel_note_appears_in_primiky(self):
+        """Day with corr_fuel_set must include a correction note in Примітки."""
+        import database.db_api as db
+
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-03-05 14:32:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        # Day 5 = row offset 4 (row 9)
+        _, _, notes = self._get_ops_row(ws, day_offset=4)
+
+        assert notes is not None and 'Корекція палива' in notes, (
+            f"Expected correction note in Примітки, got {notes!r}"
+        )
+        assert '69.0' in notes, (
+            f"Expected correction value 69.0 in note, got {notes!r}"
+        )
+        assert '14:32' in notes, (
+            f"Expected correction time 14:32 in note, got {notes!r}"
+        )
+
+    def test_corr_fuel_note_without_timestamp_fallback(self):
+        """If corr_fuel_ts cannot be captured, the note still appears without a time."""
+        # Simulate a correction by using _build_detailed_daily_data directly
+        from reports.excel_reports import ExcelReportGenerator
+        import database.db_api as db
+
+        db.add_log('corr_fuel_set', 'Admin', val='55.0',
+                   ts='2026-03-03 09:00:00', generator_id='main')
+
+        gen = ExcelReportGenerator()
+        start_dt, end_dt = gen._month_range(2026, 3)
+        data = gen._build_detailed_daily_data(start_dt, end_dt, 'main')
+
+        day3 = data[2]  # day index 2 = March 3
+        assert 'Корекція палива' in day3['notes'], (
+            f"Expected correction note for day 3, got {day3['notes']!r}"
+        )
+        assert '55.0' in day3['notes'], (
+            f"Expected correction value 55.0 in day 3 note, got {day3['notes']!r}"
+        )
+
+    def test_corr_fuel_note_and_low_fuel_warning_combine(self):
+        """When a correction leaves fuel below 40 L both pieces of info must appear in notes."""
+        import database.db_api as db
+
+        # Correction to a value that triggers a low-fuel warning (< 40 L)
+        db.add_log('corr_fuel_set', 'Admin', val='25.0',
+                   ts='2026-03-10 18:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        # Day 10 = row offset 9 (row 14)
+        _, _, notes = self._get_ops_row(ws, day_offset=9)
+
+        assert notes is not None, "Notes must not be None on correction day"
+        assert 'Корекція палива' in notes, (
+            f"Correction note missing, got {notes!r}"
+        )
+        assert '⚠' in notes, (
+            f"Low-fuel warning missing from combined note, got {notes!r}"
+        )
+
+    def test_corr_fuel_note_and_critical_warning_combine(self):
+        """When a correction leaves fuel critically low (< 15 L) both pieces appear in notes."""
+        import database.db_api as db
+
+        db.add_log('corr_fuel_set', 'Admin', val='10.0',
+                   ts='2026-03-07 20:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        # Day 7 = row offset 6 (row 11)
+        _, _, notes = self._get_ops_row(ws, day_offset=6)
+
+        assert notes is not None, "Notes must not be None on correction day"
+        assert 'Корекція палива' in notes, (
+            f"Correction note missing, got {notes!r}"
+        )
+        assert '⚠ КРИТИЧНО' in notes, (
+            f"Critical warning missing from combined note, got {notes!r}"
+        )
+
+    def test_day_after_correction_morning_fuel_equals_corrected_evening(self):
+        """Next day's morning fuel must equal the corrected evening balance from the previous day."""
+        import database.db_api as db
+
+        db.add_log('corr_fuel_set', 'Admin', val='80.0',
+                   ts='2026-03-15 21:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        # Day 15 = row offset 14 (row 19); Day 16 = row offset 15 (row 20)
+        _, day15_evening, _ = self._get_ops_row(ws, day_offset=14)
+        day16_morning, _, _ = self._get_ops_row(ws, day_offset=15)
+
+        assert day15_evening == 80.0, (
+            f"Day 15 evening must be corrected value 80.0, got {day15_evening!r}"
+        )
+        assert day16_morning == 80.0, (
+            f"Day 16 morning must equal day 15 corrected evening (80.0), got {day16_morning!r}"
+        )
+
+    def test_correction_note_appears_in_summary_sheet(self):
+        """Correction note in Примітки must also be visible in Зведення місяця summary table."""
+        import database.db_api as db
+
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-03-12 11:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Зведення місяця']
+
+        # Day 12 = offset 11 in the summary table
+        notes = self._find_summary_notes(ws, day_offset=11)
+
+        assert notes is not None and 'Корекція палива' in notes, (
+            f"Expected correction note in Зведення місяця for day 12, got {notes!r}"
+        )
+
+    def test_correction_note_absent_on_non_correction_day(self):
+        """Days without a corr_fuel_set event must NOT contain 'Корекція палива' in notes."""
+        import database.db_api as db
+
+        # Correction only on day 5 — day 1 must have no correction note
+        db.add_log('corr_fuel_set', 'Admin', val='69.0',
+                   ts='2026-03-05 14:00:00', generator_id='main')
+
+        result = generate_excel_report('detailed', 30, year=2026, month=3)
+        wb = load_workbook(io.BytesIO(result))
+        ws = wb['Операційний журнал']
+
+        # Day 1 = row offset 0 (row 5)
+        _, _, notes_day1 = self._get_ops_row(ws, day_offset=0)
+
+        assert 'Корекція палива' not in (notes_day1 or ''), (
+            f"Day 1 must not have a correction note, got {notes_day1!r}"
+        )
+

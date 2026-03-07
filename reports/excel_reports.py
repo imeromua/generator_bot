@@ -359,6 +359,7 @@ class ExcelReportGenerator:
             'shifts': {'m': {}, 'd': {}, 'e': {}, 'x': {}},
             'refills': [],
             'corr_fuel': None,
+            'corr_fuel_ts': None,
         })
 
         for row_data in logs:
@@ -394,6 +395,7 @@ class ExcelReportGenerator:
             elif event_type == 'corr_fuel_set':
                 try:
                     raw['corr_fuel'] = float(value or 0)
+                    raw['corr_fuel_ts'] = ts.strftime('%H:%M')
                 except Exception:
                     pass
 
@@ -414,6 +416,7 @@ class ExcelReportGenerator:
                 'shifts': {'m': {}, 'd': {}, 'e': {}, 'x': {}},
                 'refills': [],
                 'corr_fuel': None,
+                'corr_fuel_ts': None,
             }
 
             # Compute shift durations and collect personnel
@@ -476,12 +479,24 @@ class ExcelReportGenerator:
             fuel_rate_actual = round(fuel_consumed / work_hours, 2) if work_hours > 0 else None
 
             # Auto-generate warning notes
-            notes = ''
+            notes_parts = []
+
+            # Fuel correction note (include time when available)
+            if corr_fuel is not None:
+                corr_ts = raw.get('corr_fuel_ts')
+                if corr_ts:
+                    notes_parts.append(f"Корекція палива {corr_ts}: {corr_fuel:.1f} л")
+                else:
+                    notes_parts.append(f"Корекція палива: {corr_fuel:.1f} л")
+
+            # Fuel level warning note
             if isinstance(evening_fuel, (int, float)):
                 if evening_fuel < 15:
-                    notes = '⚠ КРИТИЧНО: низький рівень палива'
+                    notes_parts.append('⚠ КРИТИЧНО: низький рівень палива')
                 elif evening_fuel < 40:
-                    notes = '⚠ Низький рівень палива'
+                    notes_parts.append('⚠ Низький рівень палива')
+
+            notes = ' | '.join(notes_parts) if notes_parts else ''
             if work_hours == 0 and not notes:
                 notes = '—'
 
