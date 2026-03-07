@@ -531,7 +531,7 @@ class ExcelReportGenerator:
         # ------------------------------------------------------------------ row 1: title
         ws.merge_cells(f'A{TITLE_ROW}:{LAST_COL}{TITLE_ROW}')
         tc = ws[f'A{TITLE_ROW}']
-        tc.value = f"Оперативний журнал роботи генератора «{gen_name}»  —  {month_title}"
+        tc.value = f"Операційний журнал роботи генератора «{gen_name}»  —  {month_title}"
         tc.font = Font(bold=True, size=14, color='FFFFFF')
         tc.fill = self._fill('grp_date')
         tc.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
