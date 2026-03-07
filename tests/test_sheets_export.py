@@ -33,7 +33,9 @@ from services.sheets_export import (
     _unique_join,
     aggregate_app_data,
     apply_sync_decisions,
+    build_preview_version,
     build_sync_preview,
+    collect_batch_updates,
     load_sheet_state,
 )
 
@@ -543,6 +545,7 @@ class TestBuildSyncPreview:
 def _make_mock_worksheet() -> MagicMock:
     ws = MagicMock()
     ws.update = MagicMock()
+    ws.batch_update = MagicMock()
     return ws
 
 
@@ -579,7 +582,10 @@ class TestApplySyncDecisions:
         result = apply_sync_decisions(ws, {"safe_updates": [su], "conflicts": [], "new_rows": []})
         assert len(result["applied"]) == 1
         assert result["applied"][0]["status"] == "applied_safe_update"
-        ws.update.assert_called_once_with("N5:N5", [["80"]], value_input_option="USER_ENTERED")
+        ws.batch_update.assert_called_once_with(
+            [{"range": "N5:N5", "values": [["80"]]}],
+            value_input_option="USER_ENTERED",
+        )
 
     # --- new_rows always applied ---
 
@@ -597,10 +603,15 @@ class TestApplySyncDecisions:
             current_row_count=10,
         )
         assert any(r["status"] == "new_row" for r in result["applied"])
-        # All SYNC_FIELDS columns should have been written
-        written_cols = {c.args[0].split(":")[0][0] for c in ws.update.call_args_list}
-        expected_cols = {col_letter for _, _, col_letter in SYNC_FIELDS}
-        assert written_cols == expected_cols
+        # All SYNC_FIELDS columns should have been written via batch_update
+        ws.batch_update.assert_called_once()
+        call_args = ws.batch_update.call_args
+        batch_entries = call_args[0][0]
+        written_ranges = [entry["range"] for entry in batch_entries]
+        # Expect grouped range entries for new row 11 (A:I, N, P:Q)
+        assert any("A11" in r for r in written_ranges)
+        assert any("N11" in r for r in written_ranges)
+        assert any("P11" in r for r in written_ranges)
 
     # --- conflicts: default keep_sheet ---
 
@@ -610,7 +621,7 @@ class TestApplySyncDecisions:
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [conflict], "new_rows": []})
         assert len(result["skipped"]) == 1
         assert result["skipped"][0]["status"] == "skipped_keep_sheet"
-        ws.update.assert_not_called()
+        ws.batch_update.assert_not_called()
 
     # --- keep_app per-field decision ---
 
@@ -621,7 +632,10 @@ class TestApplySyncDecisions:
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [conflict], "new_rows": []}, decisions=decisions)
         assert len(result["applied"]) == 1
         assert result["applied"][0]["status"] == "applied_keep_app"
-        ws.update.assert_called_once_with("N5:N5", [["80"]], value_input_option="USER_ENTERED")
+        ws.batch_update.assert_called_once_with(
+            [{"range": "N5:N5", "values": [["80"]]}],
+            value_input_option="USER_ENTERED",
+        )
 
     # --- keep_sheet per-field decision ---
 
@@ -631,7 +645,7 @@ class TestApplySyncDecisions:
         decisions = [{"date": self.DATE, "field": "fuel", "decision": "keep_sheet"}]
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [conflict], "new_rows": []}, decisions=decisions)
         assert len(result["skipped"]) == 1
-        ws.update.assert_not_called()
+        ws.batch_update.assert_not_called()
 
     # --- keep_app_all global decision ---
 
@@ -643,7 +657,9 @@ class TestApplySyncDecisions:
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [c1, c2], "new_rows": []}, decisions=decisions)
         assert len(result["applied"]) == 2
         assert all(r["status"] == "applied_keep_app" for r in result["applied"])
-        assert ws.update.call_count == 2
+        ws.batch_update.assert_called_once()
+        entries = ws.batch_update.call_args[0][0]
+        assert len(entries) == 2
 
     # --- keep_sheet_all global decision ---
 
@@ -654,7 +670,7 @@ class TestApplySyncDecisions:
         decisions = [{"decision": "keep_sheet_all"}]
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [c1, c2], "new_rows": []}, decisions=decisions)
         assert len(result["skipped"]) == 2
-        ws.update.assert_not_called()
+        ws.batch_update.assert_not_called()
 
     # --- per-field overrides global ---
 
@@ -700,7 +716,7 @@ class TestApplySyncDecisions:
         result = apply_sync_decisions(ws, {"safe_updates": [], "conflicts": [], "new_rows": []})
         assert result["applied"] == []
         assert result["skipped"] == []
-        ws.update.assert_not_called()
+        ws.batch_update.assert_not_called()
 
 
 # ===========================================================================
@@ -783,11 +799,15 @@ class TestFullPipelineIntegration:
         result = apply_sync_decisions(ws2, preview, decisions=[])
         # conflict not applied (no decision)
         assert not any(r.get("field") == "fuel" for r in result["applied"])
-        # fuel write should NOT have happened
-        fuel_writes = [
-            c for c in ws2.update.call_args_list if "N" in str(c.args[0])
-        ]
-        assert fuel_writes == []
+        # fuel column N write should NOT have happened
+        if ws2.batch_update.called:
+            all_ranges = [
+                e["range"]
+                for call in ws2.batch_update.call_args_list
+                for e in call[0][0]
+            ]
+            fuel_ranges = [r for r in all_ranges if r.startswith("N")]
+            assert fuel_ranges == []
 
     def test_conflict_resolved_keep_app(self):
         self._insert_log("refill", "2026-03-07 10:00:00", value="80", driver="Іван", receipt="001")
@@ -809,3 +829,257 @@ class TestFullPipelineIntegration:
         assert len(applied_fuel) == 1
         assert applied_fuel[0]["app_value"] == "80"
         assert applied_fuel[0]["status"] == "applied_keep_app"
+
+
+# ===========================================================================
+# 9. build_preview_version — determinism and change detection
+# ===========================================================================
+
+
+class TestBuildPreviewVersion:
+    """Tests for the build_preview_version() helper."""
+
+    def _make_sheet_state(self, dates_fields: dict[str, dict]) -> dict:
+        return {
+            date: {"row_index": i + 3, "fields": fields}
+            for i, (date, fields) in enumerate(dates_fields.items())
+        }
+
+    def _make_app_data(self, dates_fields: dict[str, dict]) -> dict:
+        return {date: {"fields": fields} for date, fields in dates_fields.items()}
+
+    def test_same_inputs_produce_same_version(self):
+        """Identical inputs must produce the same token (determinism)."""
+        sheet_state = self._make_sheet_state({"2026-03-07": {"fuel": "80", "m_start": "08:00"}})
+        app_data = self._make_app_data({"2026-03-07": {"fuel": "80", "m_start": "08:00"}})
+        v1 = build_preview_version(sheet_state, app_data)
+        v2 = build_preview_version(sheet_state, app_data)
+        assert v1 == v2
+
+    def test_different_sheet_value_produces_different_version(self):
+        """A change in sheet_state must produce a different token."""
+        app_data = self._make_app_data({"2026-03-07": {"fuel": "80"}})
+        ss1 = self._make_sheet_state({"2026-03-07": {"fuel": "75"}})
+        ss2 = self._make_sheet_state({"2026-03-07": {"fuel": "80"}})
+        assert build_preview_version(ss1, app_data) != build_preview_version(ss2, app_data)
+
+    def test_different_app_value_produces_different_version(self):
+        """A change in app_data must produce a different token."""
+        sheet_state = self._make_sheet_state({"2026-03-07": {"fuel": "80"}})
+        ad1 = self._make_app_data({"2026-03-07": {"fuel": "80"}})
+        ad2 = self._make_app_data({"2026-03-07": {"fuel": "90"}})
+        assert build_preview_version(sheet_state, ad1) != build_preview_version(sheet_state, ad2)
+
+    def test_new_date_in_app_produces_different_version(self):
+        """Adding a new date to app_data must produce a different token."""
+        sheet_state = self._make_sheet_state({"2026-03-07": {"fuel": "80"}})
+        ad1 = self._make_app_data({"2026-03-07": {"fuel": "80"}})
+        ad2 = self._make_app_data({
+            "2026-03-07": {"fuel": "80"},
+            "2026-03-08": {"fuel": "50"},
+        })
+        assert build_preview_version(sheet_state, ad1) != build_preview_version(sheet_state, ad2)
+
+    def test_empty_inputs_produce_stable_version(self):
+        """Empty inputs should produce a consistent non-empty token."""
+        v = build_preview_version({}, {})
+        assert isinstance(v, str)
+        assert len(v) == 16
+        assert v == build_preview_version({}, {})
+
+    def test_version_is_16_hex_chars(self):
+        """Token should be a 16-character lowercase hex string."""
+        sheet_state = self._make_sheet_state({"2026-03-07": {"fuel": "80"}})
+        app_data = self._make_app_data({"2026-03-07": {"fuel": "80"}})
+        v = build_preview_version(sheet_state, app_data)
+        assert len(v) == 16
+        assert all(c in "0123456789abcdef" for c in v)
+
+
+# ===========================================================================
+# 10. collect_batch_updates — batched write behavior
+# ===========================================================================
+
+
+class TestCollectBatchUpdates:
+    """Unit tests for the collect_batch_updates() helper."""
+
+    DATE = "2026-03-07"
+
+    def _make_safe_update(self, field="fuel", column="N", app_val="80", row_index=5):
+        return {
+            "date": self.DATE,
+            "row_index": row_index,
+            "field": field,
+            "column": column,
+            "sheet_value": "",
+            "app_value": app_val,
+            "status": "safe_update",
+        }
+
+    def _make_conflict(self, field="fuel", column="N", sheet_val="75", app_val="80", row_index=5):
+        return {
+            "date": self.DATE,
+            "row_index": row_index,
+            "field": field,
+            "column": column,
+            "sheet_value": sheet_val,
+            "app_value": app_val,
+            "status": "conflict",
+        }
+
+    def test_empty_preview_returns_empty_batch(self):
+        batch, applied, skipped = collect_batch_updates(
+            {"new_rows": [], "safe_updates": [], "conflicts": []}
+        )
+        assert batch == []
+        assert applied == []
+        assert skipped == []
+
+    def test_safe_update_produces_single_cell_entry(self):
+        su = self._make_safe_update(column="N", app_val="80", row_index=5)
+        batch, applied, skipped = collect_batch_updates(
+            {"new_rows": [], "safe_updates": [su], "conflicts": []}
+        )
+        assert len(batch) == 1
+        assert batch[0]["range"] == "N5:N5"
+        assert batch[0]["values"] == [["80"]]
+        assert len(applied) == 1
+        assert applied[0]["status"] == "applied_safe_update"
+
+    def test_conflict_without_decision_skipped_not_in_batch(self):
+        conflict = self._make_conflict()
+        batch, applied, skipped = collect_batch_updates(
+            {"new_rows": [], "safe_updates": [], "conflicts": [conflict]}
+        )
+        assert batch == []
+        assert applied == []
+        assert len(skipped) == 1
+
+    def test_keep_app_conflict_produces_cell_entry(self):
+        conflict = self._make_conflict(column="N", app_val="80", row_index=5)
+        decisions = [{"date": self.DATE, "field": "fuel", "decision": "keep_app"}]
+        batch, applied, skipped = collect_batch_updates(
+            {"new_rows": [], "safe_updates": [], "conflicts": [conflict]},
+            decisions=decisions,
+        )
+        assert len(batch) == 1
+        assert batch[0]["range"] == "N5:N5"
+        assert batch[0]["values"] == [["80"]]
+        assert applied[0]["status"] == "applied_keep_app"
+
+    def test_new_row_produces_grouped_range_entries(self):
+        """New rows should produce 3 grouped range entries (A:I, N, P:Q)."""
+        new_row = {
+            "date": self.DATE,
+            "fields": {n: "" for n, _, _ in SYNC_FIELDS},
+        }
+        new_row["fields"]["date"] = "07.03.2026"
+        new_row["fields"]["fuel"] = "80"
+        new_row["fields"]["receipts"] = "001"
+        new_row["fields"]["drivers"] = "Іван"
+
+        batch, applied, skipped = collect_batch_updates(
+            {"new_rows": [new_row], "safe_updates": [], "conflicts": []},
+            current_row_count=2,
+        )
+        # 3 entries: A3:I3, N3:N3, P3:Q3
+        assert len(batch) == 3
+        ranges = {e["range"] for e in batch}
+        assert "A3:I3" in ranges
+        assert "N3:N3" in ranges
+        assert "P3:Q3" in ranges
+
+    def test_new_row_ai_range_contains_correct_values(self):
+        new_row = {
+            "date": self.DATE,
+            "fields": {n: "" for n, _, _ in SYNC_FIELDS},
+        }
+        new_row["fields"]["date"] = "07.03.2026"
+        new_row["fields"]["m_start"] = "08:00"
+
+        batch, _, _ = collect_batch_updates(
+            {"new_rows": [new_row], "safe_updates": [], "conflicts": []},
+            current_row_count=2,
+        )
+        ai_entry = next(e for e in batch if e["range"] == "A3:I3")
+        values = ai_entry["values"][0]
+        assert values[0] == "07.03.2026"   # A = date
+        assert values[1] == "08:00"         # B = m_start
+
+    def test_multiple_safe_updates_all_in_single_batch_list(self):
+        su1 = self._make_safe_update(column="N", app_val="80", row_index=5)
+        su2 = self._make_safe_update(field="m_start", column="B", app_val="08:00", row_index=5)
+        batch, applied, _ = collect_batch_updates(
+            {"new_rows": [], "safe_updates": [su1, su2], "conflicts": []}
+        )
+        assert len(batch) == 2
+        assert len(applied) == 2
+
+    def test_row_count_inferred_from_preview(self):
+        """New row index is inferred from max existing row_index when current_row_count omitted."""
+        su = self._make_safe_update(row_index=10)
+        new_row = {"date": "2026-03-08", "fields": {n: "" for n, _, _ in SYNC_FIELDS}}
+        batch, applied, _ = collect_batch_updates(
+            {"new_rows": [new_row], "safe_updates": [su], "conflicts": []}
+        )
+        # New row should be at row 11 — check that range ends with ':X11'
+        new_row_ranges = [e["range"] for e in batch if e["range"].endswith("11")]
+        assert len(new_row_ranges) > 0, "New row should be placed at row 11"
+
+
+# ===========================================================================
+# 11. apply_sync_decisions — single batch_update call behavior
+# ===========================================================================
+
+
+class TestApplySyncDecisionsBatched:
+    """Tests that apply_sync_decisions() uses a single batch_update() call."""
+
+    DATE = "2026-03-07"
+
+    def test_single_batch_update_call_for_mixed_writes(self):
+        """All writes (safe_update + conflict) should be in one batch_update call."""
+        ws = _make_mock_worksheet()
+        su = {
+            "date": self.DATE, "row_index": 5, "field": "fuel", "column": "N",
+            "sheet_value": "", "app_value": "80", "status": "safe_update",
+        }
+        conflict = {
+            "date": self.DATE, "row_index": 5, "field": "m_start", "column": "B",
+            "sheet_value": "07:00", "app_value": "08:00", "status": "conflict",
+        }
+        decisions = [{"date": self.DATE, "field": "m_start", "decision": "keep_app"}]
+        apply_sync_decisions(
+            ws,
+            {"new_rows": [], "safe_updates": [su], "conflicts": [conflict]},
+            decisions=decisions,
+        )
+        # Despite two separate writes, only one batch_update call
+        ws.batch_update.assert_called_once()
+        entries = ws.batch_update.call_args[0][0]
+        assert len(entries) == 2
+
+    def test_no_batch_update_when_nothing_to_write(self):
+        """batch_update must not be called when there are no writes."""
+        ws = _make_mock_worksheet()
+        apply_sync_decisions(ws, {"new_rows": [], "safe_updates": [], "conflicts": []})
+        ws.batch_update.assert_not_called()
+
+    def test_new_row_uses_grouped_ranges(self):
+        """New rows use grouped range entries (fewer entries than per-cell)."""
+        ws = _make_mock_worksheet()
+        new_row = {
+            "date": self.DATE,
+            "fields": {n: "" for n, _, _ in SYNC_FIELDS},
+        }
+        new_row["fields"]["date"] = "07.03.2026"
+        apply_sync_decisions(
+            ws,
+            {"new_rows": [new_row], "safe_updates": [], "conflicts": []},
+            current_row_count=2,
+        )
+        ws.batch_update.assert_called_once()
+        entries = ws.batch_update.call_args[0][0]
+        # 3 grouped entries (A:I, N, P:Q) — not 12 individual cell writes
+        assert len(entries) == 3
