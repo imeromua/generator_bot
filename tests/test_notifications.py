@@ -1,11 +1,11 @@
-"""Tests for notification reliability fixes and morning briefing improvements.
+"""Tests for notification reliability fixes and daily report improvements.
 
 Covers:
-- Morning briefing recipient selection (admins must receive it too)
-- Admin NOT excluded from morning brief
+- Daily report recipient selection (admins must receive it too)
+- Admin NOT excluded from daily report
 - Quiet-hours midnight wrap-around fix
-- Daily/weekly report window widening (full-hour window)
-- Morning briefing content blocks (generator, separate maintenance countdowns)
+- Daily/weekly report window (MORNING_BRIEF_TIME-based)
+- Daily report content blocks (generator, separate maintenance countdowns)
 - Persistent idempotent send state (DB-based)
 - Regression: missed notification scenario due to admin filtering
 """
@@ -57,18 +57,16 @@ def _make_dt(hour: int, minute: int = 0, tz=KYIV) -> datetime:
 
 
 # ---------------------------------------------------------------------------
-# A. Morning brief recipient selection — admins MUST receive the brief
+# A. Daily report recipient selection — admins MUST receive the report
 # ---------------------------------------------------------------------------
 
 
-class TestMorningBriefRecipients:
-    """Morning brief must be sent to all registered users, including admins."""
+class TestDailyReportRecipients:
+    """Daily report must be sent to all registered users, including admins."""
 
     def _make_bot(self):
         bot = MagicMock()
         bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=1))
-        bot.edit_message_text = AsyncMock(side_effect=Exception("no tracked msg"))
-        bot.delete_message = AsyncMock()
         return bot
 
     def _register_users(self, admin_id: int, user_id: int):
@@ -77,8 +75,8 @@ class TestMorningBriefRecipients:
         db.register_user(user_id, "Regular User")
 
     @pytest.mark.asyncio
-    async def test_admin_receives_morning_brief(self, monkeypatch):
-        """Regression: admin must NOT be skipped in morning brief dispatch."""
+    async def test_admin_receives_daily_report(self, monkeypatch):
+        """Regression: admin must NOT be skipped in daily report dispatch."""
         admin_id = 111
         user_id = 222
         monkeypatch.setattr(config, "ADMIN_IDS", [admin_id])
@@ -89,21 +87,23 @@ class TestMorningBriefRecipients:
         now = _make_dt(7, 31)  # 1 minute after default 07:30 brief time
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="test brief"):
-            result = await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        assert result is True, "brief_sent_today should be True after sending"
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="test report"),
+        ):
+            await check_all_notifications(bot, state)
 
-        # Both admin and regular user should have received the message
         sent_ids = {c.kwargs.get("chat_id") or c.args[0] for c in bot.send_message.call_args_list}
-        assert admin_id in sent_ids, f"Admin {admin_id} must receive morning brief (was skipped)"
-        assert user_id in sent_ids, f"Regular user {user_id} must receive morning brief"
+        assert admin_id in sent_ids, f"Admin {admin_id} must receive daily report (was skipped)"
+        assert user_id in sent_ids, f"Regular user {user_id} must receive daily report"
 
     @pytest.mark.asyncio
-    async def test_all_users_receive_brief_regardless_of_admin_status(self, monkeypatch):
-        """Brief is sent to all registered users, not filtered by ADMIN_IDS."""
+    async def test_all_users_receive_daily_report_regardless_of_admin_status(self, monkeypatch):
+        """Daily report is sent to all registered users, not filtered by ADMIN_IDS."""
         admin_id1 = 101
         admin_id2 = 102
         user_id1 = 201
@@ -117,48 +117,66 @@ class TestMorningBriefRecipients:
         now = _make_dt(7, 35)
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
+
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
 
         sent_ids = {c.kwargs.get("chat_id") or c.args[0] for c in bot.send_message.call_args_list}
         for uid in (admin_id1, admin_id2, user_id1, user_id2):
-            assert uid in sent_ids, f"User {uid} should have received the brief"
+            assert uid in sent_ids, f"User {uid} should have received the daily report"
 
     @pytest.mark.asyncio
-    async def test_brief_not_sent_outside_window(self, monkeypatch):
-        """Brief must not be sent when current time is before the window."""
+    async def test_daily_report_not_sent_outside_window(self, monkeypatch):
+        """Daily report must not be sent when current time is before the window."""
         db.register_user(100, "user")
+        monkeypatch.setattr(config, "ADMIN_IDS", [])
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
         bot = self._make_bot()
         # 6:00 — well before 07:30 window
         now = _make_dt(6, 0)
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            result = await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        assert result is False, "Should return False (not sent) before window"
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
+
         bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_brief_not_resent_when_already_sent(self, monkeypatch):
-        """Brief must not be re-sent if brief_sent_today=True."""
+    async def test_daily_report_not_resent_if_db_key_set(self, monkeypatch):
+        """Daily report must not be re-sent if DB key already has today's date."""
         db.register_user(100, "user")
+        monkeypatch.setattr(config, "ADMIN_IDS", [])
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
+
+        from services.scheduler_parts.notification_check import DAILY_REPORT_KEY
+        db.set_state(DAILY_REPORT_KEY, "2024-01-15")  # already sent today
 
         bot = self._make_bot()
         now = _make_dt(7, 45)
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            result = await maybe_send_morning_brief(bot, now, "2024-01-15", True, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        assert result is True
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
+
         bot.send_message.assert_not_called()
 
 
@@ -167,73 +185,86 @@ class TestMorningBriefRecipients:
 # ---------------------------------------------------------------------------
 
 
-class TestMorningBriefIdempotency:
-    """Morning brief uses DB-persisted state so restarts don't cause double-sends."""
+class TestDailyReportIdempotency:
+    """Daily report uses DB-persisted state so restarts don't cause double-sends."""
 
     def _make_bot(self):
         bot = MagicMock()
         bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=1))
-        bot.edit_message_text = AsyncMock(side_effect=Exception("no tracked msg"))
-        bot.delete_message = AsyncMock()
         return bot
 
     @pytest.mark.asyncio
     async def test_db_key_written_after_send(self, monkeypatch):
-        """After sending the brief, the sent date must be persisted in DB."""
+        """After sending the daily report, the sent date must be persisted in DB."""
         db.register_user(100, "user")
+        monkeypatch.setattr(config, "ADMIN_IDS", [])
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
         bot = self._make_bot()
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief, _BRIEF_SENT_DATE_KEY
+        from services.scheduler_parts.notification_check import check_all_notifications, DAILY_REPORT_KEY
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        stored = db.get_state_value(_BRIEF_SENT_DATE_KEY, "")
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
+
+        stored = db.get_state_value(DAILY_REPORT_KEY, "")
         assert stored == "2024-01-15", f"DB key should store today's date, got {stored!r}"
 
     @pytest.mark.asyncio
     async def test_no_resend_after_restart_within_window(self, monkeypatch):
-        """If DB shows brief already sent today, in-memory False flag doesn't trigger resend."""
+        """If DB shows daily report already sent today, in-memory restart doesn't trigger resend."""
         db.register_user(100, "user")
+        monkeypatch.setattr(config, "ADMIN_IDS", [])
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
-        # Simulate: brief was sent earlier, bot restarted, in-memory flag is False
-        from services.scheduler_parts.morning_brief import _BRIEF_SENT_DATE_KEY
-        db.set_state(_BRIEF_SENT_DATE_KEY, "2024-01-15")
+        from services.scheduler_parts.notification_check import DAILY_REPORT_KEY
+        db.set_state(DAILY_REPORT_KEY, "2024-01-15")  # already sent
 
         bot = self._make_bot()
         now = _make_dt(7, 50)  # still within the window
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            result = await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        assert result is True
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
+
         # Should NOT resend because DB key says already sent today
         bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_sends_on_new_day_even_if_yesterday_key_exists(self, monkeypatch):
-        """If DB key has yesterday's date, the brief should be sent today."""
+        """If DB key has yesterday's date, the daily report should be sent today."""
         db.register_user(100, "user")
+        monkeypatch.setattr(config, "ADMIN_IDS", [])
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
-        from services.scheduler_parts.morning_brief import _BRIEF_SENT_DATE_KEY
-        db.set_state(_BRIEF_SENT_DATE_KEY, "2024-01-14")  # yesterday
+        from services.scheduler_parts.notification_check import DAILY_REPORT_KEY
+        db.set_state(DAILY_REPORT_KEY, "2024-01-14")  # yesterday
 
         bot = self._make_bot()
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief"):
-            result = await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        assert result is True
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report"),
+        ):
+            await check_all_notifications(bot, state)
+
         bot.send_message.assert_called_once()
 
 
@@ -353,12 +384,12 @@ class TestShouldNotifySkipLogging:
 
 
 # ---------------------------------------------------------------------------
-# E. Morning brief content blocks
+# E. Daily report content blocks
 # ---------------------------------------------------------------------------
 
 
-class TestMorningBriefContent:
-    """_build_brief_text must include all required operational blocks."""
+class TestDailyReportContent:
+    """_build_daily_report_text must include all required operational blocks."""
 
     def test_content_includes_generator_status(self, monkeypatch):
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
@@ -371,19 +402,19 @@ class TestMorningBriefContent:
 
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value={}),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "50.0", "status": "OFF"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="main"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value={}),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "50.0", "status": "OFF"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="main"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 80.0, "spark_needed": 60.0, "maintenance_needed": 150.0},
             ),
-            patch("services.scheduler_parts.morning_brief.yesterday_shifts_summary", return_value="—"),
+            patch("services.scheduler_parts.notification_check.yesterday_shifts_summary", return_value="—"),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
         assert "Генератор" in txt, "Text must include generator status section"
         assert "Основний" in txt, "Active generator label must be present"
@@ -402,19 +433,19 @@ class TestMorningBriefContent:
 
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value={}),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "80.0", "status": "ON"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="main"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value={}),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "80.0", "status": "ON"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="main"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 20.0, "spark_needed": 45.0, "maintenance_needed": 120.0},
             ),
-            patch("services.scheduler_parts.morning_brief.yesterday_shifts_summary", return_value="—"),
+            patch("services.scheduler_parts.notification_check.yesterday_shifts_summary", return_value="—"),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
         assert "мастила" in txt.lower(), "Must have oil change countdown"
         assert "свічок" in txt.lower(), "Must have spark plug countdown"
@@ -431,19 +462,19 @@ class TestMorningBriefContent:
 
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value={}),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "20.0", "status": "OFF"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="main"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value={}),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "20.0", "status": "OFF"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="main"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 0.0, "spark_needed": 0.0, "maintenance_needed": 0.0},
             ),
-            patch("services.scheduler_parts.morning_brief.yesterday_shifts_summary", return_value="—"),
+            patch("services.scheduler_parts.notification_check.yesterday_shifts_summary", return_value="—"),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
         assert "прострочен" in txt.lower() or "Нагадування" in txt, "Must contain overdue warnings"
         assert "Низький рівень палива" in txt, "Low fuel warning must appear when fuel < threshold"
@@ -459,21 +490,21 @@ class TestMorningBriefContent:
 
         now = _make_dt(7, 31)
 
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value={}),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "70.0", "status": "ON"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="emergency"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value={}),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "70.0", "status": "ON"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="emergency"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 50.0, "spark_needed": 50.0, "maintenance_needed": 150.0},
             ),
-            patch("services.scheduler_parts.morning_brief.yesterday_shifts_summary", return_value="—"),
+            patch("services.scheduler_parts.notification_check.yesterday_shifts_summary", return_value="—"),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
-        assert "Аварійний" in txt, "Emergency generator label must appear in brief"
+        assert "Аварійний" in txt, "Emergency generator label must appear in daily report"
 
     def test_content_includes_yesterday_summary(self, monkeypatch):
         monkeypatch.setattr(config, "FUEL_CONSUMPTION", 5.0)
@@ -484,28 +515,28 @@ class TestMorningBriefContent:
         monkeypatch.setattr(config, "MAINTENANCE_INTERVAL", 200)
 
         now = _make_dt(7, 31)
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value={}),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "80.0", "status": "OFF"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="main"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value={}),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "80.0", "status": "OFF"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="main"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 90.0, "spark_needed": 90.0, "maintenance_needed": 190.0},
             ),
             patch(
-                "services.scheduler_parts.morning_brief.yesterday_shifts_summary",
+                "services.scheduler_parts.notification_check.yesterday_shifts_summary",
                 return_value="🌅 Ранок: 07:00–09:30",
             ),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
         assert "Вчорашні зміни" in txt
         assert "07:00–09:30" in txt
 
     def test_outage_schedule_with_ranges(self, monkeypatch):
-        """Outage ranges must appear correctly in the brief."""
+        """Outage ranges must appear correctly in the daily report."""
         monkeypatch.setattr(config, "FUEL_CONSUMPTION", 5.0)
         monkeypatch.setattr(config, "EMERGENCY_FUEL_CONSUMPTION", 4.0)
         monkeypatch.setattr(config, "FUEL_ALERT_THRESHOLD_L", 40.0)
@@ -517,54 +548,57 @@ class TestMorningBriefContent:
         schedule = {h: (1 if h in (9, 10, 11) else 0) for h in range(24)}
 
         now = _make_dt(7, 31)
-        from services.scheduler_parts.morning_brief import _build_brief_text
+        from services.scheduler_parts.notification_check import _build_daily_report_text
 
         with (
-            patch("services.scheduler_parts.morning_brief.db.get_schedule", return_value=schedule),
-            patch("services.scheduler_parts.morning_brief.db.get_state", return_value={"current_fuel": "80.0", "status": "OFF"}),
-            patch("services.scheduler_parts.morning_brief.db.get_active_generator", return_value="main"),
+            patch("services.scheduler_parts.notification_check.db.get_schedule", return_value=schedule),
+            patch("services.scheduler_parts.notification_check.db.get_state", return_value={"current_fuel": "80.0", "status": "OFF"}),
+            patch("services.scheduler_parts.notification_check.db.get_active_generator", return_value="main"),
             patch(
-                "services.scheduler_parts.morning_brief.get_maintenance_stats",
+                "services.scheduler_parts.notification_check.get_maintenance_stats",
                 return_value={"oil_needed": 90.0, "spark_needed": 90.0, "maintenance_needed": 190.0},
             ),
-            patch("services.scheduler_parts.morning_brief.yesterday_shifts_summary", return_value="—"),
+            patch("services.scheduler_parts.notification_check.yesterday_shifts_summary", return_value="—"),
         ):
-            txt = _build_brief_text(now, "2024-01-15")
+            txt = _build_daily_report_text(now, "2024-01-15")
 
-        assert "09:00 - 12:00" in txt, "Outage range 09:00-12:00 must appear in brief"
+        assert "09:00 - 12:00" in txt, "Outage range 09:00-12:00 must appear in daily report"
         assert "3 год" in txt, "Total offline hours must be shown"
 
 
 # ---------------------------------------------------------------------------
-# F. Daily / weekly report window widening
+# F. Daily report window (MORNING_BRIEF_TIME-based)
 # ---------------------------------------------------------------------------
 
 
 class TestDailyWeeklyReportWindow:
-    """daily_report and weekly_report should fire during any minute of hour 9."""
+    """daily_report fires once in the 60-minute window after MORNING_BRIEF_TIME."""
 
     @pytest.mark.asyncio
-    async def test_daily_report_fires_at_any_minute_in_hour_9(self, monkeypatch):
-        """daily_report must be sent even if the scheduler starts at 09:45, not 09:00."""
+    async def test_daily_report_fires_within_brief_window(self, monkeypatch):
+        """daily_report must be sent when within the MORNING_BRIEF_TIME window."""
         user_id = 500
         db.register_user(user_id, "Test User")
         monkeypatch.setattr(config, "ADMIN_IDS", [])
+        monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
         bot = MagicMock()
         bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=1))
 
-        # Simulate now=09:45
-        now_mock = _make_dt(9, 45)
+        # now=07:35 — within the 60-minute window starting at 07:30
+        now_mock = _make_dt(7, 35)
 
         from services.scheduler_parts.notification_check import check_all_notifications
 
-        # Enable daily_report preference for the user
-        from database.api.notifications import set_user_preference
-        set_user_preference(user_id, "daily_report", True)
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        state = {"status": "OFF", "current_fuel": "80.0"}
-
-        with patch("services.scheduler_parts.notification_check.now_kiev", return_value=now_mock):
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now_mock),
+            patch(
+                "services.scheduler_parts.notification_check._build_daily_report_text",
+                return_value="📊 Щоденний звіт (test)",
+            ),
+        ):
             await check_all_notifications(bot, state)
 
         bot.send_message.assert_called()
@@ -572,29 +606,35 @@ class TestDailyWeeklyReportWindow:
         assert any("Щоденний звіт" in t for t in call_texts), "daily_report must be sent"
 
     @pytest.mark.asyncio
-    async def test_daily_report_not_fired_outside_hour_9(self, monkeypatch):
-        """daily_report must NOT be sent at hour 10."""
+    async def test_daily_report_not_fired_outside_brief_window(self, monkeypatch):
+        """daily_report must NOT be sent outside the MORNING_BRIEF_TIME window."""
         user_id = 501
         db.register_user(user_id, "Test User")
         monkeypatch.setattr(config, "ADMIN_IDS", [])
+        monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
 
         bot = MagicMock()
         bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=1))
 
-        now_mock = _make_dt(10, 0)  # Hour 10 — should NOT fire daily_report
+        # Hour 10 — well outside the 07:30 + 60min window
+        now_mock = _make_dt(10, 0)
 
         from services.scheduler_parts.notification_check import check_all_notifications
-        from database.api.notifications import set_user_preference
-        set_user_preference(user_id, "daily_report", True)
 
-        state = {"status": "OFF", "current_fuel": "80.0"}
+        state = {"status": "OFF", "current_fuel": "200.0"}
 
-        with patch("services.scheduler_parts.notification_check.now_kiev", return_value=now_mock):
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now_mock),
+            patch(
+                "services.scheduler_parts.notification_check._build_daily_report_text",
+                return_value="📊 Щоденний звіт (test)",
+            ),
+        ):
             await check_all_notifications(bot, state)
 
         call_texts = [str(c) for c in bot.send_message.call_args_list]
         daily_calls = [t for t in call_texts if "Щоденний звіт" in t]
-        assert len(daily_calls) == 0, "daily_report must NOT fire outside hour 9"
+        assert len(daily_calls) == 0, "daily_report must NOT fire outside MORNING_BRIEF_TIME window"
 
 
 # ---------------------------------------------------------------------------
@@ -630,10 +670,8 @@ class TestAdminNotificationRegression:
         assert any("КРИТИЧНО" in t or "Паливо" in t for t in call_texts), "Must mention fuel critical"
 
     @pytest.mark.asyncio
-    async def test_morning_brief_regression_admin_was_excluded(self, monkeypatch):
-        """Regression test: in old code, admin was excluded from morning brief.
-        This test ensures the fix is in place and admins receive the brief.
-        """
+    async def test_daily_report_regression_admin_included(self, monkeypatch):
+        """Regression test: daily report must be sent to admins, not just regular users."""
         admin_id = 777
         regular_user_id = 888
         monkeypatch.setattr(config, "ADMIN_IDS", [admin_id])
@@ -642,19 +680,22 @@ class TestAdminNotificationRegression:
 
         bot = MagicMock()
         bot.send_message = AsyncMock(return_value=MagicMock(chat=MagicMock(id=1), message_id=1))
-        bot.edit_message_text = AsyncMock(side_effect=Exception("no msg"))
-        bot.delete_message = AsyncMock()
 
         monkeypatch.setattr(config, "MORNING_BRIEF_TIME", "07:30")
         now = _make_dt(7, 35)
 
-        from services.scheduler_parts.morning_brief import maybe_send_morning_brief
+        from services.scheduler_parts.notification_check import check_all_notifications
 
-        with patch("services.scheduler_parts.morning_brief._build_brief_text", return_value="brief text"):
-            await maybe_send_morning_brief(bot, now, "2024-01-15", False, 3600)
+        state = {"status": "OFF", "current_fuel": "200.0"}
+
+        with (
+            patch("services.scheduler_parts.notification_check.now_kiev", return_value=now),
+            patch("services.scheduler_parts.notification_check._build_daily_report_text", return_value="report text"),
+        ):
+            await check_all_notifications(bot, state)
 
         sent_ids = {c.kwargs.get("chat_id") or c.args[0] for c in bot.send_message.call_args_list}
         assert admin_id in sent_ids, (
-            f"REGRESSION: admin {admin_id} was not sent the morning brief. "
-            "Old code silently skipped admins — this must be fixed."
+            f"REGRESSION: admin {admin_id} was not sent the daily report. "
+            "Admins must receive the daily report too."
         )

@@ -6,7 +6,6 @@ import config
 from utils.time import now_kiev
 
 # Імпорти частин планувальника
-from services.scheduler_parts.morning_brief import maybe_send_morning_brief
 from services.scheduler_parts.auto_close import maybe_auto_close_shift
 from services.scheduler_parts.stop_reminder import maybe_send_stop_reminder
 from services.scheduler_parts.fuel_alert import check_fuel_alert
@@ -28,11 +27,7 @@ async def scheduler_loop(bot):
     today_str = now_kiev().strftime("%Y-%m-%d")
 
     # Прапорці виконання
-    brief_sent_today = False
     auto_close_done_today = False
-
-    # Константи
-    BRIEF_WINDOW = 60 * 60  # 1 година вікно для брифінгу
 
     while True:
         try:
@@ -43,7 +38,6 @@ async def scheduler_loop(bot):
             # Скидання прапорців на новий день
             if current_today_str != today_str:
                 today_str = current_today_str
-                brief_sent_today = False
                 auto_close_done_today = False
                 logger.info(f"📅 Новий день: {today_str}")
 
@@ -57,10 +51,7 @@ async def scheduler_loop(bot):
                 )
                 close_time = datetime.strptime("20:30", "%H:%M").time()
 
-            # 1. РАНКОВИЙ БРИФІНГ
-            brief_sent_today = await maybe_send_morning_brief(bot, now, today_str, brief_sent_today, BRIEF_WINDOW)
-
-            # 2. АВТО-ЗАКРИТТЯ ЗМІНИ (о WORK_END_TIME)
+            # 1. АВТО-ЗАКРИТТЯ ЗМІНИ
             auto_close_done_today, skip_rest = await maybe_auto_close_shift(bot, now, close_time, auto_close_done_today)
             if skip_rest:
                 # Якщо відбулося закриття, даємо паузу і йдемо на нове коло
@@ -76,19 +67,19 @@ async def scheduler_loop(bot):
             except Exception:
                 state = {}
 
-            # 3. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" (за N хв до кінця)
+            # 2. НАГАДУВАННЯ "НАТИСНІТЬ СТОП" (за N хв до кінця)
             await maybe_send_stop_reminder(bot, now, current_date, close_time, today_str, state)
 
-            # 4. АЛЕРТИ ПО ПАЛИВУ (низький рівень)
+            # 3. АЛЕРТИ ПО ПАЛИВУ (низький рівень)
             await check_fuel_alert(bot, state)
 
-            # 5. FIX #25: АЛЕРТИ ПО ТО (наближення техобслуговування)
+            # 4. FIX #25: АЛЕРТИ ПО ТО (наближення техобслуговування)
             await check_maintenance_alert(bot, state)
 
-            # 6. Task 5: Розширені сповіщення (з дебаунсингом і налаштуваннями)
+            # 5. ВСІ СПОВІЩЕННЯ (включаючи daily_report о MORNING_BRIEF_TIME)
             await check_all_notifications(bot, state)
 
-            # 7. Task 6: Перевірка замовлення палива
+            # 6. Task 6: Перевірка замовлення палива
             await check_fuel_order(bot, state)
 
             # --- АВТОМАТИЧНУ СИНХРОНІЗАЦІЮ ВИДАЛЕНО ---

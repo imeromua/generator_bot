@@ -1,13 +1,16 @@
-"""Task 5: Extended notification checks with debouncing and preference support.
+"""Extended notification checks with debouncing, preference support, and daily report.
 
 Checks critical and important notification conditions and sends alerts to users
 who have the relevant notification type enabled.  Enforces a 15-minute debounce
 per (user_id, notification_type) key using the generator_state table as a
 lightweight cache.
+
+The daily report is handled separately: it fires once per day at
+config.MORNING_BRIEF_TIME using a DB key for cross-restart idempotency.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, time as dt_time
 
 import config
 import database.db_api as db
@@ -18,9 +21,22 @@ from database.api.notifications import (
     is_notification_enabled,
     get_quiet_hours,
 )
-from utils.time import now_kiev
+from utils.time import now_kiev, format_hours_hhmm
+from services.scheduler_parts.utils import (
+    schedule_to_ranges,
+    fmt_range,
+    yesterday_shifts_summary,
+)
 
 logger = logging.getLogger(__name__)
+
+# DB state key used to persist the last date the daily report was sent.
+# Prevents double-sends on restart and enables cross-restart idempotency.
+DAILY_REPORT_KEY = "daily_report_sent_date"
+
+# Hours-remaining threshold at which a maintenance item appears in the Reminders section.
+_OIL_SPARK_WARN_HOURS = 10
+_PLANNED_MAINT_WARN_HOURS = 20
 
 # Debounce: minimum minutes between repeat notifications of the same type per user
 DEBOUNCE_MINUTES = 15
@@ -129,6 +145,130 @@ def _get_all_user_ids() -> list[int]:
         return []
 
 
+def _build_daily_report_text(now: datetime, today_str: str) -> str:
+    """Build the daily report message text.
+
+    Assembles a concise but informative operational digest including:
+    - Current power status and today's outage schedule
+    - Active generator and its status
+    - Current fuel level and estimated runtime
+    - Separate maintenance countdowns (oil, spark plugs, planned service)
+    - Critical warnings (overdue items)
+    - Yesterday's shift summary
+    """
+    # --- Power schedule ---
+    schedule = db.get_schedule(today_str)
+    if not schedule or not isinstance(schedule, dict):
+        logger.warning("⚠️ Графік недоступний або порожній, використовуємо порожній графік")
+        schedule = {}
+
+    ranges = schedule_to_ranges(schedule)
+    total_off = sum((e - s) for s, e in ranges)
+
+    now_h = now.hour
+    is_outage_now = int(schedule.get(now_h, 0) or 0) == 1
+    now_status = "🔴 Зараз: <b>відключення</b>" if is_outage_now else "🟢 Зараз: <b>світло є</b>"
+
+    # --- Generator state ---
+    st = db.get_state()
+    gen_status = str(st.get("status", "OFF") or "OFF").upper()
+
+    try:
+        active_gen = db.get_active_generator()
+    except Exception:
+        active_gen = "main"
+
+    gen_label = "🔋 Основний" if active_gen == "main" else "⚠️ Аварійний"
+    gen_on_label = "ON" if gen_status == "ON" else "OFF"
+
+    # --- Fuel ---
+    try:
+        current_fuel = float(st.get("current_fuel", 0.0) or 0.0)
+    except Exception:
+        current_fuel = 0.0
+
+    # Use per-generator consumption rate
+    if active_gen == "emergency":
+        fuel_rate = config.EMERGENCY_FUEL_CONSUMPTION
+    else:
+        fuel_rate = config.FUEL_CONSUMPTION
+
+    hours_left = current_fuel / fuel_rate if fuel_rate > 0 else 0
+    hours_left_hhmm = format_hours_hhmm(hours_left)
+
+    # --- Maintenance stats (separate countdowns for oil, spark, planned service) ---
+    oil_needed: float | None = None
+    spark_needed: float | None = None
+    maintenance_needed: float | None = None
+    try:
+        maint = get_maintenance_stats(active_gen)
+        oil_needed = float(maint.get("oil_needed") or 0.0)
+        spark_needed = float(maint.get("spark_needed") or 0.0)
+        maintenance_needed = float(maint.get("maintenance_needed") or 0.0)
+    except Exception as e:
+        logger.warning(f"⚠️ Помилка читання статистики ТО: {e}")
+
+    # --- Compose message ---
+    txt = f"📊 <b>Щоденний звіт</b> ({now.strftime('%d.%m.%Y')})\n\n"
+
+    # Power status
+    txt += f"📅 <b>Графік відключень (сьогодні)</b>\n"
+    if not ranges:
+        txt += "✅ Відключень не заплановано.\n"
+    else:
+        for s, e in ranges:
+            txt += f"🔴 {fmt_range(s, e)}\n"
+        txt += f"\n⏱ Сумарно без світла: <b>{total_off} год</b>\n"
+    txt += f"{now_status}\n\n"
+
+    # Generator status
+    txt += f"⚙️ <b>Генератор</b>\n"
+    txt += f"  Активний: {gen_label} ({gen_on_label})\n\n"
+
+    # Fuel
+    txt += (
+        f"⛽ <b>Паливо</b>\n"
+        f"  Залишок: <b>{current_fuel:.1f} л</b>\n"
+        f"  Вистачить на: <b>~{hours_left_hhmm}</b>\n\n"
+    )
+
+    # Maintenance countdowns (separate per type)
+    txt += f"🔧 <b>Техобслуговування</b>\n"
+    txt += f"  🛢 До заміни мастила: <b>{format_hours_hhmm(oil_needed) if oil_needed is not None else 'N/A'}</b>\n"
+    txt += f"  🔩 До заміни свічок: <b>{format_hours_hhmm(spark_needed) if spark_needed is not None else 'N/A'}</b>\n"
+    txt += f"  📋 До планового ТО: <b>{format_hours_hhmm(maintenance_needed) if maintenance_needed is not None else 'N/A'}</b>\n\n"
+
+    # Yesterday's shifts
+    txt += "📌 <b>Вчорашні зміни</b>\n"
+    txt += yesterday_shifts_summary(now)
+    txt += "\n\n"
+
+    # Critical warnings / reminders
+    reminders = []
+    if current_fuel < config.FUEL_ALERT_THRESHOLD_L:
+        reminders.append(f"⚠️ Низький рівень палива: <b>{current_fuel:.1f} л</b>")
+    if oil_needed is not None:
+        if oil_needed <= 0:
+            reminders.append("⚠️ Заміна мастила <b>прострочена!</b>")
+        elif oil_needed < _OIL_SPARK_WARN_HOURS:
+            reminders.append(f"⏳ До заміни мастила: <b>{format_hours_hhmm(oil_needed)}</b>")
+    if spark_needed is not None:
+        if spark_needed <= 0:
+            reminders.append("⚠️ Заміна свічок <b>прострочена!</b>")
+        elif spark_needed < _OIL_SPARK_WARN_HOURS:
+            reminders.append(f"⏳ До заміни свічок: <b>{format_hours_hhmm(spark_needed)}</b>")
+    if maintenance_needed is not None:
+        if maintenance_needed <= 0:
+            reminders.append("⚠️ Планове ТО <b>прострочено!</b>")
+        elif maintenance_needed < _PLANNED_MAINT_WARN_HOURS:
+            reminders.append(f"⏳ До планового ТО: <b>{format_hours_hhmm(maintenance_needed)}</b>")
+
+    if reminders:
+        txt += "🔔 <b>Нагадування</b>\n" + "\n".join(reminders)
+
+    return txt
+
+
 async def check_all_notifications(bot, state: dict) -> None:
     """Run all notification condition checks.
 
@@ -217,19 +357,29 @@ async def check_all_notifications(bot, state: dict) -> None:
                 )
                 _mark_sent(uid, "maintenance_soon", now)
 
-    # --- 5. Info: daily_report at 09:xx → all registered users ---
-    # Use a full-hour window (any minute in hour 9) — debounce prevents double-sends.
-    if now.hour == 9:
-        for uid in all_user_ids:
-            if _should_notify(uid, "daily_report", now):
-                await _notify_user(
-                    bot,
-                    uid,
-                    f"📊 <b>Щоденний звіт</b>\n\n"
-                    f"Стан генератора: <b>{gen_status}</b>\n"
-                    f"Рівень палива: <b>{current_fuel:.1f} л</b>",
-                )
-                _mark_sent(uid, "daily_report", now)
+    # --- 5. Info: daily_report at MORNING_BRIEF_TIME → all registered users (once per day) ---
+    # Uses DB key for idempotency — fires exactly once regardless of restarts.
+    try:
+        brief_time = datetime.strptime(config.MORNING_BRIEF_TIME, "%H:%M").time()
+    except Exception:
+        brief_time = dt_time(8, 0)
+
+    target_dt = datetime.combine(now.date(), brief_time).replace(tzinfo=config.KYIV)
+    diff_s = (now - target_dt).total_seconds()
+
+    if 0 <= diff_s < 3600:
+        today_str = now.strftime("%Y-%m-%d")
+        sent_date = db.get_state_value(DAILY_REPORT_KEY, "") or ""
+        if sent_date != today_str:
+            try:
+                txt = _build_daily_report_text(now, today_str)
+            except Exception as e:
+                logger.error(f"❌ Failed to build daily report text: {e}", exc_info=True)
+                txt = f"📊 <b>Щоденний звіт</b> ({now.strftime('%d.%m.%Y')})\n\n⚠️ Помилка формування звіту."
+            for uid in all_user_ids:
+                await _notify_user(bot, uid, txt)
+            db.set_state(DAILY_REPORT_KEY, today_str)
+            logger.info(f"✅ Щоденний звіт надіслано {len(all_user_ids)} користувач(ам)")
 
     # --- 6. Info: weekly_report on Monday at 09:xx → all registered users ---
     # Use a full-hour window (any minute in hour 9 on Monday) — debounce prevents double-sends.
