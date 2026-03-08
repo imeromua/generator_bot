@@ -163,8 +163,11 @@ def add_log(
         conn = get_connection()
         close_conn = True
 
-    # Якщо generator_id не вказаний - отримуємо поточний
-    if generator_id is None:
+    # Глобальні події завжди зберігаються з generator_id='main' (спільний бак/ГСМ)
+    GLOBAL_EVENTS = {'corr_fuel_set', 'refill'}
+    if event in GLOBAL_EVENTS:
+        gen_id = 'main'
+    elif generator_id is None:
         gen_id = _conn_get_state_value(conn, "active_generator", "main")
     else:
         gen_id = generator_id
@@ -432,7 +435,8 @@ def get_logs_for_period(start_date, end_date, generator_id: str | None = None):
             query = """
                 SELECT event_type, timestamp, user_name, value, driver_name, receipt_number, generator_id
                 FROM logs
-                WHERE timestamp >= ? AND timestamp <= ? AND generator_id = ?
+                WHERE timestamp >= ? AND timestamp <= ?
+                AND (generator_id = ? OR event_type IN ('corr_fuel_set', 'refill'))
                 ORDER BY timestamp ASC
             """
             return conn.execute(
@@ -455,29 +459,25 @@ def get_logs_for_period(start_date, end_date, generator_id: str | None = None):
 def get_refills_for_date(date_str: str, generator_id: str | None = None):
     """Повертає всі заправки за дату (для агрегації і idempotent sync у Sheet).
 
+    ``refill`` — глобальна подія (спільний бак), тому фільтр по ``generator_id``
+    ігнорується: повертаються всі заправки за дату незалежно від генератора.
+
     Args:
         date_str: дата у форматі YYYY-MM-DD
-        generator_id: фільтр по генератору
+        generator_id: Deprecated — not used. ``refill`` is a global event;
+            all refills are returned regardless of generator. Retained for
+            backward compatibility.
     """
     if not date_str:
         return []
     with get_connection() as conn:
-        if generator_id:
-            query = """
-                SELECT timestamp, user_name, value, driver_name, receipt_number
-                FROM logs
-                WHERE event_type = 'refill' AND timestamp LIKE ? AND generator_id = ?
-                ORDER BY timestamp ASC
-            """
-            return conn.execute(query, (f"{date_str}%", generator_id)).fetchall()
-        else:
-            query = """
-                SELECT timestamp, user_name, value, driver_name, receipt_number
-                FROM logs
-                WHERE event_type = 'refill' AND timestamp LIKE ?
-                ORDER BY timestamp ASC
-            """
-            return conn.execute(query, (f"{date_str}%",)).fetchall()
+        query = """
+            SELECT timestamp, user_name, value, driver_name, receipt_number
+            FROM logs
+            WHERE event_type = 'refill' AND timestamp LIKE ?
+            ORDER BY timestamp ASC
+        """
+        return conn.execute(query, (f"{date_str}%",)).fetchall()
 
 
 def get_latest_corr_fuel_before(before_ts: str, generator_id: str | None = None):
@@ -487,34 +487,28 @@ def get_latest_corr_fuel_before(before_ts: str, generator_id: str | None = None)
     This is used to seed the opening fuel balance for the first day of a report
     month from a historically accurate anchor rather than from live state.
 
+    ``corr_fuel_set`` is a global event (shared fuel tank), so ``generator_id``
+    is ignored — the search covers all records regardless of generator.
+
     Args:
         before_ts: exclusive upper bound timestamp in ``'YYYY-MM-DD HH:MM:SS'`` format,
             typically the first instant of the report month, e.g. ``'2026-03-01 00:00:00'``.
-        generator_id: filter by generator (``'main'``, ``'emergency'``, or ``None`` for all).
+        generator_id: Deprecated — not used. ``corr_fuel_set`` is a global event;
+            the search covers all records regardless of generator. Retained for
+            backward compatibility.
 
     Returns:
         ``float`` fuel value when a matching record is found, ``None`` otherwise.
     """
     with get_connection() as conn:
-        if generator_id:
-            query = """
-                SELECT value FROM logs
-                WHERE event_type = 'corr_fuel_set'
-                  AND timestamp < ?
-                  AND generator_id = ?
-                ORDER BY timestamp DESC, id DESC
-                LIMIT 1
-            """
-            row = conn.execute(query, (before_ts, generator_id)).fetchone()
-        else:
-            query = """
-                SELECT value FROM logs
-                WHERE event_type = 'corr_fuel_set'
-                  AND timestamp < ?
-                ORDER BY timestamp DESC, id DESC
-                LIMIT 1
-            """
-            row = conn.execute(query, (before_ts,)).fetchone()
+        query = """
+            SELECT value FROM logs
+            WHERE event_type = 'corr_fuel_set'
+              AND timestamp < ?
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 1
+        """
+        row = conn.execute(query, (before_ts,)).fetchone()
     if row is None:
         return None
     try:

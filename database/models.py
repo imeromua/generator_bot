@@ -749,6 +749,17 @@ def init_db():
     except Exception as e:
         logging.warning(f"⚠️ Не вдалося ініціалізувати таблиці конфігурації: {e}")
 
+    # Міграція даних: глобальні події завжди зберігаються з generator_id='main'
+    # (corr_fuel_set і refill стосуються спільного баку/ГСМ, не окремого генератора)
+    try:
+        c.execute(
+            "UPDATE logs SET generator_id = 'main'"
+            " WHERE event_type IN ('corr_fuel_set', 'refill') AND generator_id != 'main'"
+        )
+        logging.info("✅ Міграція: глобальні події (corr_fuel_set, refill) виправлені до generator_id='main'")
+    except Exception as e:
+        logging.warning(f"⚠️ Не вдалося виконати міграцію глобальних подій: {e}")
+
     try:
         conn.commit()
     except Exception as e:
