@@ -1552,3 +1552,75 @@ class TestDatabaseUserManagement:
         db.set_personnel_for_user(100, "ToDelete")
         db.delete_personnel_name("ToDelete")
         assert db.get_personnel_for_user(100) is None
+
+
+# ---------------------------------------------------------------------------
+# SD JWT Bearer token authentication
+# ---------------------------------------------------------------------------
+
+
+class TestSdJwtAuth:
+    """Tests for ServiceDesk JWT Bearer token authentication."""
+
+    def _make_admin_session(self):
+        """Create an admin user and a web session; return the access token."""
+        from database.api.auth import create_web_session
+        from database.models import get_connection
+
+        db.create_user(200, username="sd_admin", first_name="SD", last_name="Admin", role="admin")
+        with get_connection() as conn:
+            session = create_web_session(conn, user_id=200, ip="127.0.0.1", user_agent="test")
+        return session["token"]
+
+    def _make_user_session(self):
+        """Create a non-admin user and a web session; return the access token."""
+        from database.api.auth import create_web_session
+        from database.models import get_connection
+
+        db.create_user(201, username="sd_user", first_name="SD", last_name="User", role="user")
+        with get_connection() as conn:
+            session = create_web_session(conn, user_id=201, ip="127.0.0.1", user_agent="test")
+        return session["token"]
+
+    def test_bearer_token_grants_fuel_orders_access(self, client):
+        """Valid SD JWT Bearer token should return 200 on /api/fuel/orders."""
+        token = self._make_admin_session()
+        resp = client.get("/api/fuel/orders", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_bearer_token_grants_maintenance_access(self, client):
+        """Valid SD JWT admin Bearer token should return 200 on /api/maintenance."""
+        token = self._make_admin_session()
+        resp = client.get("/api/maintenance", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_bearer_token_grants_shifts_schedule_access(self, client):
+        """Valid SD JWT admin Bearer token should return 200 on /api/shifts/schedule."""
+        token = self._make_admin_session()
+        resp = client.get("/api/shifts/schedule", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_bearer_token_grants_admin_users_access(self, client):
+        """Valid SD JWT admin Bearer token should return 200 on /api/admin/users."""
+        token = self._make_admin_session()
+        resp = client.get("/api/admin/users", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_non_admin_bearer_token_forbidden_on_maintenance(self, client):
+        """Non-admin SD JWT token should return 403 on admin-only endpoints."""
+        token = self._make_user_session()
+        resp = client.get("/api/maintenance", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 403
+
+    def test_invalid_bearer_token_returns_401(self, client):
+        """Invalid Bearer token should fall through to 401 (no valid auth method)."""
+        resp = client.get(
+            "/api/fuel/orders",
+            headers={"Authorization": "Bearer invalid.token.here"},
+        )
+        assert resp.status_code == 401
+
+    def test_empty_bearer_falls_through_to_telegram_path(self, client):
+        """A request with no auth header at all should return 401."""
+        resp = client.get("/api/fuel/orders")
+        assert resp.status_code == 401
