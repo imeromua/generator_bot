@@ -143,7 +143,7 @@ function renderDashboardHTML(data) {
 
   let html = '<div class="section-header"><h2>Поточний стан</h2></div>';
   html += '<div class="stats-grid">';
-  html += statCard('Генератор', genStatus, activeGen ? 'Активний: ' + esc(String(activeGen)) : '');
+  html += statCard('Генератор', esc(genStatus), activeGen ? 'Активний: ' + esc(String(activeGen)) : '');
   html += statCard('Рівень пального', fuelPct !== '—' ? fuelPct + '%' : '—', fuelL ? esc(String(fuelL)) + ' л' : '');
   html += statCard('Моточаси', motorH, '');
   html += statCard('Режим', running ? '🟢 Працює' : '⚪ Зупинено', '');
@@ -234,7 +234,7 @@ async function loadMaintenance() {
 function renderMaintenanceStatus(data) {
   function bar(item, label) {
     if (!item) return '';
-    const pct = item.progress_pct ?? (item.current && item.interval ? Math.min(100, Math.round(item.current / item.interval * 100)) : 0);
+    const pct = item.progress_pct ?? (item.current && item.interval && item.interval > 0 ? Math.min(100, Math.round(item.current / item.interval * 100)) : 0);
     const color = pct >= 90 ? 'red' : pct >= 70 ? 'yellow' : 'green';
     return '<div class="card" style="margin-bottom:0.75rem"><div class="flex justify-between items-center" style="margin-bottom:0.5rem"><span class="font-bold">' + esc(label) + '</span><span class="text-sm text-muted">' + (item.current ?? '—') + ' / ' + (item.interval ?? '—') + ' год</span></div><div class="progress-bar"><div class="progress-fill ' + color + '" style="width:' + pct + '%"></div></div></div>';
   }
@@ -718,7 +718,11 @@ async function loadReports() {
     const gen  = el('report-gen').value;
     const url = api.reports.excelUrl(type, days, gen);
     const token = SD_AUTH.getAccessToken();
-    window.open(url + (token ? '&token=' + encodeURIComponent(token) : ''), '_blank');
+    // Fetch with auth header and trigger download via blob URL
+    fetch(url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'report.xlsx'; a.click(); URL.revokeObjectURL(a.href); })
+      .catch(e => toast(e.message, 'error'));
   });
 }
 
