@@ -3,14 +3,24 @@ from datetime import datetime
 from database.models import get_connection
 
 
-def register_user(user_id, name):
+def register_user(user_id, name, username=None, first_name=None, last_name=None):
+    """Register or update a user. Sets registered_at on first insert so the user
+    appears correctly in the admin users list (sorted by registered_at DESC)."""
+    ts = datetime.now().isoformat()
+    full_name = name or str(user_id)
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO users (user_id, full_name) VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET full_name = excluded.full_name
+            INSERT INTO users (user_id, full_name, username, first_name, last_name, registered_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                full_name = excluded.full_name,
+                username  = COALESCE(excluded.username, users.username),
+                first_name = COALESCE(excluded.first_name, users.first_name),
+                last_name  = COALESCE(excluded.last_name, users.last_name),
+                registered_at = COALESCE(users.registered_at, excluded.registered_at)
             """,
-            (user_id, name),
+            (user_id, full_name, username, first_name, last_name, ts),
         )
 
 
@@ -39,10 +49,11 @@ def create_user(
             INSERT INTO users (user_id, full_name, username, first_name, last_name, role, is_active, registered_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
-                full_name = excluded.full_name,
-                username = COALESCE(excluded.username, users.username),
+                full_name  = excluded.full_name,
+                username   = COALESCE(excluded.username, users.username),
                 first_name = COALESCE(excluded.first_name, users.first_name),
-                last_name = COALESCE(excluded.last_name, users.last_name)
+                last_name  = COALESCE(excluded.last_name, users.last_name),
+                registered_at = COALESCE(users.registered_at, excluded.registered_at)
             """,
             (user_id, full_name, username, first_name, last_name, role, 1 if is_active else 0, registered_at),
         )
@@ -56,7 +67,12 @@ def update_last_activity(user_id):
 
 
 def get_users(role=None, is_active=None, search=None, page=1, per_page=20):
-    """Return a list of users with optional filters and pagination."""
+    """Return a list of users with optional filters and pagination.
+
+    Sorts by registered_at DESC NULLS LAST so users without a registration
+    timestamp still appear (they were registered via the old register_user
+    that did not store registered_at).
+    """
     conditions = ["deleted_at IS NULL"]
     params = []
     if role:
@@ -72,10 +88,13 @@ def get_users(role=None, is_active=None, search=None, page=1, per_page=20):
     where = " WHERE " + " AND ".join(conditions) if conditions else ""
     offset = (page - 1) * per_page
     params.extend([per_page, offset])
+    # NULLS LAST — юзери без дати реєстрації все одно відображаються
     sql = (
         f"SELECT user_id, full_name, username, first_name, last_name, role, is_active, "
         f"registered_at, last_activity, blocked_at, blocked_by, block_reason "
-        f"FROM users{where} ORDER BY registered_at DESC LIMIT ? OFFSET ?"
+        f"FROM users{where} "
+        f"ORDER BY COALESCE(registered_at, '1970-01-01') DESC "
+        f"LIMIT ? OFFSET ?"
     )
     with get_connection() as conn:
         rows = conn.execute(sql, params).fetchall()
