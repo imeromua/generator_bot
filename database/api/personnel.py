@@ -109,8 +109,8 @@ def update_personnel_name(old_name, new_name):
         if conn:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rb_err:
+                logging.warning(f"Rollback failed during personnel update: {rb_err}")
         logging.error(f"Помилка оновлення персоналу: {e}")
         return False
 
@@ -139,8 +139,8 @@ def delete_personnel_name(name):
         if conn:
             try:
                 conn.rollback()
-            except Exception:
-                pass
+            except Exception as rb_err:
+                logging.warning(f"Rollback failed during personnel delete: {rb_err}")
         logging.error(f"Помилка видалення персоналу: {e}")
         return False
 
