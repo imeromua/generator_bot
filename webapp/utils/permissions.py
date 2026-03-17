@@ -16,6 +16,10 @@ def is_admin(user: dict | None) -> bool:
     """Перевіряє чи є користувач адміністратором (за ADMIN_IDS або роллю в БД)."""
     if not user:
         return False
+    # Fast path: role already present in dict (e.g. SD JWT auth)
+    direct_role = user.get("role")
+    if direct_role in ("admin", "superadmin"):
+        return True
     try:
         user_id = int(user.get("id", 0))
     except (TypeError, ValueError):
