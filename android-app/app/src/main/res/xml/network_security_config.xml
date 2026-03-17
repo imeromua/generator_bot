@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Network Security Configuration
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Restricts the app to HTTPS-only traffic (cleartext HTTP is blocked).
+    This mirrors the android:usesCleartextTraffic="false" manifest attribute
+    and also disables trust for user-installed CA certificates in release
+    builds for additional security hardening.
+
+    During development you may temporarily allow cleartext for localhost:
+        <domain-config cleartextTrafficPermitted="true">
+            <domain includeSubdomains="false">localhost</domain>
+        </domain-config>
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Trust system CA certificates only (not user-installed CAs) -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

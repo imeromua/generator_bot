@@ -313,6 +313,26 @@ try:
 except ValueError:
     WEBAPP_PORT = 8080
 
+# --- SERVICE DESK AUTH (SD-2) ---
+# Secret key used for signing JWT tokens.  Set this to a long random string
+# in production; if left empty a random secret is generated at startup
+# (sessions will not survive restarts).
+SD_SECRET_KEY = (os.getenv("SD_SECRET_KEY", "") or "").strip()
+# Alias expected by database/api/auth.py
+JWT_SECRET = SD_SECRET_KEY
+
+# Access-token lifetime in seconds (default: 1 hour)
+try:
+    SD_ACCESS_TOKEN_TTL = int(os.getenv("SD_ACCESS_TOKEN_TTL", "3600"))
+except ValueError:
+    SD_ACCESS_TOKEN_TTL = 3600
+
+# Refresh-token lifetime in seconds (default: 30 days)
+try:
+    SD_REFRESH_TOKEN_TTL = int(os.getenv("SD_REFRESH_TOKEN_TTL", "2592000"))
+except ValueError:
+    SD_REFRESH_TOKEN_TTL = 2592000
+
 
 # =====================================================================
 # Pydantic-сумісні Settings-класи для структурованої конфігурації.

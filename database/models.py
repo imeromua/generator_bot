@@ -659,6 +659,62 @@ def init_db():
                 else:
                     logging.warning(f"⚠️ Не вдалося додати users.{col_name}: {e}")
 
+    # SD-1 Міграція: нові колонки в users для веб-авторизації
+    # Note: SQLite does not support ADD COLUMN with UNIQUE constraint;
+    # uniqueness is enforced via dedicated UNIQUE indexes added below.
+    _web_auth_user_columns = [
+        ("email", "TEXT"),
+        ("password_hash", "TEXT"),
+        ("web_login", "TEXT"),
+        ("web_last_login", "TEXT"),
+        ("telegram_linked", "INTEGER DEFAULT 1"),
+    ]
+    for col_name, col_def in _web_auth_user_columns:
+        try:
+            c.execute(f"SELECT {col_name} FROM users LIMIT 1")
+        except Exception:
+            try:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+                logging.info(f"✅ Колонка users.{col_name} додана")
+            except Exception as e:
+                if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                    logging.info(f"✅ Колонка users.{col_name} вже існує")
+                else:
+                    logging.warning(f"⚠️ Не вдалося додати users.{col_name}: {e}")
+
+    # SD-1 Нова таблиця web_sessions
+    _id_col = "BIGSERIAL" if _is_postgres() else "INTEGER"
+    _user_id_type = "BIGINT" if _is_postgres() else "INTEGER"
+    try:
+        c.execute(f"""CREATE TABLE IF NOT EXISTS web_sessions (
+            id {_id_col} PRIMARY KEY,
+            user_id {_user_id_type} NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            token TEXT NOT NULL UNIQUE,
+            refresh_token TEXT UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            ip_address TEXT,
+            user_agent TEXT,
+            is_active INTEGER NOT NULL DEFAULT 1
+        )""")
+        logging.info("✅ Таблиця web_sessions готова")
+    except Exception as e:
+        logging.warning(f"⚠️ Не вдалося створити web_sessions: {e}")
+
+    # SD-1 Нова таблиця web_password_reset
+    try:
+        c.execute(f"""CREATE TABLE IF NOT EXISTS web_password_reset (
+            id {_id_col} PRIMARY KEY,
+            user_id {_user_id_type} NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+            reset_token TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0
+        )""")
+        logging.info("✅ Таблиця web_password_reset готова")
+    except Exception as e:
+        logging.warning(f"⚠️ Не вдалося створити web_password_reset: {e}")
+
     # Індекси для оптимізації пошуку (створюються ПІСЛЯ міграцій!)
     index_statements = [
         "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)",
@@ -677,6 +733,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_shift_schedule_personnel ON shift_schedule(assigned_personnel_id)",
         "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)",
         "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_web_login ON users(web_login) WHERE web_login IS NOT NULL",
     ]
 
     # PostgreSQL-specific optimized indexes

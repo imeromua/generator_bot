@@ -23,6 +23,7 @@ from webapp.utils.validation import (  # noqa: E402, F401
 )
 from webapp.utils.permissions import is_admin as _is_admin  # noqa: E402, F401
 from webapp.services.analytics_service import _safe_round, _build_daily_stats  # noqa: E402, F401
+from servicedesk.auth_router import router as sd_auth_router  # noqa: E402, F401
 from webapp.api.status import (  # noqa: E402, F401
     api_status,
     api_schedule,

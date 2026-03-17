@@ -77,6 +77,9 @@ from webapp.api.users import (
     api_admin_users_delete,
 )
 
+from servicedesk.auth_router import router as sd_auth_router
+from servicedesk.static_router import mount_sd_static, router as sd_static_router
+
 import config
 
 logger = logging.getLogger(__name__)
@@ -161,6 +164,12 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RateLimitMiddleware)
 
+    # ServiceDesk auth router (SD-2)
+    app.include_router(sd_auth_router)
+
+    # Digital Asset Links endpoint for Android TWA (SD-4)
+    app.include_router(sd_static_router)
+
     app.add_api_route("/api/status", api_status, methods=["GET"])
     app.add_api_route("/api/schedule", api_schedule, methods=["GET"])
     app.add_api_route("/api/schedule/week", api_schedule_week, methods=["GET"])
@@ -242,6 +251,9 @@ def create_app() -> FastAPI:
             app.mount("/css", StaticFiles(directory=str(css_dir)), name="css")
         if js_dir.is_dir():
             app.mount("/js", StaticFiles(directory=str(js_dir)), name="js")
+
+    # ServiceDesk SPA static files (mounted at /sd)
+    mount_sd_static(app)
 
     return app
 

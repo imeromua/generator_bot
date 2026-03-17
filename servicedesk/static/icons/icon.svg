@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#161b22"/>
+  <!-- Border -->
+  <rect width="512" height="512" rx="96" fill="none" stroke="#30363d" stroke-width="8"/>
+  <!-- Generator bolt / lightning icon -->
+  <polygon points="296,64 176,280 256,280 216,448 336,232 256,232" fill="#238636"/>
+</svg>
