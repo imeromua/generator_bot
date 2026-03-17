@@ -9,6 +9,7 @@ const UsersManager = (() => {
     let _page = 1;
     let _perPage = 20;
     let _total = 0;
+    let _searchTimeout = null;
 
     const ROLE_LABELS = {
         superadmin: "🔑 Супер-адмін",
@@ -49,7 +50,7 @@ const UsersManager = (() => {
 
         const params = { page: _page, per_page: _perPage };
         if (role) params.role = role;
-        if (status) params.is_active = status;
+        if (status !== "") params.is_active = status;
         if (search) params.search = search;
 
         const container = _el("users-list");
@@ -198,5 +199,10 @@ const UsersManager = (() => {
         }
     }
 
-    return { load, prevPage, nextPage, updateRole, blockUser, unblockUser, deleteUser };
+    function onSearchInput() {
+        if (_searchTimeout) clearTimeout(_searchTimeout);
+        _searchTimeout = setTimeout(() => load(true), 300);
+    }
+
+    return { load, prevPage, nextPage, updateRole, blockUser, unblockUser, deleteUser, onSearchInput };
 })();

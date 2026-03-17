@@ -1362,6 +1362,8 @@
                 showError(e.message);
             }
         },
+
+        showToast,
     };
 
     // Прив'язуємо App до window для onclick у HTML
