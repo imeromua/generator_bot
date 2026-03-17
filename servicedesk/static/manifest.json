@@ -4,8 +4,8 @@
   "description": "Система управління генераторами — ServiceDesk SPA",
   "start_url": "/sd/",
   "display": "standalone",
-  "background_color": "#0d1117",
-  "theme_color": "#0d1117",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "orientation": "portrait-primary",
   "icons": [
     {

@@ -6,9 +6,15 @@
  *   2. On 401 attempts a token refresh then retries once.
  *   3. Throws an Error (message = server detail) on non-2xx.
  *
+ * Namespaces:
+ *   auth, logs, events, maintenance, fuel, schedule, shifts,
+ *   users, status, actions, powerSchedule, admin, analytics,
+ *   reports, notifications
+ *
  * Usage:
  *   const data = await api.auth.me();
  *   const logs = await api.logs.list({ limit: 50 });
+ *   const kpi  = await api.analytics.kpi({ days: 30 });
  */
 
 const api = (() => {
@@ -121,13 +127,23 @@ const api = (() => {
     },
   };
 
-  /* ── Maintenance ─────────────────────────────────────────── */
+  /* ── Events (webapp events log) ─────────────────────────── */
+  const events = {
+    list(params) {
+      return get('/api/events', { params });
+    },
+  };
+
+  /* ── Maintenance (extended) ─────────────────────────────── */
   const maintenance = {
     list(params) {
       return get('/api/maintenance', { params });
     },
-    create(data) {
+    perform(data) {
       return post('/api/maintenance/perform', { body: data });
+    },
+    setHours(data) {
+      return post('/api/maintenance/set-hours', { body: data });
     },
   };
 
@@ -154,33 +170,197 @@ const api = (() => {
     },
   };
 
-  /* ── Users (admin) ───────────────────────────────────────── */
+  /* ── Shifts (extended) ───────────────────────────────────── */
+  const shifts = {
+    list(params) {
+      return get('/api/shifts/schedule', { params });
+    },
+    create(data) {
+      return post('/api/shifts/schedule', { body: data });
+    },
+    auto(month, save) {
+      return post('/api/shifts/auto', { body: { month, save } });
+    },
+    analytics(params) {
+      return get('/api/shifts/analytics', { params });
+    },
+  };
+
+  /* ── Users (extended) ────────────────────────────────────── */
   const users = {
     list(params) {
       return get('/api/admin/users', { params });
     },
-    block(userId) {
-      return put(`/api/admin/users/${userId}/block`);
+    updateRole(userId, role) {
+      return put(`/api/admin/users/${userId}/role`, { body: { role } });
+    },
+    block(userId, reason) {
+      return put(`/api/admin/users/${userId}/block`, { body: { reason } });
     },
     unblock(userId) {
       return put(`/api/admin/users/${userId}/unblock`);
     },
-    setPassword(userId, password) {
-      return post('/api/sd/auth/change-password', { body: { user_id: userId, password } });
+    deleteUser(userId) {
+      return del(`/api/admin/users/${userId}`);
     },
   };
 
-  /* ── Status (dashboard overview) ────────────────────────── */
+  /* ── Status (extended) ───────────────────────────────────── */
   const status = {
     current() {
       return get('/api/status');
     },
-    schedule() {
-      return get('/api/schedule');
+    schedule(date) {
+      return get('/api/schedule', { params: { date } });
+    },
+    week() {
+      return get('/api/schedule/week');
+    },
+    generators() {
+      return get('/api/generators');
     },
   };
 
-  return { auth, logs, maintenance, fuel, schedule, users, status, request };
+  /* ── Actions (shift start/stop, refuel, generator switch) ── */
+  const actions = {
+    startShift(shift) {
+      return post('/api/action/start', { body: { shift } });
+    },
+    stopShift(shift) {
+      return post('/api/action/stop', { body: { shift } });
+    },
+    refuel(driver, liters, receipt_number) {
+      return post('/api/action/refill', { body: { driver, liters, receipt_number } });
+    },
+    switchGenerator(target) {
+      return post('/api/generator/switch', { body: { target } });
+    },
+    setFuel(fuel_liters) {
+      return post('/api/fuel/set', { body: { fuel_liters } });
+    },
+  };
+
+  /* ── Power schedule (24h grid) ──────────────────────────── */
+  const powerSchedule = {
+    get(date) {
+      return get('/api/schedule', { params: { date } });
+    },
+    week() {
+      return get('/api/schedule/week');
+    },
+    toggle(date, hour) {
+      return post('/api/schedule/toggle', { body: { date, hour } });
+    },
+  };
+
+  /* ── Admin config ───────────────────────────────────────── */
+  const admin = {
+    getConfig() {
+      return get('/api/admin/config');
+    },
+    getConfigHistory(limit) {
+      return get('/api/admin/config/history', { params: { limit } });
+    },
+    setGeneratorConfig(generator_id, param, value) {
+      return post('/api/admin/config/generator', { body: { generator_id, param, value } });
+    },
+    setGlobalConfig(param, value) {
+      return post('/api/admin/config/global', { body: { param, value } });
+    },
+    // Drivers
+    getDrivers() {
+      return get('/api/admin/drivers');
+    },
+    addDriver(name) {
+      return post('/api/admin/drivers', { body: { name } });
+    },
+    deleteDriver(name) {
+      return del('/api/admin/drivers', { body: { name } });
+    },
+    // Personnel
+    getPersonnel() {
+      return get('/api/admin/personnel');
+    },
+    addPersonnel(name) {
+      return post('/api/admin/personnel', { body: { name } });
+    },
+    deletePersonnel(name) {
+      return del('/api/admin/personnel', { body: { name } });
+    },
+    assignPersonnel(user_id, personnel) {
+      return post('/api/admin/personnel/assign', { body: { user_id, personnel } });
+    },
+    // Sync
+    sync() {
+      return post('/api/admin/sync');
+    },
+    // Audit
+    getAudit(params) {
+      return get('/api/admin/audit', { params });
+    },
+    exportAudit(params) {
+      return get('/api/admin/audit/export', { params });
+    },
+    // Backups
+    getBackups() {
+      return get('/api/admin/backups');
+    },
+    createBackup() {
+      return post('/api/admin/backup');
+    },
+  };
+
+  /* ── Analytics ───────────────────────────────────────────── */
+  const analytics = {
+    kpi(params) {
+      return get('/api/analytics/kpi', { params });
+    },
+    fuelTimeline(params) {
+      return get('/api/analytics/fuel-timeline', { params });
+    },
+    motorHours(params) {
+      return get('/api/analytics/motor-hours', { params });
+    },
+    efficiency(params) {
+      return get('/api/analytics/efficiency', { params });
+    },
+    calendar(params) {
+      return get('/api/analytics/calendar', { params });
+    },
+    trends(params) {
+      return get('/api/analytics/trends', { params });
+    },
+    forecast() {
+      return get('/api/analytics/forecast');
+    },
+  };
+
+  /* ── Reports ─────────────────────────────────────────────── */
+  const reports = {
+    excelUrl(type, days, generator) {
+      const params = new URLSearchParams({ type: type || 'quick', days: days || 30 });
+      if (generator) params.set('generator', generator);
+      return `/api/report/excel/v2?${params}`;
+    },
+  };
+
+  /* ── Notifications ───────────────────────────────────────── */
+  const notifications = {
+    getPreferences() {
+      return get('/api/notifications/preferences');
+    },
+    setPreference(data) {
+      return post('/api/notifications/preferences', { body: data });
+    },
+    setQuietHours(start, end) {
+      return post('/api/notifications/quiet-hours', { body: { start, end } });
+    },
+    test() {
+      return post('/api/notifications/test');
+    },
+  };
+
+  return { auth, logs, events, maintenance, fuel, schedule, shifts, users, status, actions, powerSchedule, admin, analytics, reports, notifications, request };
 })();
 
 if (typeof module !== 'undefined') module.exports = api;
