@@ -954,6 +954,40 @@ class TestApiAnalytics:
         )
         assert "attachment" in resp.headers.get("content-disposition", "")
 
+    def test_excel_v1_report_ios_headers(self, client, monkeypatch):
+        """v1 Excel report must include iOS-compatible cache and filename* headers."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        resp = client.get("/api/report/excel?days=7")
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        assert "filename*=UTF-8''" in cd, "RFC 5987 filename* missing from Content-Disposition"
+        cc = resp.headers.get("cache-control", "")
+        assert "must-revalidate" in cc, "must-revalidate missing from Cache-Control"
+        assert "no-store" in cc, "no-store missing from Cache-Control"
+        assert resp.headers.get("pragma", "").lower() == "no-cache"
+        assert resp.headers.get("expires", "") == "0"
+
+    def test_excel_v2_report_ios_headers(self, client, monkeypatch):
+        """v2 Excel report must include iOS-compatible cache and filename* headers."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 1, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        resp = client.get("/api/report/excel/v2?type=quick&days=7")
+        assert resp.status_code == 200
+        cd = resp.headers.get("content-disposition", "")
+        assert "filename*=UTF-8''" in cd, "RFC 5987 filename* missing from Content-Disposition"
+        cc = resp.headers.get("cache-control", "")
+        assert "must-revalidate" in cc, "must-revalidate missing from Cache-Control"
+        assert "no-store" in cc, "no-store missing from Cache-Control"
+        assert resp.headers.get("pragma", "").lower() == "no-cache"
+        assert resp.headers.get("expires", "") == "0"
+
 
 class TestMiniAppUi:
     """Smoke tests for Mini App UI markup/assets."""

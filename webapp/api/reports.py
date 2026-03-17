@@ -12,6 +12,7 @@ from webapp.utils import permissions as _permissions_mod
 from webapp.utils.db_helpers import get_admin_info as _get_admin_info
 from webapp.services.reports_service import _build_daily_report_wb, EXCEL_AVAILABLE
 from reports.excel_reports import generate_excel_report, EXCEL_AVAILABLE as _EXCEL_RPT_AVAILABLE
+from utils.export_utils import build_xlsx_headers
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +66,7 @@ async def api_report_excel(request: Request):
         return Response(
             content=buf.read(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Cache-Control": "no-cache",
-                "X-Content-Type-Options": "nosniff",
-            },
+            headers=build_xlsx_headers(filename),
         )
     except Exception as e:
         logger.exception("api_report_excel error")
@@ -107,11 +104,7 @@ async def api_report_excel_v2(request: Request):
         return Response(
             content=excel_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Cache-Control": "no-cache",
-                "X-Content-Type-Options": "nosniff",
-            },
+            headers=build_xlsx_headers(filename),
         )
     except ValueError as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
