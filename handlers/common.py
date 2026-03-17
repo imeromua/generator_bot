@@ -7,7 +7,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, W
 from aiogram.utils.markdown import hbold
 
 import config
-import database.models as db_models
+import database.db_api as db
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,13 @@ async def cmd_start(message: Message):
 
     # Реєстрація користувача в базі (якщо новий)
     try:
-        db_models.register_user(user_id, username, full_name)
+        db.create_user(
+            user_id=user_id,
+            username=username,
+            first_name=message.from_user.first_name,
+            last_name=message.from_user.last_name,
+            role="user",
+        )
     except Exception as e:
         logger.error(f"Failed to register user {user_id}: {e}")
 
@@ -34,7 +40,7 @@ async def cmd_start(message: Message):
     is_admin = user_id in config.ADMIN_IDS
 
     try:
-        has_personnel = bool(db_models.get_user_personnel(user_id))
+        has_personnel = bool(db.get_personnel_for_user(user_id))
     except Exception:
         has_personnel = False
 
