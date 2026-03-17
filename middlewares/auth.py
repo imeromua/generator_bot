@@ -2,6 +2,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery
 import logging
 import config
+import database.db_api as db
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,17 @@ class WhitelistMiddleware(BaseMiddleware):
         if user_id in whitelist_ids:
             return await handler(event, data)
 
-        # 4. Якщо нічого не підійшло - блокуємо
+        # 4. Перевірка активного користувача в БД
+        try:
+            db_user = db.get_user(user_id)
+            # users columns: user_id[0], full_name[1], username[2], first_name[3],
+            #                last_name[4], role[5], is_active[6]
+            if db_user and db_user[6] == 1:  # is_active == 1
+                return await handler(event, data)
+        except Exception as e:
+            logger.warning(f"DB whitelist check failed for user_id={user_id}: {e}")
+
+        # 5. Якщо нічого не підійшло - блокуємо
         logger.info(f"⛔ Blocked by whitelist: user_id={user_id}, event={type(event).__name__}")
 
         if isinstance(event, Message):
