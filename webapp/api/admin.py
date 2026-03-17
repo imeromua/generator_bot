@@ -211,6 +211,9 @@ async def api_admin_personnel_assign(request: Request):
         return JSONResponse(content={"error": "user_id обов'язковий"}, status_code=400)
 
     try:
+        db_user = db.get_user(target_user_id)
+        if not db_user:
+            return JSONResponse(content={"error": "Користувача не знайдено"}, status_code=404)
         old_personnel = db.get_personnel_for_user(target_user_id)
         db.set_personnel_for_user(target_user_id, personnel_name)
         admin_id, admin_name = _get_admin_info(user)
