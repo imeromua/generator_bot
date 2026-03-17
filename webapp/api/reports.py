@@ -16,6 +16,20 @@ from utils.export_utils import build_xlsx_headers
 
 logger = logging.getLogger(__name__)
 
+# Людські назви типів звітів
+REPORT_TYPE_NAMES = {
+    "quick":      "Швидкий звіт",
+    "detailed":   "Детальний звіт",
+    "technical":  "Технічний звіт",
+    "financial":  "Фінансовий звіт",
+    "personnel":  "Звіт по персоналу",
+}
+
+GENERATOR_NAMES = {
+    "main":      "Основний",
+    "emergency": "Резервний",
+}
+
 
 async def api_report_excel(request: Request):
     """GET /api/report/excel?days=30&generator=main — завантаження Excel-звіту.
@@ -52,8 +66,10 @@ async def api_report_excel(request: Request):
         wb.save(buf)
         buf.seek(0)
 
-        safe_gen = "main" if generator_param == "main" else "backup"
-        filename = f"report_{safe_gen}_{now.strftime('%Y%m%d_%H%M')}.xlsx"
+        gen_label = GENERATOR_NAMES.get(generator_param, generator_param)
+        date_str = now.strftime("%d.%m.%Y")
+        filename = f"Звіт генератора ({gen_label}), {date_str}.xlsx"
+
         admin_id, admin_name = _get_admin_info(user)
         db.log_admin_action(
             admin_id,
@@ -94,13 +110,17 @@ async def api_report_excel_v2(request: Request):
             gen_id = None
 
         now = datetime.now(config.KYIV)
-        if report_type == 'detailed':
-            # Detailed report is always current-month; pass year/month explicitly
+        report_name = REPORT_TYPE_NAMES.get(report_type, report_type)
+
+        if report_type == "detailed":
             excel_bytes = generate_excel_report(report_type, days, gen_id, year=now.year, month=now.month)
-            filename = f"detailed_report_{now.strftime('%Y_%m')}.xlsx"
+            date_str = now.strftime("%m.%Y")
+            filename = f"{report_name}, {date_str}.xlsx"
         else:
             excel_bytes = generate_excel_report(report_type, days, gen_id)
-            filename = f"generator_report_{report_type}_{now.strftime('%Y%m%d')}.xlsx"
+            date_str = now.strftime("%d.%m.%Y")
+            filename = f"{report_name}, {date_str}.xlsx"
+
         return Response(
             content=excel_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
