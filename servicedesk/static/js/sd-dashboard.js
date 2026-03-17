@@ -63,6 +63,10 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function escAttr(s) {
+  return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /* ── Sidebar & mobile nav ──────────────────────────────────────── */
 function initNav() {
   const overlay = el('sidebar-overlay');
@@ -507,7 +511,7 @@ async function loadAdminDrivers(body) {
     html += '<div class="table-wrap"><table><thead><tr><th>Ім\'я</th><th>Дія</th></tr></thead><tbody>' +
       items.map(d => {
         const name = typeof d === 'string' ? d : (d.name || d.driver_name || '—');
-        return '<tr><td>' + esc(name) + '</td><td><button class="btn btn-danger js-del-driver" data-name="' + esc(name) + '" style="font-size:0.78rem;padding:0.2rem 0.5rem">Видалити</button></td></tr>';
+        return '<tr><td>' + esc(name) + '</td><td><button class="btn btn-danger js-del-driver" data-name="' + escAttr(name) + '" style="font-size:0.78rem;padding:0.2rem 0.5rem">Видалити</button></td></tr>';
       }).join('') + '</tbody></table></div>';
   } else {
     html += '<p class="text-muted">Водіїв не знайдено</p>';
@@ -537,7 +541,7 @@ async function loadAdminPersonnel(body) {
     html += '<div class="table-wrap"><table><thead><tr><th>Ім\'я</th><th>Дія</th></tr></thead><tbody>' +
       items.map(p => {
         const name = typeof p === 'string' ? p : (p.name || p.full_name || '—');
-        return '<tr><td>' + esc(name) + '</td><td><button class="btn btn-danger js-del-person" data-name="' + esc(name) + '" style="font-size:0.78rem;padding:0.2rem 0.5rem">Видалити</button></td></tr>';
+        return '<tr><td>' + esc(name) + '</td><td><button class="btn btn-danger js-del-person" data-name="' + escAttr(name) + '" style="font-size:0.78rem;padding:0.2rem 0.5rem">Видалити</button></td></tr>';
       }).join('') + '</tbody></table></div>';
   } else {
     html += '<p class="text-muted">Персонал не знайдено</p>';
