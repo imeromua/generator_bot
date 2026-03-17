@@ -64,6 +64,16 @@ async def api_admin_users_update_role(request: Request, user_id: int):
     if role not in _VALID_ROLES:
         return JSONResponse(content={"error": f"Невірна роль. Доступні: {', '.join(_VALID_ROLES)}"}, status_code=400)
 
+    # Only superadmins can assign the superadmin role
+    if role == "superadmin":
+        from webapp.utils.permissions import get_user_role as _get_user_role
+        admin_role = _get_user_role(user)
+        if admin_role != "superadmin":
+            return JSONResponse(
+                content={"error": "Тільки супер-адмін може призначити роль супер-адміна"},
+                status_code=403,
+            )
+
     try:
         db_user = db.get_user(user_id)
         if not db_user:

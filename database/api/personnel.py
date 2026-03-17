@@ -34,6 +34,7 @@ def get_all_users_with_personnel():
             SELECT u.user_id, u.full_name, up.personnel_name
             FROM users u
             LEFT JOIN user_personnel up ON up.user_id = u.user_id
+            WHERE u.deleted_at IS NULL
             ORDER BY LOWER(u.full_name)
             """).fetchall()
         return rows
@@ -82,32 +83,33 @@ def update_personnel_name(old_name, new_name):
     if old_name == new_name:
         return True
 
+    conn = None
     try:
-        with get_connection() as conn:
-            # Check if new name already exists
-            exists = conn.execute("SELECT 1 FROM personnel_names WHERE name = ?", (new_name,)).fetchone()
+        conn = get_connection()
+        # Check if new name already exists
+        exists = conn.execute("SELECT 1 FROM personnel_names WHERE name = ?", (new_name,)).fetchone()
 
-            if exists:
-                logging.warning(f"Персонал {new_name} вже існує")
-                return False
+        if exists:
+            logging.warning(f"Персонал {new_name} вже існує")
+            return False
 
-            # Begin transaction to update both tables
-            conn.execute("BEGIN")
+        # Begin transaction to update both tables
+        conn.execute("BEGIN")
 
-            # Update in personnel_names
-            cur = conn.execute("UPDATE personnel_names SET name = ? WHERE name = ?", (new_name, old_name))
+        # Update in personnel_names
+        cur = conn.execute("UPDATE personnel_names SET name = ? WHERE name = ?", (new_name, old_name))
 
-            # Update in user_personnel (where users are assigned to this personnel)
-            conn.execute("UPDATE user_personnel SET personnel_name = ? WHERE personnel_name = ?", (new_name, old_name))
+        # Update in user_personnel (where users are assigned to this personnel)
+        conn.execute("UPDATE user_personnel SET personnel_name = ? WHERE personnel_name = ?", (new_name, old_name))
 
-            conn.commit()
+        conn.commit()
 
-            return bool(cur.rowcount and cur.rowcount > 0)
+        return bool(cur.rowcount and cur.rowcount > 0)
     except Exception as e:
         if conn:
             try:
                 conn.rollback()
-            except:
+            except Exception:
                 pass
         logging.error(f"Помилка оновлення персоналу: {e}")
         return False
@@ -118,25 +120,26 @@ def delete_personnel_name(name):
     if not name:
         return False
 
+    conn = None
     try:
-        with get_connection() as conn:
-            # Begin transaction
-            conn.execute("BEGIN")
+        conn = get_connection()
+        # Begin transaction
+        conn.execute("BEGIN")
 
-            # Delete user assignments first
-            conn.execute("DELETE FROM user_personnel WHERE personnel_name = ?", (name,))
+        # Delete user assignments first
+        conn.execute("DELETE FROM user_personnel WHERE personnel_name = ?", (name,))
 
-            # Delete from personnel_names
-            cur = conn.execute("DELETE FROM personnel_names WHERE name = ?", (name,))
+        # Delete from personnel_names
+        cur = conn.execute("DELETE FROM personnel_names WHERE name = ?", (name,))
 
-            conn.commit()
+        conn.commit()
 
-            return bool(cur.rowcount and cur.rowcount > 0)
+        return bool(cur.rowcount and cur.rowcount > 0)
     except Exception as e:
         if conn:
             try:
                 conn.rollback()
-            except:
+            except Exception:
                 pass
         logging.error(f"Помилка видалення персоналу: {e}")
         return False

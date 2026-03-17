@@ -26,7 +26,10 @@ def register_user(user_id, name, username=None, first_name=None, last_name=None)
 
 def get_user(user_id):
     with get_connection() as conn:
-        return conn.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        return conn.execute(
+            "SELECT * FROM users WHERE user_id = ? AND deleted_at IS NULL",
+            (user_id,),
+        ).fetchone()
 
 
 def get_all_users():

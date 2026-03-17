@@ -1206,3 +1206,349 @@ class TestRoleBasedAccess:
             assert f'data-tab="{tab}" data-role="admin"' in html, (
                 f"Tab '{tab}' is missing data-role='admin'"
             )
+
+
+# ---------------------------------------------------------------------------
+# User management API tests
+# ---------------------------------------------------------------------------
+
+
+class TestAdminUsersApi:
+    """Tests for user management endpoints (/api/admin/users)."""
+
+    def _patch_admin(self, monkeypatch, *, user_id=1, role="admin"):
+        """Patch auth helpers so the caller is treated as an admin."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": user_id, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: role)
+
+    def _patch_non_admin(self, monkeypatch, *, user_id=999):
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": user_id, "first_name": "User"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+
+    # ---- list users ----
+
+    def test_list_users_no_auth(self, client):
+        """Unauthenticated request should return 403."""
+        resp = client.get("/api/admin/users")
+        # extract_user returns None → is_admin returns False → 403
+        assert resp.status_code == 403
+
+    def test_list_users_non_admin(self, client, monkeypatch):
+        self._patch_non_admin(monkeypatch)
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 403
+
+    def test_list_users_empty(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "users" in data
+        assert "total" in data
+        assert data["total"] == 0
+
+    def test_list_users_returns_created_user(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser", first_name="Test", last_name="User")
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["users"][0]["user_id"] == 100
+
+    def test_list_users_excludes_deleted(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="alive")
+        db.create_user(101, username="deleted")
+        db.soft_delete_user(101)
+        resp = client.get("/api/admin/users")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["users"][0]["user_id"] == 100
+
+    def test_list_users_filter_by_role(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="admin_u", role="admin")
+        db.create_user(101, username="viewer_u", role="viewer")
+        resp = client.get("/api/admin/users?role=admin")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["users"][0]["role"] == "admin"
+
+    def test_list_users_search(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="alice")
+        db.create_user(101, username="bob")
+        resp = client.get("/api/admin/users?search=alice")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+
+    # ---- update role ----
+
+    def test_update_role_success(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser", role="user")
+        resp = client.put("/api/admin/users/100/role", json={"role": "operator"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+
+    def test_update_role_invalid_role(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser", role="user")
+        resp = client.put("/api/admin/users/100/role", json={"role": "invalid_role"})
+        assert resp.status_code == 400
+
+    def test_update_role_user_not_found(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.put("/api/admin/users/99999/role", json={"role": "admin"})
+        assert resp.status_code == 404
+
+    def test_update_role_superadmin_by_admin_forbidden(self, client, monkeypatch):
+        """Regular admin cannot assign superadmin role."""
+        self._patch_admin(monkeypatch, role="admin")
+        db.create_user(100, username="testuser", role="user")
+        resp = client.put("/api/admin/users/100/role", json={"role": "superadmin"})
+        assert resp.status_code == 403
+
+    def test_update_role_superadmin_by_superadmin_allowed(self, client, monkeypatch):
+        """Superadmin can assign superadmin role."""
+        self._patch_admin(monkeypatch, role="superadmin")
+        db.create_user(100, username="testuser", role="user")
+        resp = client.put("/api/admin/users/100/role", json={"role": "superadmin"})
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_update_role_deleted_user_not_found(self, client, monkeypatch):
+        """Cannot update role of a soft-deleted user."""
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser", role="user")
+        db.soft_delete_user(100)
+        resp = client.put("/api/admin/users/100/role", json={"role": "admin"})
+        assert resp.status_code == 404
+
+    # ---- block/unblock ----
+
+    def test_block_user_success(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        resp = client.put("/api/admin/users/100/block", json={"reason": "test"})
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_block_user_not_found(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.put("/api/admin/users/99999/block", json={})
+        assert resp.status_code == 404
+
+    def test_unblock_user_success(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        db.block_user(100, blocked_by=1, reason="test")
+        resp = client.put("/api/admin/users/100/unblock")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_unblock_user_not_found(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.put("/api/admin/users/99999/unblock")
+        assert resp.status_code == 404
+
+    # ---- delete ----
+
+    def test_delete_user_success(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        resp = client.delete("/api/admin/users/100")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+    def test_delete_user_not_found(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.delete("/api/admin/users/99999")
+        assert resp.status_code == 404
+
+    def test_delete_user_already_deleted(self, client, monkeypatch):
+        """Deleting an already soft-deleted user should return 404."""
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        db.soft_delete_user(100)
+        resp = client.delete("/api/admin/users/100")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Personnel assignment tests
+# ---------------------------------------------------------------------------
+
+
+class TestPersonnelAssignment:
+    """Tests for personnel binding (/api/admin/personnel/assign)."""
+
+    def _patch_admin(self, monkeypatch, *, user_id=1):
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": user_id, "first_name": "Admin"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+
+    def test_assign_personnel_success(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        db.add_personnel_name("Іванов І.І.")
+        resp = client.post(
+            "/api/admin/personnel/assign",
+            json={"user_id": 100, "personnel": "Іванов І.І."},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_assign_personnel_nonexistent_user(self, client, monkeypatch):
+        """Assigning personnel to a non-existent user should return 404."""
+        self._patch_admin(monkeypatch)
+        resp = client.post(
+            "/api/admin/personnel/assign",
+            json={"user_id": 99999, "personnel": "Іванов І.І."},
+        )
+        assert resp.status_code == 404
+
+    def test_assign_personnel_deleted_user(self, client, monkeypatch):
+        """Assigning personnel to a deleted user should return 404."""
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        db.soft_delete_user(100)
+        resp = client.post(
+            "/api/admin/personnel/assign",
+            json={"user_id": 100, "personnel": "Іванов І.І."},
+        )
+        assert resp.status_code == 404
+
+    def test_unassign_personnel(self, client, monkeypatch):
+        """Sending empty personnel should clear the binding."""
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="testuser")
+        db.set_personnel_for_user(100, "Іванов І.І.")
+        resp = client.post(
+            "/api/admin/personnel/assign",
+            json={"user_id": 100, "personnel": ""},
+        )
+        assert resp.status_code == 200
+        assert db.get_personnel_for_user(100) is None
+
+    def test_assign_missing_user_id(self, client, monkeypatch):
+        self._patch_admin(monkeypatch)
+        resp = client.post(
+            "/api/admin/personnel/assign",
+            json={"personnel": "Іванов І.І."},
+        )
+        assert resp.status_code == 400
+
+    def test_personnel_list_excludes_deleted_users(self, client, monkeypatch):
+        """GET /api/admin/personnel should not show deleted users."""
+        self._patch_admin(monkeypatch)
+        db.create_user(100, username="alive", first_name="Alive", last_name="User")
+        db.create_user(101, username="deleted", first_name="Deleted", last_name="User")
+        db.soft_delete_user(101)
+        resp = client.get("/api/admin/personnel")
+        assert resp.status_code == 200
+        data = resp.json()
+        user_ids = [u["user_id"] for u in data["users"]]
+        assert 100 in user_ids
+        assert 101 not in user_ids
+
+
+# ---------------------------------------------------------------------------
+# Database-level user management tests
+# ---------------------------------------------------------------------------
+
+
+class TestDatabaseUserManagement:
+    """Tests for database-level user operations."""
+
+    def test_get_user_excludes_deleted(self):
+        """get_user() should return None for soft-deleted users."""
+        db.create_user(100, username="testuser")
+        assert db.get_user(100) is not None
+        db.soft_delete_user(100)
+        assert db.get_user(100) is None
+
+    def test_get_users_excludes_deleted(self):
+        """get_users() should not include soft-deleted users."""
+        db.create_user(100, username="alive")
+        db.create_user(101, username="deleted")
+        db.soft_delete_user(101)
+        users = db.get_users()
+        user_ids = [u["user_id"] for u in users]
+        assert 100 in user_ids
+        assert 101 not in user_ids
+
+    def test_count_users_excludes_deleted(self):
+        """count_users() should not count soft-deleted users."""
+        db.create_user(100, username="alive")
+        db.create_user(101, username="deleted")
+        db.soft_delete_user(101)
+        assert db.count_users() == 1
+
+    def test_get_all_users_with_personnel_excludes_deleted(self):
+        """get_all_users_with_personnel() should not include soft-deleted users."""
+        db.create_user(100, username="alive")
+        db.create_user(101, username="deleted")
+        db.set_personnel_for_user(100, "PersonA")
+        db.set_personnel_for_user(101, "PersonB")
+        db.soft_delete_user(101)
+        rows = db.get_all_users_with_personnel()
+        user_ids = [r[0] for r in rows]
+        assert 100 in user_ids
+        assert 101 not in user_ids
+
+    def test_update_user_role(self):
+        db.create_user(100, username="testuser", role="user")
+        db.update_user_role(100, "admin")
+        user = db.get_user(100)
+        assert user is not None
+        assert user[5] == "admin"
+
+    def test_block_and_unblock_user(self):
+        db.create_user(100, username="testuser")
+        db.block_user(100, blocked_by=1, reason="spam")
+        user = db.get_user(100)
+        assert user[6] == 0  # is_active
+        db.unblock_user(100)
+        user = db.get_user(100)
+        assert user[6] == 1  # is_active
+
+    def test_personnel_add_delete(self):
+        assert db.add_personnel_name("Тестов Т.Т.") is True
+        assert db.add_personnel_name("Тестов Т.Т.") is False  # duplicate
+        names = db.get_personnel_names()
+        assert "Тестов Т.Т." in names
+        assert db.delete_personnel_name("Тестов Т.Т.") is True
+        names = db.get_personnel_names()
+        assert "Тестов Т.Т." not in names
+
+    def test_personnel_update_name(self):
+        db.add_personnel_name("OldName")
+        db.create_user(100, username="testuser")
+        db.set_personnel_for_user(100, "OldName")
+        assert db.update_personnel_name("OldName", "NewName") is True
+        # Verify cascade: user_personnel should also be updated
+        assert db.get_personnel_for_user(100) == "NewName"
+        assert "NewName" in db.get_personnel_names()
+        assert "OldName" not in db.get_personnel_names()
+
+    def test_personnel_delete_clears_user_assignment(self):
+        db.add_personnel_name("ToDelete")
+        db.create_user(100, username="testuser")
+        db.set_personnel_for_user(100, "ToDelete")
+        db.delete_personnel_name("ToDelete")
+        assert db.get_personnel_for_user(100) is None
