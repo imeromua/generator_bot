@@ -21,7 +21,7 @@ async def cmd_start(message: Message):
     Відображає привітання та кнопку для відкриття Mini App.
     """
     user_id = message.from_user.id
-    username = message.from_user.username or "unknown"
+    username = message.from_user.username or None
     full_name = message.from_user.full_name or "User"
 
     # Реєстрація користувача в базі (якщо новий)

@@ -182,6 +182,22 @@ async def api_user_role(request: Request):
     except (TypeError, ValueError):
         user_id = None
 
+    # Auto-register Telegram webapp users on first access so they appear in
+    # the Users Management and Personnel Binding admin tabs.
+    # SD JWT users (from the ServiceDesk) already have a DB record and carry
+    # an explicit "role" key — skip registration for those.
+    if user_id and user and not user.get("role"):
+        try:
+            db.create_user(
+                user_id=user_id,
+                username=user.get("username") or None,
+                first_name=user.get("first_name") or None,
+                last_name=user.get("last_name") or None,
+                role="user",
+            )
+        except Exception:
+            logger.debug("Failed to auto-register user %s", user_id, exc_info=True)
+
     is_admin = _permissions_mod.is_admin(user)
     role = _permissions_mod.get_user_role(user)
     personnel = db.get_personnel_for_user(user_id) if user_id else None

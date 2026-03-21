@@ -1143,6 +1143,56 @@ class TestRoleBasedAccess:
         assert data["role"] == "user"
         assert data["is_admin"] is False
 
+    def test_user_role_auto_registers_new_telegram_user(self, client, monkeypatch):
+        """GET /api/user/role should auto-register a Telegram user not yet in the DB."""
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 777, "first_name": "New", "last_name": "User", "username": "newuser"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: False)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: "user")
+        # User should not exist before the request
+        assert db.get_user(777) is None
+        resp = client.get("/api/user/role")
+        assert resp.status_code == 200
+        # After the request, the user should be in the DB
+        user_row = db.get_user(777)
+        assert user_row is not None
+        # Verify via dict helper to avoid brittle index access
+        user_dict = db.get_users(search="newuser")
+        assert len(user_dict) == 1
+        assert user_dict[0]["username"] == "newuser"
+
+    def test_user_role_auto_registration_preserves_existing_role(self, client, monkeypatch):
+        """Auto-registration must not overwrite an existing user's role."""
+        db.create_user(888, username="existing", role="admin")
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 888, "first_name": "Existing", "username": "existing"},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: "admin")
+        resp = client.get("/api/user/role")
+        assert resp.status_code == 200
+        # Role must still be "admin", not reverted to "user"
+        users = db.get_users(role="admin")
+        assert any(u["user_id"] == 888 for u in users), "User 888 should still have admin role"
+
+    def test_user_role_sd_jwt_user_not_re_registered(self, client, monkeypatch):
+        """SD JWT users (with explicit 'role' in dict) must not be re-registered via create_user."""
+        # SD JWT user dict carries a 'role' key
+        monkeypatch.setattr(
+            "webapp.utils.validation.extract_user",
+            lambda req: {"id": 999, "first_name": "SD", "role": "admin", "user_id": 999},
+        )
+        monkeypatch.setattr("webapp.utils.permissions.is_admin", lambda user: True)
+        monkeypatch.setattr("webapp.utils.permissions.get_user_role", lambda user: "admin")
+        resp = client.get("/api/user/role")
+        assert resp.status_code == 200
+        # SD user without prior record should NOT be created by this path
+        # (they are managed via the ServiceDesk auth flow)
+        assert db.get_user(999) is None
+
     def test_shifts_get_non_admin_forbidden(self, client, monkeypatch):
         """Non-admin should get 403 on GET /api/shifts/schedule."""
         monkeypatch.setattr(
