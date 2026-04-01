@@ -69,3 +69,4 @@ htmlcov/
 dmypy.json
 bot.pid
 admin_bot.env
+.android-app\.gradle
