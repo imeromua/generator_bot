@@ -96,7 +96,7 @@ def get_users(role=None, is_active=None, search=None, page=1, per_page=20):
         f"SELECT user_id, full_name, username, first_name, last_name, role, is_active, "
         f"registered_at, last_activity, blocked_at, blocked_by, block_reason "
         f"FROM users{where} "
-        f"ORDER BY COALESCE(registered_at, '1970-01-01') DESC "
+        f"ORDER BY COALESCE(registered_at, '2099-01-01') DESC "
         f"LIMIT ? OFFSET ?"
     )
     with get_connection() as conn:

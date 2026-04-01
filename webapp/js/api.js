@@ -248,6 +248,8 @@ const API = (() => {
         // User management (admin)
         /** Список користувачів */
         adminGetUsers: (params) => get("/api/admin/users", params),
+        /** Додати користувача */
+        adminAddUser: (data) => post("/api/admin/users", data),
         /** Змінити роль користувача */
         adminUpdateUserRole: (userId, role) => _put(`/api/admin/users/${userId}/role`, { role }),
         /** Заблокувати користувача */

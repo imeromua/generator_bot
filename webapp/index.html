@@ -440,6 +440,39 @@
                         <input type="text" id="search-users" class="form-input" style="flex:2;min-width:140px"
                             placeholder="🔍 Пошук..." oninput="UsersManager.onSearchInput()">
                     </div>
+                    <div style="margin-bottom:10px">
+                        <button class="btn btn-primary btn-full" onclick="UsersManager.toggleNewUserForm()">+ Додати користувача</button>
+                    </div>
+                    <div id="new-user-form" class="hidden" style="margin-bottom:15px; padding:12px; background:var(--color-surface); border-radius:8px; border:1px solid var(--color-border);">
+                        <div class="form-row">
+                            <label class="form-label">Telegram ID (обов'язково)</label>
+                            <input type="number" id="new-user-id" class="form-input" placeholder="Наприклад: 123456789">
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Роль</label>
+                            <select id="new-user-role" class="form-input">
+                                <option value="user" selected>👤 Користувач</option>
+                                <option value="viewer">👁️ Спостерігач</option>
+                                <option value="operator">⚙️ Оператор</option>
+                                <option value="admin">👨‍💼 Адміністратор</option>
+                            </select>
+                        </div>
+                        <div class="form-row" style="display:flex;gap:8px">
+                            <div style="flex:1">
+                                <label class="form-label">Ім'я</label>
+                                <input type="text" id="new-user-firstname" class="form-input" placeholder="Ім'я">
+                            </div>
+                            <div style="flex:1">
+                                <label class="form-label">Прізвище</label>
+                                <input type="text" id="new-user-lastname" class="form-input" placeholder="Прізвище">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <label class="form-label">Username (без @)</label>
+                            <input type="text" id="new-user-username" class="form-input" placeholder="Username">
+                        </div>
+                        <button class="btn btn-primary btn-full" onclick="UsersManager.createUser()">✅ Зберегти користувача</button>
+                    </div>
                     <div id="users-list">
                         <!-- Заповнюється JS -->
                     </div>

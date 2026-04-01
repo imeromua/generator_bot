@@ -199,10 +199,59 @@ const UsersManager = (() => {
         }
     }
 
+    function toggleNewUserForm() {
+        const form = _el("new-user-form");
+        if (form) {
+            form.classList.toggle("hidden");
+        }
+    }
+
+    async function createUser() {
+        const userIdInput = _el("new-user-id");
+        const roleInput = _el("new-user-role");
+        const firstNameInput = _el("new-user-firstname");
+        const lastNameInput = _el("new-user-lastname");
+        const usernameInput = _el("new-user-username");
+
+        const userId = parseInt(userIdInput.value, 10);
+        if (isNaN(userId)) {
+            if (typeof App !== "undefined" && App.showToast) App.showToast("❌ Введіть коректний Telegram ID", "error");
+            else alert("Введіть коректний Telegram ID");
+            return;
+        }
+
+        const data = {
+            user_id: userId,
+            role: roleInput.value,
+            first_name: firstNameInput.value.trim(),
+            last_name: lastNameInput.value.trim(),
+            username: usernameInput.value.trim()
+        };
+
+        try {
+            await API.adminAddUser(data);
+            if (typeof App !== "undefined" && App.showToast) {
+                App.showToast("✅ Користувача успішно додано", "success");
+            }
+            userIdInput.value = "";
+            firstNameInput.value = "";
+            lastNameInput.value = "";
+            usernameInput.value = "";
+            toggleNewUserForm();
+            load(true);
+        } catch (e) {
+            if (typeof App !== "undefined" && App.showToast) {
+                App.showToast("❌ " + e.message, "error");
+            } else {
+                alert("Помилка: " + e.message);
+            }
+        }
+    }
+
     function onSearchInput() {
         if (_searchTimeout) clearTimeout(_searchTimeout);
         _searchTimeout = setTimeout(() => load(true), 300);
     }
 
-    return { load, prevPage, nextPage, updateRole, blockUser, unblockUser, deleteUser, onSearchInput };
+    return { load, prevPage, nextPage, updateRole, blockUser, unblockUser, deleteUser, toggleNewUserForm, createUser, onSearchInput };
 })();

@@ -71,6 +71,7 @@ from webapp.api.analytics import (
 from webapp.api.reports import api_report_excel, api_report_excel_v2
 from webapp.api.users import (
     api_admin_users_list,
+    api_admin_users_add,
     api_admin_users_update_role,
     api_admin_users_block,
     api_admin_users_unblock,
@@ -211,6 +212,7 @@ def create_app() -> FastAPI:
     app.add_api_route("/api/admin/backup/download/{filename}", api_admin_backup_download, methods=["GET"])
 
     app.add_api_route("/api/admin/users", api_admin_users_list, methods=["GET"])
+    app.add_api_route("/api/admin/users", api_admin_users_add, methods=["POST"])
     app.add_api_route("/api/admin/users/{user_id}/role", api_admin_users_update_role, methods=["PUT"])
     app.add_api_route("/api/admin/users/{user_id}/block", api_admin_users_block, methods=["PUT"])
     app.add_api_route("/api/admin/users/{user_id}/unblock", api_admin_users_unblock, methods=["PUT"])

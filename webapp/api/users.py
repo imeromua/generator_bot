@@ -177,3 +177,62 @@ async def api_admin_users_delete(request: Request, user_id: int):
     except Exception as e:
         logger.exception("api_admin_users_delete error")
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+async def api_admin_users_add(request: Request):
+    """POST /api/admin/users — додати нового користувача вручну."""
+    user = _validation_mod.extract_user(request)
+    if not _permissions_mod.is_admin(user):
+        return JSONResponse(content={"error": "Тільки для адміністраторів"}, status_code=403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(content={"error": "Невірний JSON"}, status_code=400)
+
+    try:
+        new_user_id = int(str(body.get("user_id")).strip())
+    except (TypeError, ValueError):
+        return JSONResponse(content={"error": "user_id має бути числом"}, status_code=400)
+
+    username = (body.get("username") or "").strip()
+    first_name = (body.get("first_name") or "").strip()
+    last_name = (body.get("last_name") or "").strip()
+    role = (body.get("role") or "user").strip()
+
+    if role not in _VALID_ROLES:
+        return JSONResponse(content={"error": f"Невірна роль. Доступні: {', '.join(_VALID_ROLES)}"}, status_code=400)
+
+    if role == "superadmin":
+        from webapp.utils.permissions import get_user_role as _get_user_role
+        admin_role = _get_user_role(user)
+        if admin_role != "superadmin":
+            return JSONResponse(content={"error": "Тільки супер-адмін може призначити роль супер-адміна"}, status_code=403)
+
+    try:
+        existing = db.get_user(new_user_id)
+        if existing:
+            return JSONResponse(content={"error": f"Користувач з ID {new_user_id} вже існує"}, status_code=409)
+
+        db.create_user(
+            user_id=new_user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            role=role,
+            is_active=True
+        )
+
+        admin_id, admin_name = _get_admin_info(user)
+        db.log_admin_action(
+            admin_id,
+            admin_name,
+            "user_add",
+            f"Додано користувача {new_user_id} (роль: {role})",
+            target_entity=f"user:{new_user_id}",
+            new_value={"role": role, "username": username}
+        )
+        return {"success": True, "message": "Користувача успішно додано"}
+    except Exception as e:
+        logger.exception("api_admin_users_add error")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
